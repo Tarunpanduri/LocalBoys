@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { 
@@ -14,6 +14,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import Login from './screens/login';
 import SignUp from './screens/signup';
+import MapScreen from './screens/maps';
+
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -27,20 +30,38 @@ export default function App() {
     Sen_ExtraBold: Sen_800ExtraBold,
   });
 
+  const [initialRoute, setInitialRoute] = useState('Login');
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
   const onLayoutRootView = useCallback(async () => {
-    if (fontsLoaded) {
+    if (fontsLoaded && !checkingAuth) {
       await SplashScreen.hideAsync();
     }
-  }, [fontsLoaded]);
+  }, [fontsLoaded, checkingAuth]);
 
-  if (!fontsLoaded) return null;
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, user => {
+      if (user) {
+        setInitialRoute('MapScreen'); // already logged in
+      } else {
+        setInitialRoute('Login'); // not logged in
+      }
+      setCheckingAuth(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  if (!fontsLoaded || checkingAuth) return null;
 
   return (
     <View style={styles.container} onLayout={onLayoutRootView}>
       <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
           <Stack.Screen name="Login" component={Login} />
           <Stack.Screen name="SignUp" component={SignUp} />
+          <Stack.Screen name="MapScreen" component={MapScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </View>

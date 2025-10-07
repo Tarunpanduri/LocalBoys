@@ -20,7 +20,7 @@ export default function Login({ navigation }) {
     const firebaseAuth = getAuth();
     try {
       await signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
-      Alert.alert("Success", "Logged in successfully!");
+      navigation.navigate("MapScreen");
     } catch (error) {
       Alert.alert("Login Failed", error.message);
     } finally {

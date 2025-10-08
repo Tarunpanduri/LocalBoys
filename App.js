@@ -15,6 +15,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Login from './screens/login';
 import SignUp from './screens/signup';
 import MapScreen from './screens/maps';
+import HomeScreen from './screens/homescreen';
 
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 
@@ -43,9 +44,9 @@ export default function App() {
     const auth = getAuth();
     const unsubscribe = onAuthStateChanged(auth, user => {
       if (user) {
-        setInitialRoute('MapScreen'); // already logged in
+        setInitialRoute('HomeScreen');
       } else {
-        setInitialRoute('Login'); // not logged in
+        setInitialRoute('Login'); 
       }
       setCheckingAuth(false);
     });
@@ -62,6 +63,7 @@ export default function App() {
           <Stack.Screen name="Login" component={Login} />
           <Stack.Screen name="SignUp" component={SignUp} />
           <Stack.Screen name="MapScreen" component={MapScreen} />
+          <Stack.Screen name="HomeScreen" component={HomeScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </View>

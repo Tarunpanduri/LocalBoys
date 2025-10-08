@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image,Platform } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { auth, db as database } from "../firebase";
@@ -7,7 +7,7 @@ import { ref, update } from "firebase/database";
 
 const GOOGLE_API_KEY = "AIzaSyAoF8ZGAKdI_vCzvYZTpAFM1jbHQyPIMCc";
 
-export default function MapScreen() {
+export default function MapScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -92,7 +92,7 @@ export default function MapScreen() {
       const userRef = ref(database, `users/${uid}`);
       const updates = { location: { lat: selectedPlace.lat || null, lng: selectedPlace.lng || null, area: selectedPlace.area || "", city: selectedPlace.city || "", state: selectedPlace.state || "", pincode: selectedPlace.pincode || "", formattedAddress: selectedPlace.formattedAddress || "", updatedAt: new Date().toISOString() } };
       await update(userRef, updates);
-      Alert.alert("Success", "Location saved successfully!");
+      navigation.navigate("HomeScreen");
     } catch (err) { console.error("Location update error:", err); Alert.alert("Error", err.message || "Failed to save location."); }
     finally { setSaving(false); }
   };

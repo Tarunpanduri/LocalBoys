@@ -54,7 +54,7 @@ export default function MapScreen({ navigation }) {
       const newPlace = { lat: loc.coords.latitude, lng: loc.coords.longitude, ...place };
       setSelectedPlace(newPlace);
       mapRef.current?.animateToRegion({ latitude: newPlace.lat, longitude: newPlace.lng, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 1000);
-    } catch (err) { console.error(err); Alert.alert("Error", "Unable to fetch current location."); }
+    } catch (err) { console.error(err); Alert.alert("Error", "Unable to fetch current location. Please select manually"); }
     finally { setFetching(false); }
   };
 

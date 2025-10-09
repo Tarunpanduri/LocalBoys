@@ -12,10 +12,14 @@ import {
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import { RootSiblingParent } from 'react-native-root-siblings'; 
+
 import Login from './screens/login';
 import SignUp from './screens/signup';
 import MapScreen from './screens/maps';
 import HomeScreen from './screens/homescreen';
+import ShopDetails from './screens/shopdestails';
+import CheckoutScreen from './screens/checkout';
 
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 
@@ -57,16 +61,20 @@ export default function App() {
   if (!fontsLoaded || checkingAuth) return null;
 
   return (
-    <View style={styles.container} onLayout={onLayoutRootView}>
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
-          <Stack.Screen name="Login" component={Login} />
-          <Stack.Screen name="SignUp" component={SignUp} />
-          <Stack.Screen name="MapScreen" component={MapScreen} />
-          <Stack.Screen name="HomeScreen" component={HomeScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </View>
+    <RootSiblingParent>
+      <View style={styles.container} onLayout={onLayoutRootView}>
+        <NavigationContainer>
+          <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
+            <Stack.Screen name="Login" component={Login} />
+            <Stack.Screen name="SignUp" component={SignUp} />
+            <Stack.Screen name="MapScreen" component={MapScreen} />
+            <Stack.Screen name="HomeScreen" component={HomeScreen} />
+            <Stack.Screen name="ShopDetails" component={ShopDetails} />
+            <Stack.Screen name="Checkout" component={CheckoutScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </View>
+    </RootSiblingParent>
   );
 }
 

@@ -32,6 +32,18 @@ export default function HomeScreen({ navigation }) {
     const [greetingName, setGreetingName] = useState("Guest");
     const [categoryMeta, setCategoryMeta] = useState({});
     const [activeTab, setActiveTab] = useState("ordering");
+    const [eventUrl, setEventUrl] = useState('');
+
+
+    useEffect(() => {
+        const eventRef = dbRef(db, "admin_data/general/event");
+        const unsubEvent = onValue(eventRef, snap => {
+        setEventUrl(snap.val() || '');
+        });
+
+        return () => unsubEvent();
+    }, []);
+
 
     // Track user auth state
     useEffect(() => auth.onAuthStateChanged(user => setUid(user?.uid || null)), []);
@@ -55,7 +67,8 @@ export default function HomeScreen({ navigation }) {
         fetchUserData();
     }, [uid]);
 
-    // Fetch admin, categories, shops, notifications
+
+
     useEffect(() => {
         if (!uid) return;
 
@@ -96,7 +109,6 @@ export default function HomeScreen({ navigation }) {
         };
     }, [uid]);
 
-    // Filter shops by distance, category, search text
     useEffect(() => {
         if (!userLocation) return;
         const filtered = shops
@@ -108,7 +120,6 @@ export default function HomeScreen({ navigation }) {
         setFilteredShops(filtered);
     }, [shops, userLocation, radiusKm, activeCategory, searchText]);
 
-    // Refresh shops
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
         try {
@@ -121,10 +132,6 @@ export default function HomeScreen({ navigation }) {
         }
     }, []);
 
-    const getGreeting = () => {
-        const hour = new Date().getHours();
-        return hour < 12 ? "Good Morning!" : hour < 16 ? "Good Afternoon!" : "Good Evening!";
-    };
 
     const activeCategoryColor = categoryMeta[categories.find(c => c.id === activeCategory)?.label]?.Theme || "#66BB6A";
 
@@ -203,8 +210,7 @@ export default function HomeScreen({ navigation }) {
                 </>
             );
         } else {
-            // Ride Tab
-            const rideCardWidth = width - 36; // 18 padding each side
+            const rideCardWidth = width - 36; 
             const rideImageWidth = rideCardWidth * 0.45;
 
             return (
@@ -236,7 +242,7 @@ export default function HomeScreen({ navigation }) {
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
             <StatusBar barStyle="dark-content" backgroundColor="#19212a" translucent={false} />
-            <LinearGradient colors={[activeCategoryColor || "#66BB6A", "#ffffff"]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 250 }} />
+            <LinearGradient colors={[activeCategoryColor || "#66BB6A", "#ffffff"]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 180 }} />
             <View style={styles.screen}>
                 <View style={styles.headerRow}>
                     <View style={styles.deliveryCol}>
@@ -246,17 +252,43 @@ export default function HomeScreen({ navigation }) {
                             <Ionicons name="chevron-down" size={12} color="#000" />
                         </TouchableOpacity>
                     </View>
-                    <TouchableOpacity style={[styles.notifBtn, { backgroundColor: darkenColor(activeCategoryColor, 10), borderColor: darkenColor(activeCategoryColor, 30), borderWidth: 1 }]} onPress={() => navigation.navigate("Notifications")}>
-                        <Ionicons name="person-circle-outline" size={28} color="#fff" />
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: "row", alignItems: "center",gap:10 }}>
+                        <TouchableOpacity
+                        style={[styles.notifBtn]}
+                        onPress={() => navigation.navigate("Notifications")}
+                        >
+                        <Ionicons
+                            name="person-circle-outline"
+                            size={28}
+                            color={darkenColor(activeCategoryColor, 50)} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                        style={[styles.notifBtn]}
+                        onPress={() => navigation.navigate("Notifications")}
+                        >
+                        <Ionicons
+                            name="cart"
+                            size={28}
+                            color={darkenColor(activeCategoryColor, 50)}
+                        />
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
                 <View style={styles.mediumcontent}>
-                    <Text style={styles.greeting}>Hey {greetingName}, <Text style={styles.greetingStrong}>{getGreeting()}</Text></Text>
                     <View style={styles.searchBox}>
                         <Ionicons name="search" size={18} style={{ marginRight: 8 }} />
                         <TextInput placeholder="Search dishes, restaurants" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
                     </View>
+                        {eventUrl ? (
+                        <View>
+                            <Image
+                            source={{ uri: eventUrl }}
+                            style={[styles.banner, { width: width - 36, height: (width - 100) * 0.5, marginTop: 20 }]}
+                            resizeMode="stretch"
+                            />
+                        </View>
+                        ) : null}
                     {renderContent()}
                 </View>
 
@@ -284,11 +316,9 @@ const styles = StyleSheet.create({
     deliverLabel: { fontSize: 13, fontFamily: "Sen_Bold", letterSpacing: 0.5 },
     locationRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
     locationText: { fontSize: 14, color: "#000", marginRight: 6, fontFamily: "Sen_Medium" },
-    notifBtn: { width: 36, height: 36, borderRadius: 18, justifyContent: "center", alignItems: "center" },
+    notifBtn: { width: 36, height: 36, borderRadius: 5, justifyContent: "center", alignItems: "center" },
 
     mediumcontent: { flex: 1, paddingHorizontal: 18, paddingTop: 12 },
-    greeting: { fontSize: 18, color: "#111", marginBottom: 12, fontFamily: "Sen_Medium" },
-    greetingStrong: { fontFamily: "Sen_ExtraBold" },
 
     searchBox: { height: 50, backgroundColor: "#f2f4f6", borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: "#ddd" },
     searchInput: { flex: 1, fontSize: 15, fontFamily: "Sen_Regular" },
@@ -321,3 +351,6 @@ const styles = StyleSheet.create({
     navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
     navText: { fontSize: 16, fontFamily: "Sen_Bold", color: "#fff" }
 });
+
+
+// https://i.ibb.co/FPsCSW3/hpy-sankranti.gif

@@ -9,23 +9,60 @@
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
-      "resizeMode": "contain"
+      "resizeMode": "cover"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "LocalBoys needs your location to provide the best experience and products",
+        "NSUserTrackingUsageDescription": "LocalBoys may send notifications to keep you updated",
+        "UIBackgroundModes": [
+          "location",
+          "fetch",
+          "remote-notification"
+        ]
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyA_pgpDfyn6jEmXkOKww8OvueM7puMKD_g"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.tarunpanduri1388.LocalBoys"
+      "package": "com.tarunpanduri1388.LocalBoys",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "FOREGROUND_SERVICE"
+      ],
+      "versionCode": 1,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyA_pgpDfyn6jEmXkOKww8OvueM7puMKD_g"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font"
-    ]
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#28A745",
+          "sounds": []
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "fcf95556-c415-4a5f-8f64-31a42bbeaa98"
+      }
+    }
   }
 }

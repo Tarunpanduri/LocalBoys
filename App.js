@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
-import { 
+import {
   useFonts,
   Sen_400Regular,
   Sen_500Medium,
@@ -12,7 +12,7 @@ import {
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
-import { RootSiblingParent } from 'react-native-root-siblings'; 
+import { RootSiblingParent } from 'react-native-root-siblings';
 
 import Login from './screens/login';
 import SignUp from './screens/signup';
@@ -20,6 +20,8 @@ import MapScreen from './screens/maps';
 import HomeScreen from './screens/homescreen';
 import ShopDetails from './screens/shopdestails';
 import CheckoutScreen from './screens/checkout';
+import OrderConfirmation from "./screens/OrderConfirmation";
+
 
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 
@@ -50,7 +52,7 @@ export default function App() {
       if (user) {
         setInitialRoute('HomeScreen');
       } else {
-        setInitialRoute('Login'); 
+        setInitialRoute('Login');
       }
       setCheckingAuth(false);
     });
@@ -71,6 +73,17 @@ export default function App() {
             <Stack.Screen name="HomeScreen" component={HomeScreen} />
             <Stack.Screen name="ShopDetails" component={ShopDetails} />
             <Stack.Screen name="Checkout" component={CheckoutScreen} />
+
+            <Stack.Screen
+              name="OrderConfirmation"
+              component={OrderConfirmation}
+              options={{
+                headerShown: false,
+                gestureEnabled: false
+              }}
+            />
+
+
           </Stack.Navigator>
         </NavigationContainer>
       </View>

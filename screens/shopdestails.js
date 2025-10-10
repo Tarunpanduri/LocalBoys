@@ -38,19 +38,18 @@ const handleProceedCheckout = async () => {
   if (!cartShopId) return;
 
   try {
-    const shopSnap = await get(dbRef(db, `shops/${cartShopId}`));
-    if (!shopSnap.exists()) {
-      Toast.show("Shop details not found", { duration: Toast.durations.SHORT });
-      return;
-    }
-    const fullShopData = shopSnap.val();
-
-    navigation.navigate("Checkout", { shopId: cartShopId, shop: fullShopData });
+    navigation.navigate("Checkout", {
+      shopId: cartShopId,
+      shop,
+      cart: userCart[cartShopId], 
+      user: auth.currentUser,     
+    });
   } catch (err) {
-    console.error("Failed to fetch shop details:", err);
-    Toast.show("Failed to load shop details", { duration: Toast.durations.SHORT });
+    console.error("Failed to navigate to checkout:", err);
+    Toast.show("Something went wrong", { duration: Toast.durations.SHORT });
   }
 };
+
 
   useEffect(() => {
     if (!user) return;

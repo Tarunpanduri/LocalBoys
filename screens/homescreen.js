@@ -38,17 +38,15 @@ export default function HomeScreen({ navigation }) {
     useEffect(() => {
         const eventRef = dbRef(db, "admin_data/general/event");
         const unsubEvent = onValue(eventRef, snap => {
-        setEventUrl(snap.val() || '');
+            setEventUrl(snap.val() || '');
         });
 
         return () => unsubEvent();
     }, []);
 
 
-    // Track user auth state
     useEffect(() => auth.onAuthStateChanged(user => setUid(user?.uid || null)), []);
 
-    // Fetch user info
     useEffect(() => {
         if (!uid) return;
         const fetchUserData = async () => {
@@ -210,7 +208,7 @@ export default function HomeScreen({ navigation }) {
                 </>
             );
         } else {
-            const rideCardWidth = width - 36; 
+            const rideCardWidth = width - 36;
             const rideImageWidth = rideCardWidth * 0.45;
 
             return (
@@ -252,25 +250,25 @@ export default function HomeScreen({ navigation }) {
                             <Ionicons name="chevron-down" size={12} color="#000" />
                         </TouchableOpacity>
                     </View>
-                    <View style={{ flexDirection: "row", alignItems: "center",gap:10 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                         <TouchableOpacity
-                        style={[styles.notifBtn]}
-                        onPress={() => navigation.navigate("Notifications")}
+                            style={[styles.notifBtn]}
+                            onPress={() => navigation.navigate("Notifications")}
                         >
-                        <Ionicons
-                            name="person-circle-outline"
-                            size={28}
-                            color={darkenColor(activeCategoryColor, 50)} />
+                            <Ionicons
+                                name="person-circle-outline"
+                                size={28}
+                                color={darkenColor(activeCategoryColor, 50)} />
                         </TouchableOpacity>
                         <TouchableOpacity
-                        style={[styles.notifBtn]}
-                        onPress={() => navigation.navigate("Notifications")}
+                            style={[styles.notifBtn]}
+                            onPress={() => navigation.navigate("Notifications")}
                         >
-                        <Ionicons
-                            name="cart"
-                            size={28}
-                            color={darkenColor(activeCategoryColor, 50)}
-                        />
+                            <Ionicons
+                                name="cart"
+                                size={28}
+                                color={darkenColor(activeCategoryColor, 50)}
+                            />
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -280,15 +278,15 @@ export default function HomeScreen({ navigation }) {
                         <Ionicons name="search" size={18} style={{ marginRight: 8 }} />
                         <TextInput placeholder="Search dishes, restaurants" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
                     </View>
-                        {eventUrl ? (
+                    {eventUrl ? (
                         <View>
                             <Image
-                            source={{ uri: eventUrl }}
-                            style={[styles.banner, { width: width - 36, height: (width - 100) * 0.5, marginTop: 20 }]}
-                            resizeMode="stretch"
+                                source={{ uri: eventUrl }}
+                                style={[styles.banner, { width: width - 36, height: (width - 100) * 0.5, marginTop: 20 }]}
+                                resizeMode="stretch"
                             />
                         </View>
-                        ) : null}
+                    ) : null}
                     {renderContent()}
                 </View>
 

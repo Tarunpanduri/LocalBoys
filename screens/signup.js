@@ -15,16 +15,16 @@ export default function SignUp({ navigation }) {
   const [secureText, setSecureText] = useState(true);
   const [loading, setLoading] = useState(false);
 
-    const handleSignUp = async () => {
+  const handleSignUp = async () => {
     if (!firstName || !lastName || !email || !password || !mobile) return;
     setLoading(true);
     try {
-        const { user: { uid } } = await createUserWithEmailAndPassword(getAuth(), email.trim(), password);
-        await set(ref(db, `users/${uid}`), { uid, firstName, lastName, email, mobile, createdAt: new Date().toISOString() });
-        navigation.navigate("Login");
+      const { user: { uid } } = await createUserWithEmailAndPassword(getAuth(), email.trim(), password);
+      await set(ref(db, `users/${uid}`), { uid, firstName, lastName, email, mobile, createdAt: new Date().toISOString() });
+      navigation.navigate("Login");
     } catch (e) { Alert.alert("Sign Up Failed", e.message); }
     finally { setLoading(false); }
-    };
+  };
 
   return (
     <SafeAreaView style={[styles.container, { paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0 }]}>
@@ -53,7 +53,7 @@ export default function SignUp({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#B0E57E", marginBottom: -30 },
+  container: { flex: 1, backgroundColor: "#B0E57E", marginBottom: Platform.OS === "ios" ? -40 : -30 },
   header: { alignItems: "center", marginBottom: 20 },
   logo: { width: 80, height: 80 },
   title: { fontSize: 28, color: "#000", fontFamily: "Sen_Bold" },

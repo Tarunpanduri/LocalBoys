@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image,Platform } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image, Platform } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
+import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 import { auth, db as database } from "../firebase";
 import { ref, update } from "firebase/database";
 
-const GOOGLE_API_KEY = "AIzaSyAoF8ZGAKdI_vCzvYZTpAFM1jbHQyPIMCc";
+const googleMapsApiKey = "AIzaSyA_pgpDfyn6jEmXkOKww8OvueM7puMKD_g";
 
 export default function MapScreen({ navigation }) {
   const [hasPermission, setHasPermission] = useState(false);
@@ -14,10 +16,15 @@ export default function MapScreen({ navigation }) {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [selectedPlace, setSelectedPlace] = useState(null);
+  const [expoPushToken, setExpoPushToken] = useState(null);
   const mapRef = useRef(null);
 
-  useEffect(() => { checkLocationPermission(); }, []);
+  useEffect(() => {
+    checkLocationPermission();
+    registerForPushNotificationsAsync();
+  }, []);
 
+  // --- LOCATION LOGIC ---
   const checkLocationPermission = async () => {
     const { status } = await Location.getForegroundPermissionsAsync();
     if (status === "granted") { setHasPermission(true); getCurrentLocation(); }
@@ -32,14 +39,14 @@ export default function MapScreen({ navigation }) {
 
   const reverseGeocode = async (lat, lng) => {
     try {
-      const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_API_KEY}`);
+      const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${googleMapsApiKey}`);
       const data = await res.json();
       if (data.status === "OK" && data.results.length > 0) {
         const comp = data.results[0].address_components;
-        const area = comp.find((c) => c.types.includes("sublocality") || c.types.includes("neighborhood"))?.long_name || "";
-        const city = comp.find((c) => c.types.includes("locality"))?.long_name || comp.find((c) => c.types.includes("administrative_area_level_2"))?.long_name || "";
-        const state = comp.find((c) => c.types.includes("administrative_area_level_1"))?.long_name || "";
-        const pincode = comp.find((c) => c.types.includes("postal_code"))?.long_name || "";
+        const area = comp.find(c => c.types.includes("sublocality") || c.types.includes("neighborhood"))?.long_name || "";
+        const city = comp.find(c => c.types.includes("locality"))?.long_name || comp.find(c => c.types.includes("administrative_area_level_2"))?.long_name || "";
+        const state = comp.find(c => c.types.includes("administrative_area_level_1"))?.long_name || "";
+        const pincode = comp.find(c => c.types.includes("postal_code"))?.long_name || "";
         return { formattedAddress: data.results[0].formatted_address, area, city, state, pincode };
       }
       return { formattedAddress: "Address not found", area: "", city: "", state: "", pincode: "" };
@@ -62,7 +69,7 @@ export default function MapScreen({ navigation }) {
     setQuery(text);
     if (text.length < 3) return;
     try {
-      const res = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${GOOGLE_API_KEY}`);
+      const res = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${googleMapsApiKey}`);
       const data = await res.json();
       if (data && data.predictions) setSuggestions(data.predictions);
     } catch (err) { console.error("Suggestion error:", err); }
@@ -71,7 +78,7 @@ export default function MapScreen({ navigation }) {
   const fetchCoordinates = async (placeId) => {
     try {
       setFetching(true);
-      const res = await fetch(`https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${GOOGLE_API_KEY}`);
+      const res = await fetch(`https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${googleMapsApiKey}`);
       const data = await res.json();
       if (data.result?.geometry) {
         const { lat, lng } = data.result.geometry.location;
@@ -90,13 +97,62 @@ export default function MapScreen({ navigation }) {
       setSaving(true);
       const uid = auth.currentUser.uid;
       const userRef = ref(database, `users/${uid}`);
-      const updates = { location: { lat: selectedPlace.lat || null, lng: selectedPlace.lng || null, area: selectedPlace.area || "", city: selectedPlace.city || "", state: selectedPlace.state || "", pincode: selectedPlace.pincode || "", formattedAddress: selectedPlace.formattedAddress || "", updatedAt: new Date().toISOString() } };
+      const updates = {
+        location: {
+          lat: selectedPlace.lat || null,
+          lng: selectedPlace.lng || null,
+          area: selectedPlace.area || "",
+          city: selectedPlace.city || "",
+          state: selectedPlace.state || "",
+          pincode: selectedPlace.pincode || "",
+          formattedAddress: selectedPlace.formattedAddress || "",
+          updatedAt: new Date().toISOString()
+        },
+        expoPushToken
+      };
       await update(userRef, updates);
       navigation.navigate("HomeScreen");
+
+      // Optional: send a local notification confirming the location save
+      await Notifications.scheduleNotificationAsync({
+        content: { title: "Location Saved", body: "Your location has been updated successfully." },
+        trigger: null
+      });
     } catch (err) { console.error("Location update error:", err); Alert.alert("Error", err.message || "Failed to save location."); }
     finally { setSaving(false); }
   };
 
+  // --- NOTIFICATIONS LOGIC ---
+  async function registerForPushNotificationsAsync() {
+    let token;
+    if (Constants.isDevice) {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== "granted") {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      if (finalStatus !== "granted") {
+        Alert.alert("Permission Required", "Enable notifications to receive updates.");
+        return;
+      }
+      token = (await Notifications.getExpoPushTokenAsync()).data;
+      setExpoPushToken(token);
+    } else {
+      console.warn("Must use physical device for Push Notifications");
+    }
+
+    if (Platform.OS === "android") {
+      Notifications.setNotificationChannelAsync("default", {
+        name: "default",
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: "#28A745",
+      });
+    }
+  }
+
+  // --- RENDER ---
   if (!hasPermission) return (
     <View style={styles.permissionContainer}>
       <Image source={require("../assets/logo.png")} style={styles.logo} resizeMode="contain" />

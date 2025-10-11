@@ -262,7 +262,7 @@ export default function HomeScreen({ navigation }) {
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={[styles.notifBtn]}
-                            onPress={() => navigation.navigate("Notifications")}
+                            onPress={() => navigation.navigate("TrackOrder")}
                         >
                             <Ionicons
                                 name="cart"

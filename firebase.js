@@ -3,7 +3,6 @@ import { initializeApp } from "firebase/app";
 import { initializeAuth, getReactNativePersistence, getAuth } from "firebase/auth";
 import ReactNativeAsyncStorage from "@react-native-async-storage/async-storage";
 import { getDatabase } from "firebase/database";
-import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: "AIzaSyA_pgpDfyn6jEmXkOKww8OvueM7puMKD_g",
@@ -24,11 +23,6 @@ export const auth = initializeAuth(app, {
 
 export const db = getDatabase(app);
 
-export const functions = getFunctions(app, "us-central1");
 
-// Optional: For local development
-// connectFunctionsEmulator(functions, "localhost", 5001);
-
-export const callFunction = (name) => httpsCallable(functions, name);
 
 export default app;

@@ -1,16 +1,5 @@
 import React, { useState, useEffect } from "react";
-import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    ScrollView,
-    StatusBar,
-    Animated,
-    Linking,
-    ActivityIndicator,
-    Platform
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Animated, Linking, ActivityIndicator, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { ref, onValue, off } from "firebase/database";
@@ -23,231 +12,102 @@ export default function OrderConfirmation({ route, navigation }) {
     const [loading, setLoading] = useState(true);
     const [fadeAnim] = useState(new Animated.Value(0));
 
-    // Real-time order status updates
     useEffect(() => {
-        if (!auth.currentUser) {
-            setLoading(false);
-            return;
-        }
-
+        if (!auth.currentUser) { setLoading(false); return; }
         const orderRef = ref(db, `orders/${auth.currentUser.uid}/${order.id}`);
-
-        const unsubscribe = onValue(orderRef, (snapshot) => {
-            if (snapshot.exists()) {
-                setCurrentOrder(snapshot.val());
-            }
+        onValue(orderRef, (snapshot) => {
+            if (snapshot.exists()) setCurrentOrder({ id: snapshot.key, ...snapshot.val() });
             setLoading(false);
         });
-
-        // Animation
-        Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 800,
-            useNativeDriver: true,
-        }).start();
-
+        Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }).start();
         return () => off(orderRef);
     }, [order.id]);
 
-    const handleContactSupport = () => {
-        Linking.openURL(`tel:+919876543210`);
-    };
-
+    const handleContactSupport = () => Linking.openURL(`tel:+919876543210`);
     const getStatusColor = (status) => {
         switch (status) {
-            case "pending": return "#ffc107";
-            case "accepted": return "#17a2b8";
-            case "preparing": return "#fd7e14";
-            case "ready": return "#20c997";
-            case "out_for_delivery": return "#007bff";
-            case "delivered": return "#28a745";
-            case "cancelled": return "#dc3545";
-            default: return "#6c757d";
+            case "pending": return "#ffc107"; case "accepted": return "#17a2b8";
+            case "preparing": return "#fd7e14"; case "ready": return "#20c997";
+            case "out_for_delivery": return "#007bff"; case "delivered": return "#28a745";
+            case "cancelled": return "#dc3545"; default: return "#6c757d";
         }
     };
+    const formatOrderId = (orderId) => { if (!orderId) return "N/A"; const shortId = orderId.length > 8 ? orderId.slice(-8) : orderId; return `#${shortId.toUpperCase()}`; };
 
-    const formatOrderId = (orderId) => {
-        if (!orderId) return "N/A";
-        // Extract last 8 characters and format as uppercase
-        const shortId = orderId.length > 8 ? orderId.slice(-8) : orderId;
-        return `#${shortId.toUpperCase()}`;
-    };
-
-    if (loading) {
-        return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#28a745" />
-                <Text style={styles.loadingText}>Loading order details...</Text>
-            </View>
-        );
-    }
+    if (loading) return (<View style={styles.loadingContainer}><ActivityIndicator size="large" color="#28a745" /><Text style={styles.loadingText}>Loading order details...</Text></View>);
 
     return (
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
-
             <Animated.View style={{ opacity: fadeAnim, flex: 1 }}>
                 <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-
-                    {/* Success Header with Animation */}
                     <View style={styles.successContainer}>
-                        <View style={styles.successIcon}>
-                            <Ionicons name="checkmark-circle" size={80} color="#28a745" />
-                        </View>
+                        <View style={styles.successIcon}><Ionicons name="checkmark-circle" size={80} color="#28a745" /></View>
                         <Text style={styles.successTitle}>Order Confirmed!</Text>
-                        <Text style={styles.successSubtitle}>
-                            Your order {formatOrderId(currentOrder.id)} has been placed successfully. Will notify you once it's on the way.
-                        </Text>
-
-                        {/* Order Status Badge */}
-                        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(currentOrder.status) }]}>
-                            <Text style={styles.statusText}>
-                                {currentOrder.status?.replace(/_/g, ' ').toUpperCase() || "PENDING"}
-                            </Text>
-                        </View>
+                        <Text style={styles.successSubtitle}>Your order {formatOrderId(currentOrder.id)} has been placed successfully. Will notify you once it's on the way.</Text>
+                        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(currentOrder.status) }]}><Text style={styles.statusText}>{currentOrder.status?.replace(/_/g, ' ').toUpperCase() || "PENDING"}</Text></View>
                     </View>
 
-                    {/* Order Details */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Order Details</Text>
                         <View style={styles.detailsGrid}>
-                            <View style={styles.detailItem}>
-                                <Text style={styles.detailLabel}>Order ID</Text>
-                                <Text style={styles.detailValue}>{formatOrderId(currentOrder.id)}</Text>
-                            </View>
-                            <View style={styles.detailItem}>
-                                <Text style={styles.detailLabel}>Shop</Text>
-                                <Text style={styles.detailValue}>{currentOrder.shopname || "Unknown Shop"}</Text>
-                            </View>
-                            <View style={styles.detailItem}>
-                                <Text style={styles.detailLabel}>Payment</Text>
-                                <Text style={styles.detailValue}>{currentOrder.paymentMode || "COD"}</Text>
-                            </View>
-                            <View style={styles.detailItem}>
-                                <Text style={styles.detailLabel}>Order Time</Text>
-                                <Text style={styles.detailValue}>
-                                    {new Date(currentOrder.createdAt).toLocaleTimeString([], {
-                                        hour: '2-digit',
-                                        minute: '2-digit'
-                                    })}
-                                </Text>
-                            </View>
+                            <View style={styles.detailItem}><Text style={styles.detailLabel}>Order ID</Text><Text style={styles.detailValue}>{formatOrderId(currentOrder.id)}</Text></View>
+                            <View style={styles.detailItem}><Text style={styles.detailLabel}>Shop</Text><Text style={styles.detailValue}>{currentOrder.shopname || "Unknown Shop"}</Text></View>
+                            <View style={styles.detailItem}><Text style={styles.detailLabel}>Payment</Text><Text style={styles.detailValue}>{currentOrder.paymentMode || "COD"}</Text></View>
+                            <View style={styles.detailItem}><Text style={styles.detailLabel}>Order Time</Text><Text style={styles.detailValue}>{new Date(currentOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text></View>
                         </View>
                     </View>
 
-                    {/* Quick Actions */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Quick Actions</Text>
                         <View style={styles.actionGrid}>
-                            <TouchableOpacity style={styles.actionButton} onPress={handleContactSupport}>
-                                <Ionicons name="headset-outline" size={24} color="#28a745" />
-                                <Text style={styles.actionText}>Support</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={styles.actionButton}
-                                onPress={() => navigation.navigate("OrderTracking", { orderId: currentOrder.id })}
-                            >
-                                <Ionicons name="navigate-outline" size={24} color="#28a745" />
-                                <Text style={styles.actionText}>Track</Text>
-                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.actionButton} onPress={handleContactSupport}><Ionicons name="headset-outline" size={24} color="#28a745" /><Text style={styles.actionText}>Support</Text></TouchableOpacity>
+                            <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate("TrackOrder")}><Ionicons name="navigate-outline" size={24} color="#28a745" /><Text style={styles.actionText}>Track</Text></TouchableOpacity>
                         </View>
                     </View>
 
-                    {/* Order Summary */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Order Summary</Text>
                         <View style={styles.summaryGrid}>
-                            <View style={styles.summaryItem}>
-                                <Text style={styles.summaryLabel}>Items Total</Text>
-                                <Text style={styles.summaryValue}>₹{currentOrder.subtotal || 0}</Text>
-                            </View>
-                            <View style={styles.summaryItem}>
-                                <Text style={styles.summaryLabel}>Delivery</Text>
-                                <Text style={styles.summaryValue}>₹{currentOrder.deliveryFee || 0}</Text>
-                            </View>
-                            <View style={styles.summaryItem}>
-                                <Text style={styles.summaryLabel}>Platform Fee</Text>
-                                <Text style={styles.summaryValue}>₹{currentOrder.platformFee || 0}</Text>
-                            </View>
-                            {currentOrder.discount > 0 && (
-                                <View style={styles.summaryItem}>
-                                    <Text style={styles.summaryLabel}>Discount</Text>
-                                    <Text style={[styles.summaryValue, styles.discountValue]}>
-                                        -₹{currentOrder.discount || 0}
-                                    </Text>
-                                </View>
-                            )}
-                            <View style={[styles.summaryItem, styles.totalItem]}>
-                                <Text style={styles.totalLabel}>Total Amount</Text>
-                                <Text style={styles.totalValue}>₹{currentOrder.total || 0}</Text>
-                            </View>
+                            <View style={styles.summaryItem}><Text style={styles.summaryLabel}>Items Total</Text><Text style={styles.summaryValue}>₹{currentOrder.subtotal || 0}</Text></View>
+                            <View style={styles.summaryItem}><Text style={styles.summaryLabel}>Delivery</Text><Text style={styles.summaryValue}>₹{currentOrder.deliveryFee || 0}</Text></View>
+                            <View style={styles.summaryItem}><Text style={styles.summaryLabel}>Platform Fee</Text><Text style={styles.summaryValue}>₹{currentOrder.platformFee || 0}</Text></View>
+                            {currentOrder.discount > 0 && (<View style={styles.summaryItem}><Text style={styles.summaryLabel}>Discount</Text><Text style={[styles.summaryValue, styles.discountValue]}>-₹{currentOrder.discount || 0}</Text></View>)}
+                            <View style={[styles.summaryItem, styles.totalItem]}><Text style={styles.totalLabel}>Total Amount</Text><Text style={styles.totalValue}>₹{currentOrder.total || 0}</Text></View>
                         </View>
                     </View>
 
-                    {/* Order Items */}
                     {currentOrder.items && (
                         <View style={styles.section}>
                             <Text style={styles.sectionTitle}>Order Items</Text>
-                            {Object.keys(currentOrder.items)
-                                .filter(key => key.startsWith("productId"))
-                                .map((itemKey, index) => {
-                                    const item = currentOrder.items[itemKey];
-                                    return (
-                                        <View key={index} style={styles.orderItem}>
-                                            <View style={styles.itemDetails}>
-                                                <Text style={styles.itemName}>{item.productname || "Product"}</Text>
-                                                <Text style={styles.itemQuantity}>Qty: {item.qty || 1}</Text>
-                                            </View>
-                                            <Text style={styles.itemPrice}>₹{(item.price || 0) * (item.qty || 1)}</Text>
-                                        </View>
-                                    );
-                                })}
+                            {Object.keys(currentOrder.items).filter(key => key.startsWith("productId")).map((itemKey, index) => {
+                                const item = currentOrder.items[itemKey];
+                                return (
+                                    <View key={index} style={styles.orderItem}>
+                                        <View style={styles.itemDetails}><Text style={styles.itemName}>{item.productname || "Product"}</Text><Text style={styles.itemQuantity}>Qty: {item.qty || 1}</Text></View>
+                                        <Text style={styles.itemPrice}>₹{(item.price || 0) * (item.qty || 1)}</Text>
+                                    </View>
+                                );
+                            })}
                         </View>
                     )}
 
-                    {/* Next Steps */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>What Happens Next?</Text>
                         <View style={styles.timeline}>
-                            <View style={styles.timelineStep}>
-                                <View style={styles.timelineDot} />
-                                <Text style={styles.timelineText}>Restaurant confirmation</Text>
-                            </View>
-                            <View style={styles.timelineStep}>
-                                <View style={styles.timelineDot} />
-                                <Text style={styles.timelineText}>Food preparation</Text>
-                            </View>
-                            <View style={styles.timelineStep}>
-                                <View style={styles.timelineDot} />
-                                <Text style={styles.timelineText}>Driver assignment</Text>
-                            </View>
-                            <View style={styles.timelineStep}>
-                                <View style={styles.timelineDot} />
-                                <Text style={styles.timelineText}>Delivery to your location</Text>
-                            </View>
+                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Restaurant confirmation</Text></View>
+                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Food preparation</Text></View>
+                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Driver assignment</Text></View>
+                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Delivery to your location</Text></View>
                         </View>
                     </View>
-
                 </ScrollView>
 
-                {/* Fixed Action Buttons */}
                 <View style={styles.footer}>
-                    <TouchableOpacity
-                        style={styles.primaryButton}
-                        onPress={() => navigation.navigate("OrderTracking", { orderId: currentOrder.id })}
-                    >
-                        <Ionicons name="location-outline" size={20} color="#fff" />
-                        <Text style={styles.primaryButtonText}>Track Your Order</Text>
+                    <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate("TrackOrder")}>
+                        <Ionicons name="location-outline" size={20} color="#fff" /><Text style={styles.primaryButtonText}>Track Your Order</Text>
                     </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={styles.secondaryButton}
-                        onPress={() => navigation.reset({
-                            index: 0,
-                            routes: [{ name: "HomeScreen" }]
-                        })}
-                    >
+                    <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.reset({ index: 0, routes: [{ name: "HomeScreen" }] })}>
                         <Text style={styles.secondaryButtonText}>Continue Shopping</Text>
                     </TouchableOpacity>
                 </View>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -17,9 +17,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
-import Constants from "expo-constants";
 import { db } from "../firebase";
-import { ref, update } from "firebase/database";
+import { ref, set } from "firebase/database";
 
 export default function Login({ navigation }) {
   const [email, setEmail] = useState("");
@@ -30,30 +29,34 @@ export default function Login({ navigation }) {
 
   // Request notification permission and get Expo Push Token
   const registerForPushNotificationsAsync = async (userId) => {
-    if (!Constants.isDevice) {
-      Alert.alert("Error", "Push notifications require a physical device.");
-      return;
-    }
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
 
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
+      if (existingStatus !== "granted") {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
 
-    if (existingStatus !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
+      if (finalStatus !== "granted") {
+        Alert.alert("Permission denied", "Failed to get push token for notifications.");
+        console.warn("Permission denied for push notifications");
+        return;
+      }
 
-    if (finalStatus !== "granted") {
-      Alert.alert("Permission denied", "Failed to get push token for notifications.");
-      return;
-    }
+      const tokenData = await Notifications.getExpoPushTokenAsync();
+      const expoToken = tokenData.data;
 
-    const tokenData = await Notifications.getExpoPushTokenAsync();
-    const expoToken = tokenData.data;
+      if (!expoToken) {
+        console.warn("Expo token is null, cannot save to Firebase");
+        return;
+      }
 
-    // Save token to Firebase under user's profile
-    if (userId) {
-      await update(ref(db, `users/${userId}`), { expoPushToken: expoToken });
+      if (userId) {
+        await set(ref(db, `users/${userId}/expoPushToken`), expoToken);
+      }
+    } catch (error) {
+      console.error("Push token registration error:", error);
     }
   };
 
@@ -67,6 +70,7 @@ export default function Login({ navigation }) {
     const firebaseAuth = getAuth();
 
     try {
+
       const userCredential = await signInWithEmailAndPassword(
         firebaseAuth,
         email.trim(),
@@ -75,15 +79,14 @@ export default function Login({ navigation }) {
 
       const userId = userCredential.user.uid;
 
-      // Register for notifications and store token
       await registerForPushNotificationsAsync(userId);
 
-      // Navigate to main app
       navigation.reset({
         index: 0,
         routes: [{ name: "MapScreen" }],
       });
     } catch (error) {
+      console.error("Login failed:", error);
       Alert.alert("Login Failed", error.message);
     } finally {
       setLoading(false);

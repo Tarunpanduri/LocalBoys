@@ -23,32 +23,33 @@ export default function ShopDetails({ route, navigation }) {
     if (!user || !cartShopId) return;
     Alert.alert("Clear Cart", "Are you sure you want to clear your cart?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Clear", style: "destructive", onPress: async () => {
-        try {
-          await remove(dbRef(db, `carts/${user.uid}`));
-          Toast.show("Cart cleared.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-        } catch {
-          Toast.show("Failed to clear cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+      {
+        text: "Clear", style: "destructive", onPress: async () => {
+          try {
+            await remove(dbRef(db, `carts/${user.uid}`));
+            Toast.show("Cart cleared.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+          } catch {
+            Toast.show("Failed to clear cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+          }
         }
-      }},
+      },
     ]);
   };
 
-const handleProceedCheckout = async () => {
-  if (!cartShopId) return;
+  const handleProceedCheckout = async () => {
+    if (!cartShopId) return;
 
-  try {
-    navigation.navigate("Checkout", {
-      shopId: cartShopId,
-      shop,
-      cart: userCart[cartShopId], 
-      user: auth.currentUser,     
-    });
-  } catch (err) {
-    console.error("Failed to navigate to checkout:", err);
-    Toast.show("Something went wrong", { duration: Toast.durations.SHORT });
-  }
-};
+    try {
+      navigation.navigate("Checkout", {
+        shopId: cartShopId,
+        shop,
+        cart: userCart[cartShopId],
+      });
+    } catch (err) {
+      console.error("Failed to navigate to checkout:", err);
+      Toast.show("Something went wrong", { duration: Toast.durations.SHORT });
+    }
+  };
 
 
   useEffect(() => {
@@ -69,17 +70,19 @@ const handleProceedCheckout = async () => {
       if (cartShops.length && cartShops[0] !== currentShopId) {
         Alert.alert("Cart contains items from another shop", "Do you want to clear the old cart and start a new one?", [
           { text: "No", style: "cancel" },
-          { text: "Yes", onPress: async () => {
-            await set(userCartRef, { [currentShopId]: { shopname: shop.name, shopimage: shop.image, [product.id]: { productname: product.name, price: product.price, qty: 1 }}, updatedAt: Date.now() });
-            Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-          }},
+          {
+            text: "Yes", onPress: async () => {
+              await set(userCartRef, { [currentShopId]: { shopname: shop.name, shopimage: shop.image, [product.id]: { productname: product.name, price: product.price, qty: 1 } }, updatedAt: Date.now() });
+              Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+            }
+          },
         ]);
         return;
       }
 
       const shopCart = cart[currentShopId] || { shopname: shop.name, shopimage: shop.image };
       const existingProduct = shopCart[product.id], newQty = existingProduct ? existingProduct.qty + 1 : 1;
-      const updateObj = { [currentShopId]: { ...shopCart, [product.id]: { productname: product.name, price: product.price, qty: newQty }}, updatedAt: Date.now() };
+      const updateObj = { [currentShopId]: { ...shopCart, [product.id]: { productname: product.name, price: product.price, qty: newQty } }, updatedAt: Date.now() };
       await set(userCartRef, updateObj);
       Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
     } catch (err) {
@@ -101,7 +104,7 @@ const handleProceedCheckout = async () => {
     const newQty = existingProduct.qty - 1;
     if (newQty <= 0) await removeFromCart(product.id);
     else {
-      const updateObj = { [shopId]: { ...shopCart, [product.id]: { ...existingProduct, qty: newQty }}, updatedAt: Date.now() };
+      const updateObj = { [shopId]: { ...shopCart, [product.id]: { ...existingProduct, qty: newQty } }, updatedAt: Date.now() };
       await set(dbRef(db, `carts/${user.uid}`), updateObj);
     }
   };
@@ -243,9 +246,9 @@ const styles = StyleSheet.create({
   productRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
   price: { fontSize: 15, fontFamily: "Sen_Bold", color: "#222" },
   addBtn: { width: 36, height: 36, borderRadius: 18, justifyContent: "center", alignItems: "center" },
-  cartBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#fff", borderTopWidth: 1, borderColor: "#ddd", padding: 12,paddingBottom:23 , flexDirection: "row", alignItems: "center", justifyContent: "space-between", elevation: 10, shadowColor: "#000", shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 4 },
+  cartBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#fff", borderTopWidth: 1, borderColor: "#ddd", padding: 12, paddingBottom: 23, flexDirection: "row", alignItems: "center", justifyContent: "space-between", elevation: 10, shadowColor: "#000", shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 4 },
   cartInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
-  cartShopImage: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#e6ecf0" }, 
+  cartShopImage: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#e6ecf0" },
   cartText: { fontSize: 14, fontFamily: "Sen_Medium", color: "#111" },
   cartSubText: { fontSize: 12, fontFamily: "Sen_Regular", color: "#666", marginTop: 2 },
   cartActions: { flexDirection: "row", alignItems: "center" },

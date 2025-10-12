@@ -41,6 +41,9 @@ Notifications.setNotificationHandler({
 
 const Stack = createNativeStackNavigator();
 
+// Create navigation ref for handling navigation outside components
+export const navigationRef = React.createRef();
+
 export default function App() {
   const [fontsLoaded] = useFonts({
     Sen_Regular: Sen_400Regular,
@@ -100,15 +103,16 @@ export default function App() {
       if (user) registerForPushNotificationsAsync(user.uid);
     });
 
+    // Listen for incoming notifications
     notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
       console.log('Notification Received:', notification);
     });
 
+    // Handle notification responses
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
       console.log('Notification Response:', response);
-      // Optional: navigate based on notification data
-      // const route = response.notification.request.content.data.screen;
-      // if (route) navigationRef.current?.navigate(route);
+      const route = response.notification.request.content.data.screen;
+      if (route) navigationRef.current?.navigate(route);
     });
 
     return () => {
@@ -123,7 +127,7 @@ export default function App() {
   return (
     <RootSiblingParent>
       <View style={styles.container} onLayout={onLayoutRootView}>
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
           <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
             <Stack.Screen name="Login" component={Login} />
             <Stack.Screen name="SignUp" component={SignUp} />

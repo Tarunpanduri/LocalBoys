@@ -88,10 +88,10 @@ export default function HomeScreen({ navigation }) {
       ...s,
       distanceKm: s.location?.lat && s.location?.lng ? haversineDistance(userLocation.lat, userLocation.lng, Number(s.location.lat), Number(s.location.lng)) : Infinity,
     }))
-    .filter((s) => s.distanceKm <= radiusKm)
-    .filter((s) => activeCategory === "all" ? true : s.type?.toLowerCase().includes(activeCategory.toLowerCase()))
-    .filter((s) => !searchText ? true : s.name?.toLowerCase().includes(searchText.toLowerCase()) || s.type?.toLowerCase().includes(searchText.toLowerCase()))
-    .sort((a, b) => a.distanceKm - b.distanceKm);
+      .filter((s) => s.distanceKm <= radiusKm)
+      .filter((s) => activeCategory === "all" ? true : s.type?.toLowerCase().includes(activeCategory.toLowerCase()))
+      .filter((s) => !searchText ? true : s.name?.toLowerCase().includes(searchText.toLowerCase()) || s.type?.toLowerCase().includes(searchText.toLowerCase()))
+      .sort((a, b) => a.distanceKm - b.distanceKm);
     setFilteredShops(filtered);
   }, [shops, userLocation, radiusKm, activeCategory, searchText]);
 
@@ -195,7 +195,7 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.mediumcontent}>
           <View style={styles.searchBox}>
             <Ionicons name="search" size={18} style={{ marginRight: 8 }} />
-            <TextInput placeholder="Search dishes, restaurants" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
+            <TextInput placeholder="Search dishes, restaurants" placeholderTextColor="#666" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
           </View>
 
           {eventUrl ? <Image source={{ uri: eventUrl }} style={[styles.banner, { width: width - 36, height: (width - 100) * 0.5, marginTop: 20 }]} resizeMode="stretch" /> : null}
@@ -204,7 +204,7 @@ export default function HomeScreen({ navigation }) {
 
         <View style={[styles.bottomNav, { backgroundColor: activeCategoryColor }]}>
           <TouchableOpacity style={[styles.navButton, activeTab === "ordering" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("ordering")}><Text style={styles.navText}>Ordering</Text></TouchableOpacity>
-          <TouchableOpacity style={[styles.navButton, activeTab === "rides" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("rides")}><Text style={styles.navText}>Rides</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.navButton, activeTab === "Services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("Services")}><Text style={styles.navText}>Services</Text></TouchableOpacity>
         </View>
       </View>
     </SafeAreaView>
@@ -212,49 +212,49 @@ export default function HomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-    safe: { flex: 1, backgroundColor: "#19212a" },
-    containerCentered: { flex: 1, justifyContent: "center", alignItems: "center" },
-    screen: { flex: 1 },
+  safe: { flex: 1, backgroundColor: "#19212a" },
+  containerCentered: { flex: 1, justifyContent: "center", alignItems: "center" },
+  screen: { flex: 1 },
 
-    headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 14 },
-    deliveryCol: { flex: 1 },
-    deliverLabel: { fontSize: 13, fontFamily: "Sen_Bold", letterSpacing: 0.5 },
-    locationRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
-    locationText: { fontSize: 14, color: "#000", marginRight: 6, fontFamily: "Sen_Medium" },
-    notifBtn: { width: 36, height: 36, borderRadius: 5, justifyContent: "center", alignItems: "center" },
+  headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 14 },
+  deliveryCol: { flex: 1 },
+  deliverLabel: { fontSize: 13, fontFamily: "Sen_Bold", letterSpacing: 0.5 },
+  locationRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
+  locationText: { fontSize: 14, color: "#000", marginRight: 6, fontFamily: "Sen_Medium" },
+  notifBtn: { width: 36, height: 36, borderRadius: 5, justifyContent: "center", alignItems: "center" },
 
-    mediumcontent: { flex: 1, paddingHorizontal: 18, paddingTop: 12 },
+  mediumcontent: { flex: 1, paddingHorizontal: 18, paddingTop: 12 },
 
-    searchBox: { height: 50, backgroundColor: "#f2f4f6", borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: "#ddd" },
-    searchInput: { flex: 1, fontSize: 15, fontFamily: "Sen_Regular" },
+  searchBox: { height: 50, backgroundColor: "#fff", borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: "#ddd" },
+  searchInput: { flex: 1, fontSize: 15, fontFamily: "Sen_Regular" },
 
-    sectionHeader: { marginTop: 18, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-    sectionTitle: { fontSize: 18, fontFamily: "Sen_Bold", color: "#111", marginBottom: 5 },
+  sectionHeader: { marginTop: 18, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  sectionTitle: { fontSize: 18, fontFamily: "Sen_Bold", color: "#111", marginBottom: 5 },
 
-    categoryChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: "#fff", marginRight: 10, borderWidth: 1, borderColor: "#ddd" },
-    categoryLabel: { fontSize: 14, color: "#333", fontFamily: "Sen_Medium" },
+  categoryChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: "#fff", marginRight: 10, borderWidth: 1, borderColor: "#ddd" },
+  categoryLabel: { fontSize: 14, color: "#333", fontFamily: "Sen_Medium" },
 
-    shopCard: { marginTop: 14, backgroundColor: "#fff", borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#ddd", elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-    shopImage: { width: "100%", height: Math.round(width * 0.38) },
-    shopInfo: { padding: 12, borderColor: "#ddd", borderTopWidth: 1 },
-    shopName: { fontSize: 16, fontFamily: "Sen_Bold", color: "#222" },
-    shopSubtitle: { fontSize: 13, color: "#8b9aa4", marginTop: 4, fontFamily: "Sen_Medium" },
-    shopMetaRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
-    metaItem: { flexDirection: "row", alignItems: "center" },
-    metaText: { fontSize: 13, color: "#444", fontFamily: "Sen_Regular" },
+  shopCard: { marginTop: 14, backgroundColor: "#fff", borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#ddd", elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+  shopImage: { width: "100%", height: Math.round(width * 0.38) },
+  shopInfo: { padding: 12, borderColor: "#ddd", borderTopWidth: 1 },
+  shopName: { fontSize: 16, fontFamily: "Sen_Bold", color: "#222" },
+  shopSubtitle: { fontSize: 13, color: "#8b9aa4", marginTop: 4, fontFamily: "Sen_Medium" },
+  shopMetaRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
+  metaItem: { flexDirection: "row", alignItems: "center" },
+  metaText: { fontSize: 13, color: "#444", fontFamily: "Sen_Regular" },
 
-    emptyState: { marginTop: 40, alignItems: "center", justifyContent: 'center' },
-    emptytext: { fontSize: 15, color: "#555", textAlign: "center", paddingHorizontal: 20, fontFamily: "Sen_Regular" },
+  emptyState: { marginTop: 40, alignItems: "center", justifyContent: 'center' },
+  emptytext: { fontSize: 15, color: "#555", textAlign: "center", paddingHorizontal: 20, fontFamily: "Sen_Regular" },
 
-    rideCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 14, overflow: "hidden", marginBottom: 16, elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-    rideImage: { height: 100, borderRadius: 12 },
-    rideInfo: { flex: 1, justifyContent: "center", paddingHorizontal: 8 },
-    rideTitle: { fontSize: 16, fontFamily: "Sen_Bold", color: "#222" },
-    rideDesc: { fontSize: 14, fontFamily: "Sen_Medium", color: "#666", marginTop: 4 },
+  rideCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 14, overflow: "hidden", marginBottom: 16, elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+  rideImage: { height: 100, borderRadius: 12 },
+  rideInfo: { flex: 1, justifyContent: "center", paddingHorizontal: 8 },
+  rideTitle: { fontSize: 16, fontFamily: "Sen_Bold", color: "#222" },
+  rideDesc: { fontSize: 14, fontFamily: "Sen_Medium", color: "#666", marginTop: 4 },
 
-    bottomNav: { position: "absolute", bottom: 20, left: 20, right: 20, flexDirection: "row", borderRadius: 30, overflow: "hidden", zIndex: 999, elevation: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, height: 50 },
-    navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
-    navText: { fontSize: 16, fontFamily: "Sen_Bold", color: "#fff" }
+  bottomNav: { position: "absolute", bottom: 20, left: 20, right: 20, flexDirection: "row", borderRadius: 30, overflow: "hidden", zIndex: 999, elevation: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, height: 50 },
+  navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
+  navText: { fontSize: 16, fontFamily: "Sen_Bold", color: "#fff" }
 });
 
 

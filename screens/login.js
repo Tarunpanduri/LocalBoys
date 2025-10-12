@@ -83,7 +83,7 @@ export default function Login({ navigation }) {
 
       navigation.reset({
         index: 0,
-        routes: [{ name: "MapScreen" }],
+        routes: [{ name: "Addresses" }],
       });
     } catch (error) {
       console.error("Login failed:", error);

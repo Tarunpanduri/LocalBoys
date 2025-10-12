@@ -94,16 +94,16 @@ export default function AddressesScreen({ navigation }) {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity onPress={() => navigation.navigate('HomeScreen')} style={styles.backBtn}><Ionicons name="chevron-back" size={22} color="#222" /></TouchableOpacity>
-          <Text style={styles.headerTitle}>Your addresses</Text>
+          <Text style={styles.headerTitle}>My Addresses</Text>
         </View>
-        <TouchableOpacity onPress={onAdd} style={styles.headerAdd}><Ionicons name="add" size={18} color="#fff" /><Text style={styles.headerAddText}>Add</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('HomeScreen')} style={styles.headerAdd}><Ionicons name="home" size={18} color="#fff" /><Text style={styles.headerAddText}>Proceed to Home</Text></TouchableOpacity>
       </View>
 
       {entries.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="location-outline" size={56} color="#d3d3d3" />
           <Text style={styles.emptyTitle}>No addresses yet</Text>
-          <Text style={styles.emptySub}>Add an address to get started. You can set one as main and we’ll use it by default.</Text>
+          <Text style={styles.emptySub}>Add an address to get started. You can select as main and we’ll use it by default.</Text>
           <TouchableOpacity onPress={onAdd} style={[styles.addPrimary, { marginTop: 18 }]}><Text style={styles.addPrimaryText}>Add address</Text></TouchableOpacity>
         </View>
       ) : (

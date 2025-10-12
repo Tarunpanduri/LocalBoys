@@ -23,11 +23,12 @@ export default function CheckoutScreen() {
   const [cart, setCart] = useState(() => {
     if (!paramCart) return null;
     const cleanCart = {};
-    Object.keys(paramCart).forEach(k => {
+    Object.keys(paramCart).forEach((k) => {
       if (paramCart[k] && typeof paramCart[k] === "object") cleanCart[k] = { price: paramCart[k].price, qty: paramCart[k].qty, productname: paramCart[k].productname };
     });
     return cleanCart;
   });
+
   const [userData, setUserData] = useState(null), [loading, setLoading] = useState(true), [placingOrder, setPlacingOrder] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState(0), [couponCode, setCouponCode] = useState(""), [discount, setDiscount] = useState(0);
   const [paymentMode, setPaymentMode] = useState("COD"), [transactionId, setTransactionId] = useState("");
@@ -49,25 +50,26 @@ export default function CheckoutScreen() {
           const cartSnap = await get(ref(db, `carts/${user.uid}/${finalShopId}`));
           if (cartSnap.exists()) {
             const cartData = cartSnap.val(), cleanCart = {};
-            Object.keys(cartData).forEach(k => {
-              if (cartData[k] && typeof cartData[k] === "object") cleanCart[k] = { price: cartData[k].price, qty: cartData[k].qty, productname: cartData[k].productname };
-            });
+            Object.keys(cartData).forEach((k) => { if (cartData[k] && typeof cartData[k] === "object") cleanCart[k] = { price: cartData[k].price, qty: cartData[k].qty, productname: cartData[k].productname }; });
             finalCart = cleanCart;
           }
         }
+
         const [userSnap, adminSnap] = await Promise.all([get(ref(db, `users/${user.uid}`)), get(ref(db, `admin_data/general`))]);
         let fetchedUser = null, deliveryCharge = deliveryChargePerKm;
+
         if (userSnap.exists()) {
           const u = userSnap.val();
-          fetchedUser = { uid: user.uid, firstName: u.firstName, lastName: u.lastName, name: u.name, phone: u.phone, email: u.email, location: u.location ? { area: u.location.area, city: u.location.city, state: u.location.state, pincode: u.location.pincode, formattedAddress: u.location.formattedAddress, lat: u.location.lat, lng: u.location.lng, updatedAt: u.location.updatedAt } : null };
+          fetchedUser = { uid: user.uid, firstName: u.firstName, lastName: u.lastName, name: u.name, phone: u.phone, email: u.email };
+          if (u.mainAddressId && u.addresses && u.addresses[u.mainAddressId]) {
+            const main = u.addresses[u.mainAddressId];
+            fetchedUser.location = { area: main.area, city: main.city, state: main.state, pincode: main.pincode, formattedAddress: main.formattedAddress, lat: main.lat, lng: main.lng, updatedAt: main.updatedAt };
+          } else if (u.location) fetchedUser.location = { area: u.location.area, city: u.location.city, state: u.location.state, pincode: u.location.pincode, formattedAddress: u.location.formattedAddress, lat: u.location.lat, lng: u.location.lng, updatedAt: u.location.updatedAt };
         }
-        if (adminSnap.exists()) {
-          const adminData = adminSnap.val();
-          if (adminData.deliveryChargePerKm) deliveryCharge = adminData.deliveryChargePerKm;
-          setDeliveryChargePerKm(deliveryCharge);
-        }
+        if (adminSnap.exists()) { const adminData = adminSnap.val(); if (adminData.deliveryChargePerKm) deliveryCharge = adminData.deliveryChargePerKm; setDeliveryChargePerKm(deliveryCharge); }
+
         if (fetchedUser && finalCart && finalShop?.location) {
-          const calculatedSubtotal = Object.keys(finalCart).filter(k => k.startsWith("productId")).reduce((s, pid) => s + finalCart[pid].price * finalCart[pid].qty, 0);
+          const calculatedSubtotal = Object.keys(finalCart).filter((k) => k.startsWith("productId")).reduce((s, pid) => s + finalCart[pid].price * finalCart[pid].qty, 0);
           setSubtotal(calculatedSubtotal);
           const uLat = Number(fetchedUser.location?.lat), uLng = Number(fetchedUser.location?.lng), sLat = Number(finalShop.location?.lat), sLng = Number(finalShop.location?.lng);
           if (!isNaN(uLat) && !isNaN(uLng) && !isNaN(sLat) && !isNaN(sLng)) {
@@ -77,19 +79,19 @@ export default function CheckoutScreen() {
             setDeliveryFee(Math.ceil(fee));
           } else setDeliveryFee(0);
         }
+
         setShop(finalShop); setCart(finalCart); setUserData(fetchedUser);
-      } catch (e) {
-        console.error("Checkout load error:", e);
-        Toast.show("Failed to load checkout data", { duration: Toast.durations.SHORT });
-      } finally { setLoading(false); }
+      } catch (e) { console.error("Checkout load error:", e); Toast.show("Failed to load checkout data", { duration: Toast.durations.SHORT }); }
+      finally { setLoading(false); }
     };
     loadData();
   }, [user?.uid]);
 
   useEffect(() => {
     if (!cart) return;
-    const calculatedSubtotal = Object.keys(cart).filter(k => k.startsWith("productId")).reduce((s, pid) => s + cart[pid].price * cart[pid].qty, 0);
-    setSubtotal(calculatedSubtotal); setTotal(calculatedSubtotal - discount + deliveryFee + platformFee);
+    const calculatedSubtotal = Object.keys(cart).filter((k) => k.startsWith("productId")).reduce((s, pid) => s + cart[pid].price * cart[pid].qty, 0);
+    setSubtotal(calculatedSubtotal);
+    setTotal(calculatedSubtotal - discount + deliveryFee + platformFee);
   }, [cart, discount, deliveryFee]);
 
   const applyCoupon = async () => {
@@ -101,14 +103,12 @@ export default function CheckoutScreen() {
 
   const handlePlaceOrder = async () => {
     const user = auth.currentUser;
-    if (!user) { Toast.show("Please login to place an order", { duration: Toast.durations.SHORT }); navigation.navigate("Homescreen"); return; }
+    if (!user) { Toast.show("Please login to place an order", { duration: Toast.durations.SHORT }); navigation.navigate("HomeScreen"); return; }
     if (paymentMode === "Online" && !transactionId.trim()) { Toast.show("Enter transaction ID", { duration: Toast.durations.SHORT }); return; }
     try {
       setPlacingOrder(true);
       const cleanItems = {};
-      Object.keys(cart).filter(k => k.startsWith("productId")).forEach(pid => {
-        if (cart[pid].price && cart[pid].qty) cleanItems[pid] = { price: cart[pid].price, qty: cart[pid].qty, productname: cart[pid].productname || "Product" };
-      });
+      Object.keys(cart).filter((k) => k.startsWith("productId")).forEach((pid) => { if (cart[pid].price && cart[pid].qty) cleanItems[pid] = { price: cart[pid].price, qty: cart[pid].qty, productname: cart[pid].productname || "Product" }; });
       const orderData = {
         shopId, shopname: shop?.name || "Unknown Shop", shopimage: shop?.image || "", items: cleanItems,
         subtotal: Math.ceil(subtotal), discount: Math.ceil(discount), deliveryFee: Math.ceil(deliveryFee), platformFee, total: Math.ceil(total),
@@ -118,68 +118,43 @@ export default function CheckoutScreen() {
         calculationMetadata: {
           deliveryChargePerKm, freeDeliveryThreshold: 500, baseDeliveryFee: 20, platformFee: 10,
           userLocation: userData?.location ? { area: userData.location.area, city: userData.location.city, state: userData.location.state, pincode: userData.location.pincode, formattedAddress: userData.location.formattedAddress, lat: userData.location.lat, lng: userData.location.lng, updatedAt: userData.location.updatedAt } : null,
-          shopLocation: shop?.location ? { lat: shop.location.lat, lng: shop.location.lng } : null, calculatedAt: Date.now()
-        }
+          shopLocation: shop?.location ? { lat: shop.location.lat, lng: shop.location.lng } : null, calculatedAt: Date.now(),
+        },
       };
       const newOrderRef = push(ref(db, `orders/${user.uid}`));
       await set(newOrderRef, orderData);
       await remove(ref(db, `carts/${user.uid}/${shopId}`));
       navigation.replace("OrderConfirmation", { orderData: { order: { id: newOrderRef.key, ...orderData }, message: "Order placed successfully" } });
-    } catch (e) {
-      console.error("❌ Order error:", e);
-      Toast.show("Failed to place order. Please try again.", { duration: Toast.durations.LONG, position: Toast.positions.BOTTOM });
-    } finally { setPlacingOrder(false); }
+    } catch (e) { console.error("❌ Order error:", e); Toast.show("Failed to place order. Please try again.", { duration: Toast.durations.LONG, position: Toast.positions.BOTTOM }); }
+    finally { setPlacingOrder(false); }
   };
 
-  if (loading) return (<View style={styles.center}><ActivityIndicator size="large" color="#ff7a00" /></View>);
-  if (!cart || Object.keys(cart).filter(k => k.startsWith("productId")).length === 0)
-    return (<View style={styles.center}><Text style={styles.emptyText}>No items in cart.</Text><TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}><Text style={styles.backButtonText}>Back to Shop</Text></TouchableOpacity></View>);
+  if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#ff7a00" /></View>;
+  if (!cart || Object.keys(cart).filter((k) => k.startsWith("productId")).length === 0) return <View style={styles.center}><Text style={styles.emptyText}>No items in cart.</Text><TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}><Text style={styles.backButtonText}>Back to Shop</Text></TouchableOpacity></View>;
 
-  const products = Object.keys(cart).filter(k => k.startsWith("productId")).map(pid => cart[pid]);
+  const products = Object.keys(cart).filter((k) => k.startsWith("productId")).map((pid) => cart[pid]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#0e0e12" />
       <View style={styles.container}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 180 }}>
           <View style={[styles.section, { marginTop: 40 }]}>
-            <View style={styles.headerRow}>
-              <Text style={styles.sectionTitle}>DELIVERY ADDRESS</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("HomeScreen")}><Text style={styles.editText}>EDIT</Text></TouchableOpacity>
-            </View>
-            {userData?.location ? (
-              <View style={styles.addressBox}>
-                <Text style={styles.username}>{userData.firstName} {userData.lastName}</Text>
-                <Text style={styles.addressText}>{userData.location.formattedAddress}</Text>
-                <Text style={styles.addressSub}>{userData.location.city}, {userData.location.state} - {userData.location.pincode}</Text>
-              </View>
-            ) : (<Text style={styles.emptyText}>No address found</Text>)}
+            <View style={styles.headerRow}><Text style={styles.sectionTitle}>DELIVERY ADDRESS</Text><TouchableOpacity onPress={() => navigation.navigate("HomeScreen")}><Text style={styles.editText}>EDIT</Text></TouchableOpacity></View>
+            {userData?.location ? <View style={styles.addressBox}><Text style={styles.username}>{userData.firstName} {userData.lastName}</Text><Text style={styles.addressText}>{userData.location.formattedAddress}</Text><Text style={styles.addressSub}>{userData.location.city}, {userData.location.state} - {userData.location.pincode}</Text></View> : (<Text style={styles.emptyText}>No address found</Text>)}
           </View>
         </ScrollView>
 
         <View style={styles.bottomSheet}>
           <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }}>
             <View style={styles.section}>
-              <View style={styles.headerRow}>
-                <Text style={styles.sectionTitle}>YOUR ITEMS</Text>
-                <TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.editText}>EDIT ITEMS</Text></TouchableOpacity>
-              </View>
-              {products.map((i, idx) => (
-                <View key={idx} style={styles.itemCard}>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemName}>{i.productname}</Text>
-                    <Text style={styles.itemQty}>Qty: {i.qty}</Text>
-                  </View>
-                  <Text style={styles.itemPrice}>₹{i.price * i.qty}</Text>
-                </View>
-              ))}
+              <View style={styles.headerRow}><Text style={styles.sectionTitle}>YOUR ITEMS</Text><TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.editText}>EDIT ITEMS</Text></TouchableOpacity></View>
+              {products.map((i, idx) => <View key={idx} style={styles.itemCard}><View style={styles.itemInfo}><Text style={styles.itemName}>{i.productname}</Text><Text style={styles.itemQty}>Qty: {i.qty}</Text></View><Text style={styles.itemPrice}>₹{i.price * i.qty}</Text></View>)}
             </View>
 
             <View style={styles.sectiontwo}>
               <Text style={styles.sectionTitle}>COUPON</Text>
-              <View style={styles.couponRow}>
-                <TextInput style={styles.couponInput} placeholder="Enter code" placeholderTextColor="#aaa" value={couponCode} onChangeText={setCouponCode} />
-                <TouchableOpacity style={styles.applyBtn} onPress={applyCoupon}><Text style={styles.applyText}>APPLY</Text></TouchableOpacity>
-              </View>
+              <View style={styles.couponRow}><TextInput style={styles.couponInput} placeholder="Enter code" placeholderTextColor="#aaa" value={couponCode} onChangeText={setCouponCode} /><TouchableOpacity style={styles.applyBtn} onPress={applyCoupon}><Text style={styles.applyText}>APPLY</Text></TouchableOpacity></View>
             </View>
 
             <View style={styles.summaryCard}>
@@ -197,21 +172,13 @@ export default function CheckoutScreen() {
                 <TouchableOpacity style={[styles.modeBtn, paymentMode === "COD" && styles.activeMode]} onPress={() => setPaymentMode("COD")}><Text style={[styles.modeText, paymentMode === "COD" && styles.activeModeText]}>CASH ON DELIVERY</Text></TouchableOpacity>
                 <TouchableOpacity style={[styles.modeBtn, paymentMode === "Online" && styles.activeMode]} onPress={() => setPaymentMode("Online")}><Text style={[styles.modeText, paymentMode === "Online" && styles.activeModeText]}>PAY ONLINE</Text></TouchableOpacity>
               </View>
-              {paymentMode === "Online" && (
-                <View style={styles.onlineBox}>
-                  <Image source={{ uri: "https://i.ibb.co/7WpZKqR/qr-placeholder.png" }} style={styles.qrImage} />
-                  <TextInput style={styles.transactionInput} placeholder="Enter Transaction ID" placeholderTextColor="#999" value={transactionId} onChangeText={setTransactionId} />
-                  <Text style={styles.qrNote}>Scan the QR to pay, then enter your transaction ID.</Text>
-                </View>
-              )}
+              {paymentMode === "Online" && <View style={styles.onlineBox}><Image source={{ uri: "https://i.ibb.co/7WpZKqR/qr-placeholder.png" }} style={styles.qrImage} /><TextInput style={styles.transactionInput} placeholder="Enter Transaction ID" placeholderTextColor="#999" value={transactionId} onChangeText={setTransactionId} /><Text style={styles.qrNote}>Scan the QR to pay, then enter your transaction ID.</Text></View>}
             </View>
           </ScrollView>
 
           <View style={styles.bottomBar}>
             <View><Text style={styles.totalLabel}>TOTAL</Text><Text style={styles.totalAmount}>₹{Math.ceil(total)}</Text></View>
-            <TouchableOpacity style={[styles.orderBtn, placingOrder && styles.orderBtnDisabled]} onPress={handlePlaceOrder} disabled={placingOrder}>
-              {placingOrder ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.orderText}>PLACE ORDER</Text>}
-            </TouchableOpacity>
+            <TouchableOpacity style={[styles.orderBtn, placingOrder && styles.orderBtnDisabled]} onPress={handlePlaceOrder} disabled={placingOrder}>{placingOrder ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.orderText}>PLACE ORDER</Text>}</TouchableOpacity>
           </View>
         </View>
       </View>

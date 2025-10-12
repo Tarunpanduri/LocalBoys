@@ -23,6 +23,7 @@ import ShopDetails from './screens/shopdestails';
 import CheckoutScreen from './screens/checkout';
 import OrderConfirmation from "./screens/OrderConfirmation";
 import TrackOrder from './screens/trackorder';
+import AddressesScreen from './screens/AddressesScreen';
 
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebase';
@@ -131,6 +132,7 @@ export default function App() {
             <Stack.Screen name="ShopDetails" component={ShopDetails} />
             <Stack.Screen name="Checkout" component={CheckoutScreen} />
             <Stack.Screen name="TrackOrder" component={TrackOrder} />
+            <Stack.Screen name="Addresses" component={AddressesScreen} />
             <Stack.Screen
               name="OrderConfirmation"
               component={OrderConfirmation}

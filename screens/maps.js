@@ -120,35 +120,75 @@ export default function MapScreen({ navigation, route }) {
     finally { setFetching(false); }
   };
 
-  const handleConfirmLocation = async () => {
-    if (!selectedPlace) return Alert.alert('Error', 'Please pick a location first.');
-    if (!name || name.trim().length < 2) return Alert.alert('Validation', 'Please enter a name for this address.');
-    if (!phone || phone.trim().length < 6) return Alert.alert('Validation', 'Please enter a valid phone number.');
-    if (!auth.currentUser) return Alert.alert('Error', 'User not logged in.');
+const handleConfirmLocation = async () => {
+  if (!selectedPlace) return Alert.alert('Error', 'Please pick a location first.');
+  if (!name || name.trim().length < 2) return Alert.alert('Validation', 'Please enter a name for this address.');
+  if (!phone || phone.trim().length < 6) return Alert.alert('Validation', 'Please enter a valid phone number.');
+  if (!auth.currentUser) return Alert.alert('Error', 'User not logged in.');
 
-    try {
-      setSaving(true);
-      const uid = auth.currentUser.uid; const userRef = ref(database, `users/${uid}`);
-      const snapshot = await get(userRef); const existingData = snapshot.val() || {};
-      const addressObj = { lat: selectedPlace.lat || null, lng: selectedPlace.lng || null, area: selectedPlace.area || '', city: selectedPlace.city || '', state: selectedPlace.state || '', pincode: selectedPlace.pincode || '', formattedAddress: selectedPlace.formattedAddress || '', name: name.trim(), phone: phone.trim(), updatedAt: new Date().toISOString() };
+  try {
+    setSaving(true);
+    const uid = auth.currentUser.uid;
+    const userRef = ref(database, `users/${uid}`);
+    const snapshot = await get(userRef);
+    const existingData = snapshot.val() || {};
+    const addressRef = ref(database, `users/${uid}/addresses`);
+    const addressSnap = await get(addressRef);
+    const hasExistingAddresses = addressSnap.exists();
 
-      if (mode === 'edit' && editingId) await update(ref(database, `users/${uid}/addresses/${editingId}`), addressObj);
-      else { const newRef = push(ref(database, `users/${uid}/addresses`)); await set(newRef, addressObj); }
+    const addressObj = {
+      lat: selectedPlace.lat || null,
+      lng: selectedPlace.lng || null,
+      area: selectedPlace.area || '',
+      city: selectedPlace.city || '',
+      state: selectedPlace.state || '',
+      pincode: selectedPlace.pincode || '',
+      formattedAddress: selectedPlace.formattedAddress || '',
+      name: name.trim(),
+      phone: phone.trim(),
+      updatedAt: new Date().toISOString(),
+    };
 
-      if (setAsMain) {
-        let keyToSet = editingId;
-        if (!keyToSet) { const addressesSnap = await get(ref(database, `users/${uid}/addresses`)); const addressesVal = addressesSnap.val() || {}; keyToSet = Object.keys(addressesVal).find(k => addressesVal[k].updatedAt === addressObj.updatedAt && addressesVal[k].name === addressObj.name); }
-        if (keyToSet) await update(userRef, { mainAddressId: keyToSet });
+    let keyToSet = editingId;
+
+    if (mode === 'edit' && editingId) {
+      await update(ref(database, `users/${uid}/addresses/${editingId}`), addressObj);
+    } else {
+      const newRef = push(addressRef);
+      await set(newRef, addressObj);
+      keyToSet = newRef.key;
+
+      // Auto-set main address if this is the first address
+      if (!hasExistingAddresses) {
+        await update(userRef, { mainAddressId: keyToSet });
       }
+    }
 
-      if (existingData.expoPushToken) await update(userRef, { expoPushToken: existingData.expoPushToken });
-      else if (expoPushToken) await update(userRef, { expoPushToken });
+    // If user checked "Set as main address", override
+    if (setAsMain && keyToSet) {
+      await update(userRef, { mainAddressId: keyToSet });
+    }
 
-      navigation.navigate('HomeScreen', { refresh: true });
-      await Notifications.scheduleNotificationAsync({ content: { title: 'Address saved', body: 'Your address was saved successfully.' }, trigger: null });
-    } catch (err) { console.error('Save address error:', err); Alert.alert('Error', err.message || 'Failed to save address.'); }
-    finally { setSaving(false); }
-  };
+    // Handle push token
+    if (existingData.expoPushToken) {
+      await update(userRef, { expoPushToken: existingData.expoPushToken });
+    } else if (expoPushToken) {
+      await update(userRef, { expoPushToken });
+    }
+
+    navigation.navigate('Addresses', { refresh: true });
+    await Notifications.scheduleNotificationAsync({
+      content: { title: 'Address saved', body: 'Your address was saved successfully.' },
+      trigger: null,
+    });
+  } catch (err) {
+    console.error('Save address error:', err);
+    Alert.alert('Error', err.message || 'Failed to save address.');
+  } finally {
+    setSaving(false);
+  }
+};
+
 
   async function registerForPushNotificationsAsync() {
     try {

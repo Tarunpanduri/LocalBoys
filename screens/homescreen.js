@@ -7,7 +7,6 @@ import { ref as dbRef, get, onValue } from "firebase/database";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 
 const { width } = Dimensions.get("window");
-
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
   const toRad = (v) => (v * Math.PI) / 180;
   const R = 6371;
@@ -32,7 +31,7 @@ export default function HomeScreen({ navigation }) {
   const [notificationsCount, setNotificationsCount] = useState(0);
   const [greetingName, setGreetingName] = useState("Guest");
   const [categoryMeta, setCategoryMeta] = useState({});
-  const [activeTab, setActiveTab] = useState("ordering");
+  const [activeTab, setActiveTab] = useState("products");
   const [eventUrl, setEventUrl] = useState("");
 
   useEffect(() => {
@@ -84,16 +83,42 @@ export default function HomeScreen({ navigation }) {
 
   useEffect(() => {
     if (!userLocation) return;
-    const filtered = shops.map((s) => ({
-      ...s,
-      distanceKm: s.location?.lat && s.location?.lng ? haversineDistance(userLocation.lat, userLocation.lng, Number(s.location.lat), Number(s.location.lng)) : Infinity,
-    }))
+    const filtered = shops
+      .filter((s) => s.isActive !== false)
+      .filter((s) =>
+        activeTab === "products"
+          ? s.category?.toLowerCase() === "products"
+          : s.category?.toLowerCase() === "services"
+      )
+      .map((s) => ({
+        ...s,
+        distanceKm: s.location?.lat && s.location?.lng
+          ? haversineDistance(userLocation.lat, userLocation.lng, Number(s.location.lat), Number(s.location.lng))
+          : Infinity,
+      }))
       .filter((s) => s.distanceKm <= radiusKm)
       .filter((s) => activeCategory === "all" ? true : s.type?.toLowerCase().includes(activeCategory.toLowerCase()))
-      .filter((s) => !searchText ? true : s.name?.toLowerCase().includes(searchText.toLowerCase()) || s.type?.toLowerCase().includes(searchText.toLowerCase()))
+      .filter((s) =>
+        !searchText
+          ? true
+          : s.name?.toLowerCase().includes(searchText.toLowerCase()) ||
+          s.type?.toLowerCase().includes(searchText.toLowerCase())
+      )
       .sort((a, b) => a.distanceKm - b.distanceKm);
     setFilteredShops(filtered);
-  }, [shops, userLocation, radiusKm, activeCategory, searchText]);
+  }, [shops, userLocation, radiusKm, activeCategory, searchText, activeTab]);
+
+  const filteredCategories = categories.filter((c) => {
+  if (c.id === "all") return true;
+  const shopsInCategory = shops.filter(
+    (s) =>
+      s.type?.toLowerCase() === c.label.toLowerCase() &&
+      ((activeTab === "products" && s.category === "products") ||
+       (activeTab === "services" && s.category === "services"))
+  );
+  return shopsInCategory.length > 0;
+});
+
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -102,7 +127,6 @@ export default function HomeScreen({ navigation }) {
   }, []);
 
   const activeCategoryColor = categoryMeta[categories.find((c) => c.id === activeCategory)?.label]?.Theme || "#66BB6A";
-
   const darkenColor = (hex, percent) => {
     const num = parseInt(hex.replace("#", ""), 16);
     const amt = Math.round(2.55 * percent);
@@ -111,7 +135,6 @@ export default function HomeScreen({ navigation }) {
     const B = Math.min(255, Math.max(0, (num & 0x0000ff) - amt));
     return "#" + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
   };
-
   const handleCategoryPress = useCallback((id) => setActiveCategory(id), []);
 
   const renderCategory = ({ item }) => {
@@ -145,33 +168,25 @@ export default function HomeScreen({ navigation }) {
 
   if (loading) return <SafeAreaView style={styles.containerCentered}><ActivityIndicator size="large" /></SafeAreaView>;
 
-  const renderContent = () => {
-    if (activeTab === "ordering") return (
-      <>
-        <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Categories</Text></View>
-        <View style={{ height: 60 }}>
-          <FlatList data={categories} horizontal keyExtractor={(i) => i.id || Math.random().toString()} renderItem={renderCategory} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10, paddingHorizontal: 5 }} />
+const renderContent = () => (
+  <>
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>Categories</Text>
+    </View>
+    <View style={{ height: 60 }}>
+      <FlatList data={filteredCategories} horizontal keyExtractor={(i) => i.id || Math.random().toString()} renderItem={renderCategory} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10, paddingHorizontal: 5 }} />
+    </View>
+    <FlatList
+      data={filteredShops} keyExtractor={(item) => item.id || Math.random().toString()} renderItem={({ item }) => <ShopCard shop={item} />} contentContainerStyle={{ paddingBottom: 90 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} ListEmptyComponent={() => ( <View style={styles.emptyState}>
+          <Text style={styles.emptytext}>
+            No {activeTab === "products" ? "products" : "services"} available in your area yet.
+          </Text>
         </View>
-        <FlatList data={filteredShops} keyExtractor={(item) => item.id || Math.random().toString()} renderItem={({ item }) => <ShopCard shop={item} />} contentContainerStyle={{ paddingBottom: 90 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} ListEmptyComponent={() => <View style={styles.emptyState}><Text style={styles.emptytext}>Sorry, our services are currently unavailable at this location. We will notify when we are here</Text></View>} />
-      </>
-    );
-    else {
-      const rideCardWidth = width - 36; const rideImageWidth = rideCardWidth * 0.45;
-      return (
-        <View style={{ marginTop: 40, paddingHorizontal: 18 }}>
-          <Text style={[styles.sectionTitle, { marginBottom: 20 }]}>Ride Services</Text>
-          <TouchableOpacity style={styles.rideCard}>
-            <Image source={{ uri: "https://www.appicial.com/assets/images/taxi-app/taxi-app.gif" }} style={[styles.rideImage, { width: rideImageWidth, marginRight: 12 }]} resizeMode="cover" />
-            <View style={styles.rideInfo}><Text style={styles.rideTitle}>Book a Ride</Text><Text style={styles.rideDesc}>Taxi, Auto or Shuttle</Text></View>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.rideCard}>
-            <View style={styles.rideInfo}><Text style={styles.rideTitle}>Rent a Bike</Text><Text style={styles.rideDesc}>Scooter, Motorcycle</Text></View>
-            <Image source={{ uri: "https://static.wixstatic.com/media/3ed1e1_1e6b468355344677a35f9c2841036a64~mv2.gif" }} style={[styles.rideImage, { width: rideImageWidth, marginLeft: 12 }]} resizeMode="cover" />
-          </TouchableOpacity>
-        </View>
-      );
-    }
-  };
+      )}
+    />
+  </>
+);
+
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
@@ -187,7 +202,7 @@ export default function HomeScreen({ navigation }) {
             </TouchableOpacity>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate("Notifications")}><Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} /></TouchableOpacity>
+            <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate("Profile")}><Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} /></TouchableOpacity>
             <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate("TrackOrder")}><Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} /></TouchableOpacity>
           </View>
         </View>
@@ -195,7 +210,7 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.mediumcontent}>
           <View style={styles.searchBox}>
             <Ionicons name="search" size={18} style={{ marginRight: 8 }} />
-            <TextInput placeholder="Search dishes, restaurants" placeholderTextColor="#666" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
+            <TextInput placeholder="Search products or services" placeholderTextColor="#666" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
           </View>
 
           {eventUrl ? <Image source={{ uri: eventUrl }} style={[styles.banner, { width: width - 36, height: (width - 100) * 0.5, marginTop: 20 }]} resizeMode="stretch" /> : null}
@@ -203,37 +218,32 @@ export default function HomeScreen({ navigation }) {
         </View>
 
         <View style={[styles.bottomNav, { backgroundColor: activeCategoryColor }]}>
-          <TouchableOpacity style={[styles.navButton, activeTab === "ordering" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("ordering")}><Text style={styles.navText}>Ordering</Text></TouchableOpacity>
-          <TouchableOpacity style={[styles.navButton, activeTab === "Services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("Services")}><Text style={styles.navText}>Services</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.navButton, activeTab === "products" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("products")}><Text style={styles.navText}>Products</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.navButton, activeTab === "services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("services")}><Text style={styles.navText}>Services</Text></TouchableOpacity>
         </View>
       </View>
     </SafeAreaView>
   );
 }
 
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#19212a" },
   containerCentered: { flex: 1, justifyContent: "center", alignItems: "center" },
   screen: { flex: 1 },
-
   headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 14 },
   deliveryCol: { flex: 1 },
   deliverLabel: { fontSize: 13, fontFamily: "Sen_Bold", letterSpacing: 0.5 },
   locationRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
   locationText: { fontSize: 14, color: "#000", marginRight: 6, fontFamily: "Sen_Medium" },
   notifBtn: { width: 36, height: 36, borderRadius: 5, justifyContent: "center", alignItems: "center" },
-
   mediumcontent: { flex: 1, paddingHorizontal: 18, paddingTop: 12 },
-
   searchBox: { height: 50, backgroundColor: "#fff", borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: "#ddd" },
   searchInput: { flex: 1, fontSize: 15, fontFamily: "Sen_Regular" },
-
   sectionHeader: { marginTop: 18, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sectionTitle: { fontSize: 18, fontFamily: "Sen_Bold", color: "#111", marginBottom: 5 },
-
   categoryChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: "#fff", marginRight: 10, borderWidth: 1, borderColor: "#ddd" },
   categoryLabel: { fontSize: 14, color: "#333", fontFamily: "Sen_Medium" },
-
   shopCard: { marginTop: 14, backgroundColor: "#fff", borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#ddd", elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
   shopImage: { width: "100%", height: Math.round(width * 0.38) },
   shopInfo: { padding: 12, borderColor: "#ddd", borderTopWidth: 1 },
@@ -242,20 +252,11 @@ const styles = StyleSheet.create({
   shopMetaRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
   metaItem: { flexDirection: "row", alignItems: "center" },
   metaText: { fontSize: 13, color: "#444", fontFamily: "Sen_Regular" },
-
-  emptyState: { marginTop: 40, alignItems: "center", justifyContent: 'center' },
+  emptyState: { marginTop: 40, alignItems: "center", justifyContent: "center" },
   emptytext: { fontSize: 15, color: "#555", textAlign: "center", paddingHorizontal: 20, fontFamily: "Sen_Regular" },
-
-  rideCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 14, overflow: "hidden", marginBottom: 16, elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-  rideImage: { height: 100, borderRadius: 12 },
-  rideInfo: { flex: 1, justifyContent: "center", paddingHorizontal: 8 },
-  rideTitle: { fontSize: 16, fontFamily: "Sen_Bold", color: "#222" },
-  rideDesc: { fontSize: 14, fontFamily: "Sen_Medium", color: "#666", marginTop: 4 },
-
   bottomNav: { position: "absolute", bottom: 20, left: 20, right: 20, flexDirection: "row", borderRadius: 30, overflow: "hidden", zIndex: 999, elevation: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, height: 50 },
   navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
   navText: { fontSize: 16, fontFamily: "Sen_Bold", color: "#fff" }
 });
-
 
 // https://i.ibb.co/FPsCSW3/hpy-sankranti.gif

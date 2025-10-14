@@ -31,8 +31,8 @@ export default function Profile({ navigation, route }) {
 
 const menuItems = [
   { title: "Personal Info", icon: <Ionicons name="person-circle-outline" size={22} color="#FF6B6B" />, route: "PersonalInfo", params: { userData } },
-  { title: "Addresses", icon: <Ionicons name="home-outline" size={22} color="#6C63FF" />, route: "Addresses", params: { addresses: userData?.addresses } },
-  { title: "Current Orders", icon: <MaterialIcons name="shopping-cart" size={22} color="#FFD93D" />, route: "Notifications" },
+  { title: "Addresses", icon: <Ionicons name="home-outline" size={22} color="#6C63FF" />, route: "Addresses" },
+  { title: "Current Orders", icon: <MaterialIcons name="shopping-cart" size={22} color="#FFD93D" />, route: "TrackOrder" },
   { title: "Terms & Conditions", icon: <MaterialIcons name="gavel" size={22} color="#4ECDC4" />, route: "FAQs" },
   { title: "Privacy Policy", icon: <FontAwesome5 name="user-shield" size={18} color="#FFAA00" />, route: "UserReviews" },
 ];
@@ -86,7 +86,7 @@ const menuItems = [
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#F9FAFB" },
-  logo: { width: 80, height: 80 },
+  logo: { width: 80, height: 80,marginBottom: 10,marginTop:30 },
   scrollContainer: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 30 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   headerTitle: { fontSize: 18, fontWeight: "700", color: "#000" },

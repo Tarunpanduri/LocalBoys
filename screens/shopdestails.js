@@ -182,7 +182,7 @@ export default function ShopDetails({ route, navigation }) {
           <View style={styles.productBody}>
             <Text style={styles.productTitle} numberOfLines={2}>{item.name}</Text>
             <Text style={styles.productSubtitle} numberOfLines={1}>{item.description || "No description"}</Text>
-            <Text style={styles.productquantity}>qty: {item.quantity || "N/A"}</Text>
+            <Text style={styles.productquantity}>{item.quantity || "N/A"}</Text>
             <View style={styles.productRow}>
               <Text style={styles.price}>₹{item.price}</Text>
               {cartItem ? (<View style={{ flexDirection: "row", alignItems: "center" }}>

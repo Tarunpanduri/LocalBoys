@@ -47,14 +47,28 @@ export default function HomeScreen({ navigation }) {
     const userRef = dbRef(db, `users/${uid}`);
     const unsubUser = onValue(userRef, (snap) => {
       const val = snap.val() || {};
-      setUserData(val); setGreetingName(val.firstName || "User");
-      const addrId = val.mainAddressId; const allAddrs = val.addresses || {};
+      setUserData(val);
+      setGreetingName(val.firstName || "User");
+      const addrId = val.mainAddressId;
+      const allAddrs = val.addresses || {};
       if (addrId && allAddrs[addrId]) {
         setMainAddress(allAddrs[addrId]);
-        setUserLocation({ lat: allAddrs[addrId].lat, lng: allAddrs[addrId].lng, formattedAddress: allAddrs[addrId].formattedAddress, city: allAddrs[addrId].city, state: allAddrs[addrId].state });
+        setUserLocation({
+          lat: allAddrs[addrId].lat,
+          lng: allAddrs[addrId].lng,
+          formattedAddress: allAddrs[addrId].formattedAddress,
+          city: allAddrs[addrId].city,
+          state: allAddrs[addrId].state
+        });
       } else if (val.location) {
         setMainAddress(null);
-        setUserLocation({ lat: val.location.lat, lng: val.location.lng, formattedAddress: val.location.formattedAddress, city: val.location.city, state: val.location.state });
+        setUserLocation({
+          lat: val.location.lat,
+          lng: val.location.lng,
+          formattedAddress: val.location.formattedAddress,
+          city: val.location.city,
+          state: val.location.state
+        });
       }
     });
     return () => unsubUser();
@@ -66,18 +80,20 @@ export default function HomeScreen({ navigation }) {
     const catsRef = dbRef(db, "admin_data/categories");
     const shopsRef = dbRef(db, "shops");
     const notifRef = dbRef(db, `notifications/${uid}`);
-
-    const unsubAdmin = onValue(adminRef, (snap) => { const val = snap.val(); if (val?.shopVisibilityRadiusKm) setRadiusKm(Number(val.shopVisibilityRadiusKm)); });
+    const unsubAdmin = onValue(adminRef, (snap) => {
+      const val = snap.val();
+      if (val?.shopVisibilityRadiusKm) setRadiusKm(Number(val.shopVisibilityRadiusKm));
+    });
     const unsubCats = onValue(catsRef, (snap) => setCategoryMeta(snap.val() || {}));
     const unsubShops = onValue(shopsRef, (snap) => {
-      const val = snap.val() || {}; const arr = Object.keys(val).map((key) => ({ id: key, ...val[key] }));
+      const val = snap.val() || {};
+      const arr = Object.keys(val).map((key) => ({ id: key, ...val[key] }));
       setShops(arr);
       const shopTypes = Array.from(new Set(arr.map((s) => s.type?.trim()))).filter(Boolean).map((t) => ({ id: t.toLowerCase(), label: t }));
       setCategories([{ id: "all", label: "All" }, ...shopTypes]);
       setLoading(false);
     }, (err) => { console.warn("shops read error", err); setLoading(false); });
     const unsubNotifs = onValue(notifRef, (snap) => setNotificationsCount(Object.values(snap.val() || {}).filter((x) => !x.isRead).length));
-
     return () => { unsubAdmin(); unsubCats(); unsubShops(); unsubNotifs(); };
   }, [uid]);
 
@@ -94,7 +110,7 @@ export default function HomeScreen({ navigation }) {
         ...s,
         distanceKm: s.location?.lat && s.location?.lng
           ? haversineDistance(userLocation.lat, userLocation.lng, Number(s.location.lat), Number(s.location.lng))
-          : Infinity,
+          : Infinity
       }))
       .filter((s) => s.distanceKm <= radiusKm)
       .filter((s) => activeCategory === "all" ? true : s.type?.toLowerCase().includes(activeCategory.toLowerCase()))
@@ -109,21 +125,23 @@ export default function HomeScreen({ navigation }) {
   }, [shops, userLocation, radiusKm, activeCategory, searchText, activeTab]);
 
   const filteredCategories = categories.filter((c) => {
-  if (c.id === "all") return true;
-  const shopsInCategory = shops.filter(
-    (s) =>
-      s.type?.toLowerCase() === c.label.toLowerCase() &&
-      ((activeTab === "products" && s.category === "products") ||
-       (activeTab === "services" && s.category === "services"))
-  );
-  return shopsInCategory.length > 0;
-});
-
+    if (c.id === "all") return true;
+    const shopsInCategory = shops.filter(
+      (s) =>
+        s.type?.toLowerCase() === c.label.toLowerCase() &&
+        ((activeTab === "products" && s.category === "products") ||
+         (activeTab === "services" && s.category === "services"))
+    );
+    return shopsInCategory.length > 0;
+  });
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    try { const val = await get(dbRef(db, "shops")).then((snap) => snap.val() || {}); setShops(Object.keys(val).map((key) => ({ id: key, ...val[key] }))); }
-    catch (err) { console.warn("refresh error", err); } finally { setRefreshing(false); }
+    try {
+      const val = await get(dbRef(db, "shops")).then((snap) => snap.val() || {});
+      setShops(Object.keys(val).map((key) => ({ id: key, ...val[key] })));
+    } catch (err) { console.warn("refresh error", err); }
+    finally { setRefreshing(false); }
   }, []);
 
   const activeCategoryColor = categoryMeta[categories.find((c) => c.id === activeCategory)?.label]?.Theme || "#66BB6A";
@@ -168,25 +186,19 @@ export default function HomeScreen({ navigation }) {
 
   if (loading) return <SafeAreaView style={styles.containerCentered}><ActivityIndicator size="large" /></SafeAreaView>;
 
-const renderContent = () => (
-  <>
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>Categories</Text>
-    </View>
-    <View style={{ height: 60 }}>
-      <FlatList data={filteredCategories} horizontal keyExtractor={(i) => i.id || Math.random().toString()} renderItem={renderCategory} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10, paddingHorizontal: 5 }} />
-    </View>
-    <FlatList
-      data={filteredShops} keyExtractor={(item) => item.id || Math.random().toString()} renderItem={({ item }) => <ShopCard shop={item} />} contentContainerStyle={{ paddingBottom: 90 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} ListEmptyComponent={() => ( <View style={styles.emptyState}>
-          <Text style={styles.emptytext}>
-            No {activeTab === "products" ? "products" : "services"} available in your area yet.
-          </Text>
-        </View>
-      )}
-    />
-  </>
-);
-
+  const renderContent = () => (
+    <>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Categories</Text>
+      </View>
+      <View style={{ height: 60 }}>
+        <FlatList data={filteredCategories} horizontal keyExtractor={(i) => i.id || Math.random().toString()} renderItem={renderCategory} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10, paddingHorizontal: 5 }} />
+      </View>
+      <FlatList
+        data={filteredShops} keyExtractor={(item) => item.id || Math.random().toString()} renderItem={({ item }) => <ShopCard shop={item} />} contentContainerStyle={{ paddingBottom: 90 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} ListEmptyComponent={() => (<View style={styles.emptyState}><Text style={styles.emptytext}>No {activeTab === "products" ? "products" : "services"} available in your area yet.</Text></View>)}
+      />
+    </>
+  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
@@ -206,17 +218,14 @@ const renderContent = () => (
             <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate("TrackOrder")}><Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} /></TouchableOpacity>
           </View>
         </View>
-
         <View style={styles.mediumcontent}>
           <View style={styles.searchBox}>
             <Ionicons name="search" size={18} style={{ marginRight: 8 }} />
             <TextInput placeholder="Search products or services" placeholderTextColor="#666" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
           </View>
-
           {eventUrl ? <Image source={{ uri: eventUrl }} style={[styles.banner, { width: width - 36, height: (width - 100) * 0.5, marginTop: 20 }]} resizeMode="stretch" /> : null}
           {renderContent()}
         </View>
-
         <View style={[styles.bottomNav, { backgroundColor: activeCategoryColor }]}>
           <TouchableOpacity style={[styles.navButton, activeTab === "products" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("products")}><Text style={styles.navText}>Products</Text></TouchableOpacity>
           <TouchableOpacity style={[styles.navButton, activeTab === "services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("services")}><Text style={styles.navText}>Services</Text></TouchableOpacity>
@@ -225,7 +234,6 @@ const renderContent = () => (
     </SafeAreaView>
   );
 }
-
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#19212a" },
@@ -258,5 +266,6 @@ const styles = StyleSheet.create({
   navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
   navText: { fontSize: 16, fontFamily: "Sen_Bold", color: "#fff" }
 });
+
 
 // https://i.ibb.co/FPsCSW3/hpy-sankranti.gif

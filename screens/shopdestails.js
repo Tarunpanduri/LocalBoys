@@ -36,20 +36,33 @@ export default function ShopDetails({ route, navigation }) {
     ]);
   };
 
-  const handleProceedCheckout = async () => {
-    if (!cartShopId) return;
+const handleProceedCheckout = async () => {
+  if (!cartShopId) return;
 
-    try {
-      navigation.navigate("Checkout", {
-        shopId: cartShopId,
-        shop,
-        cart: userCart[cartShopId],
-      });
-    } catch (err) {
-      console.error("Failed to navigate to checkout:", err);
-      Toast.show("Something went wrong", { duration: Toast.durations.SHORT });
-    }
-  };
+  const shopCart = userCart[cartShopId] || {};
+  const cartItems = Object.keys(shopCart).filter(k => !["shopname", "shopimage"].includes(k)).map(k => shopCart[k]);
+  
+  if (!cartItems.length) return Toast.show("Cart is empty.", { duration: Toast.durations.SHORT });
+
+  // Determine service type of items
+  const hasRideService = cartItems.some(item => item.serviceType === "ride");
+  const hasDeliveryService = cartItems.some(item => item.serviceType === "delivery");
+
+  // Decide which checkout screen to navigate to
+  if (hasRideService && !hasDeliveryService) {
+    navigation.navigate("CheckoutScreentwo", { shopId: cartShopId, shop, cart: shopCart });
+  } else if (hasDeliveryService && !hasRideService) {
+    navigation.navigate("Checkout", { shopId: cartShopId, shop, cart: shopCart });
+  } else {
+    // Mixed items: either show alert or navigate to combined checkout
+    Alert.alert(
+      "Multiple Service Types",
+      "Your cart contains items with different service types. Please separate them into different orders.",
+      [{ text: "OK" }]
+    );
+  }
+};
+
 
 
   useEffect(() => {
@@ -59,37 +72,62 @@ export default function ShopDetails({ route, navigation }) {
     return () => unsub();
   }, [user]);
 
-  const addToCart = async (product) => {
-    if (!user) return Toast.show("Please login to add items to cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-    if (product.inStock === false) return Toast.show("Product is out of stock.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+const addToCart = async (product) => {
+  if (!user) return Toast.show("Please login to add items to cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+  if (product.inStock === false) return Toast.show("Product is out of stock.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
 
-    const userCartRef = dbRef(db, `carts/${user.uid}`);
-    try {
-      const snapshot = await get(userCartRef);
-      const cart = snapshot.val() || {}, cartShops = Object.keys(cart).filter((k) => k !== "updatedAt"), currentShopId = shopId;
-      if (cartShops.length && cartShops[0] !== currentShopId) {
-        Alert.alert("Cart contains items from another shop", "Do you want to clear the old cart and start a new one?", [
-          { text: "No", style: "cancel" },
-          {
-            text: "Yes", onPress: async () => {
-              await set(userCartRef, { [currentShopId]: { shopname: shop.name, shopimage: shop.image, [product.id]: { productname: product.name, price: product.price, qty: 1 } }, updatedAt: Date.now() });
-              Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-            }
-          },
-        ]);
-        return;
-      }
+  const userCartRef = dbRef(db, `carts/${user.uid}`);
+  try {
+    const snapshot = await get(userCartRef);
+    const cart = snapshot.val() || {}, cartShops = Object.keys(cart).filter((k) => k !== "updatedAt"), currentShopId = shopId;
 
-      const shopCart = cart[currentShopId] || { shopname: shop.name, shopimage: shop.image };
-      const existingProduct = shopCart[product.id], newQty = existingProduct ? existingProduct.qty + 1 : 1;
-      const updateObj = { [currentShopId]: { ...shopCart, [product.id]: { productname: product.name, price: product.price, qty: newQty } }, updatedAt: Date.now() };
-      await set(userCartRef, updateObj);
-      Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-    } catch (err) {
-      console.error(err);
-      Toast.show("Failed to add product to cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+    if (cartShops.length && cartShops[0] !== currentShopId) {
+      Alert.alert("Cart contains items from another shop", "Do you want to clear the old cart and start a new one?", [
+        { text: "No", style: "cancel" },
+        {
+          text: "Yes", onPress: async () => {
+            await set(userCartRef, {
+              [currentShopId]: {
+                shopname: shop.name,
+                shopimage: shop.image,
+                [product.id]: { 
+                  productname: product.name, 
+                  price: product.price, 
+                  qty: 1,
+                  serviceType: product.serviceType || null // <-- add serviceType here
+                }
+              },
+              updatedAt: Date.now()
+            });
+            Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+          }
+        },
+      ]);
+      return;
     }
-  };
+
+    const shopCart = cart[currentShopId] || { shopname: shop.name, shopimage: shop.image };
+    const existingProduct = shopCart[product.id], newQty = existingProduct ? existingProduct.qty + 1 : 1;
+    const updateObj = {
+      [currentShopId]: {
+        ...shopCart,
+        [product.id]: { 
+          ...existingProduct, 
+          productname: product.name, 
+          price: product.price, 
+          qty: newQty, 
+          serviceType: product.serviceType || null // <-- add serviceType here
+        }
+      },
+      updatedAt: Date.now()
+    };
+    await set(userCartRef, updateObj);
+    Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+  } catch (err) {
+    console.error(err);
+    Toast.show("Failed to add product to cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
+  }
+};
 
   const removeFromCart = async (productId) => {
     if (!user) return;

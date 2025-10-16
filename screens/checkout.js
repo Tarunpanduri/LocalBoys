@@ -73,7 +73,8 @@ export default function CheckoutScreen() {
           setSubtotal(calculatedSubtotal);
           const uLat = Number(fetchedUser.location?.lat), uLng = Number(fetchedUser.location?.lng), sLat = Number(finalShop.location?.lat), sLng = Number(finalShop.location?.lng);
           if (!isNaN(uLat) && !isNaN(uLng) && !isNaN(sLat) && !isNaN(sLng)) {
-            const distanceKm = getDistanceInKm(sLat, sLng, uLat, uLng), baseFee = 20, freeThreshold = 1000000;
+            const distanceKm = getDistanceInKm(sLat, sLng, uLat, uLng) * 1.3; 
+            const baseFee = 20, freeThreshold = 1000000;
             let fee = baseFee + distanceKm * deliveryCharge;
             if (calculatedSubtotal >= freeThreshold) fee = 0;
             setDeliveryFee(Math.ceil(fee));

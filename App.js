@@ -25,6 +25,8 @@ import OrderConfirmation from "./screens/OrderConfirmation";
 import TrackOrder from './screens/trackorder';
 import AddressesScreen from './screens/AddressesScreen';
 import Profile from './screens/profile';
+import CheckoutScreentwo from './screens/checkouttwo';
+import EditProfile from './screens/editprofile';
 
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebase';
@@ -139,6 +141,8 @@ export default function App() {
             <Stack.Screen name="TrackOrder" component={TrackOrder} />
             <Stack.Screen name="Addresses" component={AddressesScreen} />
             <Stack.Screen name="Profile" component={Profile} />
+            <Stack.Screen name="CheckoutScreentwo" component={CheckoutScreentwo} />
+            <Stack.Screen name="EditProfile" component={EditProfile} />
             <Stack.Screen
               name="OrderConfirmation"
               component={OrderConfirmation}

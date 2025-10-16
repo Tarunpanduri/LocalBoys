@@ -95,8 +95,8 @@ export default function OrderConfirmation({ route, navigation }) {
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>What Happens Next?</Text>
                         <View style={styles.timeline}>
-                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Restaurant confirmation</Text></View>
-                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Food preparation</Text></View>
+                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Admin Confirmation</Text></View>
+                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Order preparation</Text></View>
                             <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Driver assignment</Text></View>
                             <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Delivery to your location</Text></View>
                         </View>

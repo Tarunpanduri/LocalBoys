@@ -39,6 +39,7 @@ export default function CheckoutTwoScreen() {
   const [total, setTotal] = useState(0);
   const [deliveryChargePerKm, setDeliveryChargePerKm] = useState(5);
   const [subtotal, setSubtotal] = useState(0);
+  const [restaurantTotal, setRestaurantTotal] = useState(0);
   const [pickupAddress, setPickupAddress] = useState(null);
   const [dropAddress, setDropAddress] = useState(null);
   const [showAddressModal, setShowAddressModal] = useState(false);
@@ -69,7 +70,7 @@ export default function CheckoutTwoScreen() {
 
         if (userSnap.exists()) {
           const u = userSnap.val();
-          fetchedUser = { uid: user.uid, firstName: u.firstName, lastName: u.lastName, name: u.name, phone: u.phone, email: u.email };
+          fetchedUser = { uid: user.uid, firstName: u.firstName, lastName: u.lastName, name: u.name, phone: u.phone, mobile:u.mobile, email: u.email };
           if (u.addresses) { Object.keys(u.addresses).forEach(addressId => { const address = u.addresses[addressId]; addresses.push({ id: addressId, ...address }); }); setUserAddresses(addresses); }
           if (u.mainAddressId && u.addresses && u.addresses[u.mainAddressId]) { const main = u.addresses[u.mainAddressId]; const pickupAddr = { id: u.mainAddressId, ...main }; setPickupAddress(pickupAddr); fetchedUser.location = main; } else if (u.location) { fetchedUser.location = u.location; }
         }
@@ -91,7 +92,18 @@ export default function CheckoutTwoScreen() {
     } else { setDeliveryFee(0); }
   }, [pickupAddress, dropAddress, deliveryChargePerKm]);
 
-  useEffect(() => { if (!cart) return; const calculatedSubtotal = Object.keys(cart).filter((k) => k.startsWith("productId")).reduce((s, pid) => s + cart[pid].price * cart[pid].qty, 0); setSubtotal(calculatedSubtotal); setTotal(calculatedSubtotal - discount + deliveryFee + platformFee); }, [cart, discount, deliveryFee]);
+  useEffect(() => { 
+    if (!cart) return; 
+    const calculatedSubtotal = Object.keys(cart).filter((k) => k.startsWith("productId")).reduce((s, pid) => s + cart[pid].price * cart[pid].qty, 0); 
+    setSubtotal(calculatedSubtotal); 
+    setTotal(calculatedSubtotal - discount + deliveryFee + platformFee); 
+    
+    // Calculate restaurant total (subtotal - platform commission + delivery fee share)
+    const platformCommission = calculatedSubtotal * 0.15; // 15% platform commission
+    const deliveryFeeShare = deliveryFee * 0.5; // 50% of delivery fee goes to restaurant
+    const restaurantPayout = calculatedSubtotal - platformCommission + deliveryFeeShare;
+    setRestaurantTotal(Math.ceil(restaurantPayout));
+  }, [cart, discount, deliveryFee]);
 
   const applyCoupon = async () => { if (!couponCode) { Toast.show("Enter a coupon code", { duration: Toast.durations.SHORT }); return; } const couponSnap = await get(ref(db, `admin_data/general/coupons/${shopId}/${couponCode}`)); if (couponSnap.exists()) { setDiscount(couponSnap.val()); Toast.show(`Discount applied: ₹${couponSnap.val()}`, { duration: Toast.durations.SHORT }); } else { Toast.show("Invalid coupon code", { duration: Toast.durations.SHORT }); } };
 
@@ -107,7 +119,55 @@ export default function CheckoutTwoScreen() {
       setPlacingOrder(true);
       const cleanItems = {};
       Object.keys(cart).filter((k) => k.startsWith("productId")).forEach((pid) => { if (cart[pid].price && cart[pid].qty) cleanItems[pid] = { price: cart[pid].price, qty: cart[pid].qty, productname: cart[pid].productname || "Product" }; });
-      const orderData = { shopId, shopname: shop?.name || "Unknown Shop", shopimage: shop?.image || "", items: cleanItems, subtotal: Math.ceil(subtotal), discount: Math.ceil(discount), deliveryFee: Math.ceil(deliveryFee), platformFee, total: Math.ceil(total), paymentMode, transactionId: paymentMode === "Online" ? transactionId.trim() : null, pickupAddress: { ...pickupAddress, customerName: userData?.name || "Customer", customerPhone: userData?.phone || "" }, dropAddress: { ...dropAddress }, customerName: userData?.name || "Customer", customerPhone: userData?.phone || "", customerEmail: user?.email || "", status: "pending", createdAt: Date.now(), orderType: "parcel", calculationMetadata: { deliveryChargePerKm, baseDeliveryFee: 20, platformFee: 10, pickupLocation: pickupAddress ? { area: pickupAddress.area, city: pickupAddress.city, state: pickupAddress.state, pincode: pickupAddress.pincode, formattedAddress: pickupAddress.formattedAddress, lat: pickupAddress.lat, lng: pickupAddress.lng } : null, dropLocation: dropAddress ? { area: dropAddress.area, city: dropAddress.city, state: dropAddress.state, pincode: dropAddress.pincode, formattedAddress: dropAddress.formattedAddress, lat: dropAddress.lat, lng: dropAddress.lng } : null, calculatedAt: Date.now() } };
+      
+      // Calculate restaurant payout breakdown
+      const platformCommission = Math.ceil(subtotal * 0.15); // 15% platform commission
+      const deliveryFeeShare = Math.ceil(deliveryFee * 0.5); // 50% of delivery fee goes to restaurant
+      
+      const orderData = { 
+        shopId, 
+        shopname: shop?.name || "Unknown Shop", 
+        shopimage: shop?.image || "", 
+        items: cleanItems, 
+        subtotal: Math.ceil(subtotal), 
+        discount: Math.ceil(discount), 
+        deliveryFee: Math.ceil(deliveryFee), 
+        platformFee, 
+        total: Math.ceil(total), 
+        paymentMode, 
+        transactionId: paymentMode === "Online" ? transactionId.trim() : null, 
+        pickupAddress: { ...pickupAddress, customerName: userData?.name || "Customer", customerPhone: userData?.mobile || "" }, 
+        dropAddress: { ...dropAddress }, 
+        customerName: userData?.name || "Customer", 
+        customerPhone: userData?.phone || "", 
+        customerEmail: user?.email || "", 
+        status: "pending", 
+        createdAt: Date.now(), 
+        orderType: "parcel", 
+        
+        // Restaurant payout data (not displayed in frontend, only sent to cloud)
+        restaurantPayout: {
+          restaurantTotal: restaurantTotal,
+          platformCommission: platformCommission,
+          deliveryFeeShare: deliveryFeeShare,
+          netPayout: restaurantTotal,
+          calculationBreakdown: {
+            subtotal: Math.ceil(subtotal),
+            platformCommissionRate: 0.15,
+            deliveryFeeShareRate: 0.5,
+            finalRestaurantAmount: restaurantTotal
+          }
+        },
+        
+        calculationMetadata: { 
+          deliveryChargePerKm, 
+          baseDeliveryFee: 20, 
+          platformFee: 10, 
+          pickupLocation: pickupAddress ? { area: pickupAddress.area, city: pickupAddress.city, state: pickupAddress.state, pincode: pickupAddress.pincode, formattedAddress: pickupAddress.formattedAddress, lat: pickupAddress.lat, lng: pickupAddress.lng } : null, 
+          dropLocation: dropAddress ? { area: dropAddress.area, city: dropAddress.city, state: dropAddress.state, pincode: dropAddress.pincode, formattedAddress: dropAddress.formattedAddress, lat: dropAddress.lat, lng: dropAddress.lng } : null, 
+          calculatedAt: Date.now() 
+        } 
+      };
       const newOrderRef = push(ref(db, `orders/${user.uid}`));
       await set(newOrderRef, orderData);
       await remove(ref(db, `carts/${user.uid}/${shopId}`));

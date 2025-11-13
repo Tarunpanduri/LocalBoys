@@ -8,6 +8,7 @@ import { ref, onValue } from "firebase/database";
 const STATUS_STEPS = [
   { key: "pending", label: "Your order has been received" },
   { key: "accepted", label: "The restaurant is preparing your food" },
+  { key: "ready", label: "Your order is ready for pickup" },
   { key: "picked_up", label: "Your order has been picked up for delivery" },
   { key: "delivered", label: "Order arriving soon!" },
 ];
@@ -52,7 +53,7 @@ const TrackOrder = ({ navigation }) => {
       <View style={styles.cardInfo}>
         <Text style={styles.cardShop} numberOfLines={1}>{order.shopname}</Text>
         <Text style={styles.cardId}>#{order.id.slice(-6)}</Text>
-        <Text style={[styles.cardStatus, order.status === "pending" && { color: "#FF9800" }, order.status === "accepted" && { color: "#2196F3" }, order.status === "picked_up" && { color: "#9C27B0" }, order.status === "delivered" && { color: "#4CAF50" }]}>{order.status.replace("_", " ").toUpperCase()}</Text>
+        <Text style={[styles.cardStatus, order.status === "pending" && { color: "#FF9800" }, order.status === "accepted" && { color: "#2196F3" },order.status === "ready" && { color: "#f68afaff" }, order.status === "picked_up" && { color: "#9C27B0" }, order.status === "REJECTED" && { color: "#ff0000ff" }, order.status === "delivered" && { color: "#4CAF50" }]}>{order.status.replace("_", " ").toUpperCase()}</Text>
         <Text style={styles.cardTotal}>₹{order.total}</Text>
       </View>
     </TouchableOpacity>

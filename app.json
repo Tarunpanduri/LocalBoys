@@ -20,12 +20,16 @@
         "UIBackgroundModes": [
           "location",
           "fetch",
+          "remote-notification",
+          "location",
+          "fetch",
           "remote-notification"
         ]
       },
       "config": {
         "googleMapsApiKey": "AIzaSyA_pgpDfyn6jEmXkOKww8OvueM7puMKD_g"
-      }
+      },
+      "bundleIdentifier": "com.tarunpanduri1388.LocalBoys"
     },
     "android": {
       "googleServicesFile": "./google-services.json",

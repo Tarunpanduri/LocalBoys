@@ -44,17 +44,14 @@ const handleProceedCheckout = async () => {
   
   if (!cartItems.length) return Toast.show("Cart is empty.", { duration: Toast.durations.SHORT });
 
-  // Determine service type of items
   const hasRideService = cartItems.some(item => item.serviceType === "ride");
   const hasDeliveryService = cartItems.some(item => item.serviceType === "delivery");
 
-  // Decide which checkout screen to navigate to
   if (hasRideService && !hasDeliveryService) {
     navigation.navigate("CheckoutScreentwo", { shopId: cartShopId, shop, cart: shopCart });
   } else if (hasDeliveryService && !hasRideService) {
     navigation.navigate("Checkout", { shopId: cartShopId, shop, cart: shopCart });
   } else {
-    // Mixed items: either show alert or navigate to combined checkout
     Alert.alert(
       "Multiple Service Types",
       "Your cart contains items with different service types. Please separate them into different orders.",
@@ -235,7 +232,7 @@ const addToCart = async (product) => {
                 <Ionicons name="add" size={18} color="#fff" />
               </TouchableOpacity>)}
             </View>
-            {item.inStock === false && <Text style={{ color: "red", fontSize: 12, marginTop: 4 }}>Out of Stock</Text>}
+            {item.inStock === false && <Text style={{ color: "red", fontSize: 12, marginTop: 4,fontFamily:'Sen_Medium' }}>Out of Stock</Text>}
           </View>
         </View>);
       }}

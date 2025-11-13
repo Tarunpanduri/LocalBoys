@@ -33,6 +33,7 @@ export default function CheckoutScreen() {
   const [deliveryFee, setDeliveryFee] = useState(0), [couponCode, setCouponCode] = useState(""), [discount, setDiscount] = useState(0);
   const [paymentMode, setPaymentMode] = useState("COD"), [transactionId, setTransactionId] = useState("");
   const [platformFee] = useState(10), [total, setTotal] = useState(0), [deliveryChargePerKm, setDeliveryChargePerKm] = useState(5), [subtotal, setSubtotal] = useState(0);
+  const [restaurantTotal, setRestaurantTotal] = useState(0);
   const user = auth.currentUser;
 
   useEffect(() => {
@@ -60,7 +61,7 @@ export default function CheckoutScreen() {
 
         if (userSnap.exists()) {
           const u = userSnap.val();
-          fetchedUser = { uid: user.uid, firstName: u.firstName, lastName: u.lastName, name: u.name, phone: u.phone, email: u.email };
+          fetchedUser = { uid: user.uid, firstName: u.firstName, lastName: u.lastName, name: u.name, phone: u.phone,mobile: u.mobile, email: u.email };
           if (u.mainAddressId && u.addresses && u.addresses[u.mainAddressId]) {
             const main = u.addresses[u.mainAddressId];
             fetchedUser.location = { area: main.area, city: main.city, state: main.state, pincode: main.pincode, formattedAddress: main.formattedAddress, lat: main.lat, lng: main.lng, updatedAt: main.updatedAt };
@@ -93,7 +94,14 @@ export default function CheckoutScreen() {
     const calculatedSubtotal = Object.keys(cart).filter((k) => k.startsWith("productId")).reduce((s, pid) => s + cart[pid].price * cart[pid].qty, 0);
     setSubtotal(calculatedSubtotal);
     setTotal(calculatedSubtotal - discount + deliveryFee + platformFee);
+    
+    // Calculate restaurant total (subtotal - platform commission + delivery fee share)
+    const platformCommission = calculatedSubtotal * 0.10; // 10% platform commission
+    const deliveryFeeShare = deliveryFee * 0.5; // 50% of delivery fee goes to restaurant
+    const restaurantPayout = calculatedSubtotal - platformCommission + deliveryFeeShare;
+    setRestaurantTotal(Math.ceil(restaurantPayout));
   }, [cart, discount, deliveryFee]);
+console.log("userData:", userData);
 
   const applyCoupon = async () => {
     if (!couponCode) return Toast.show("Enter a coupon code", { duration: Toast.durations.SHORT });
@@ -110,12 +118,32 @@ export default function CheckoutScreen() {
       setPlacingOrder(true);
       const cleanItems = {};
       Object.keys(cart).filter((k) => k.startsWith("productId")).forEach((pid) => { if (cart[pid].price && cart[pid].qty) cleanItems[pid] = { price: cart[pid].price, qty: cart[pid].qty, productname: cart[pid].productname || "Product" }; });
+      
+      // Calculate restaurant payout breakdown
+      const platformCommission = Math.ceil(subtotal * 0.15); // 15% platform commission
+      const deliveryFeeShare = Math.ceil(deliveryFee * 0.5); // 50% of delivery fee goes to restaurant
+      
       const orderData = {
         shopId, shopname: shop?.name || "Unknown Shop", shopimage: shop?.image || "", items: cleanItems,
         subtotal: Math.ceil(subtotal), discount: Math.ceil(discount), deliveryFee: Math.ceil(deliveryFee), platformFee, total: Math.ceil(total),
         paymentMode, transactionId: paymentMode === "Online" ? transactionId.trim() : null,
-        address: userData?.location?.formattedAddress || "No address", customerName: userData?.name || "Customer", customerPhone: userData?.phone || "", customerEmail: user?.email || "",
+        address: userData?.location?.formattedAddress || "No address", customerName: userData?.firstName || "Customer", customerPhone: userData?.mobile || "", customerEmail: user?.email || "",
         status: "pending", createdAt: Date.now(),
+        
+        // Restaurant payout data (not displayed in frontend, only sent to cloud)
+        restaurantPayout: {
+          restaurantTotal: restaurantTotal,
+          platformCommission: platformCommission,
+          deliveryFeeShare: deliveryFeeShare,
+          netPayout: restaurantTotal,
+          calculationBreakdown: {
+            subtotal: Math.ceil(subtotal),
+            platformCommissionRate: 0.15,
+            deliveryFeeShareRate: 0.5,
+            finalRestaurantAmount: restaurantTotal
+          }
+        },
+        
         calculationMetadata: {
           deliveryChargePerKm, freeDeliveryThreshold: 1000000, baseDeliveryFee: 20, platformFee: 10,
           userLocation: userData?.location ? { area: userData.location.area, city: userData.location.city, state: userData.location.state, pincode: userData.location.pincode, formattedAddress: userData.location.formattedAddress, lat: userData.location.lat, lng: userData.location.lng, updatedAt: userData.location.updatedAt } : null,

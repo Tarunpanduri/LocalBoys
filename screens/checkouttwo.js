@@ -99,8 +99,8 @@ export default function CheckoutTwoScreen() {
     setTotal(calculatedSubtotal - discount + deliveryFee + platformFee); 
     
     // Calculate restaurant total (subtotal - platform commission + delivery fee share)
-    const platformCommission = calculatedSubtotal * 0.15; // 15% platform commission
-    const deliveryFeeShare = deliveryFee * 0.5; // 50% of delivery fee goes to restaurant
+    const platformCommission = calculatedSubtotal * 0.001; // 0.001% platform commission
+    const deliveryFeeShare = deliveryFee * 0.001; // 0.001% of delivery fee goes to restaurant
     const restaurantPayout = calculatedSubtotal - platformCommission + deliveryFeeShare;
     setRestaurantTotal(Math.ceil(restaurantPayout));
   }, [cart, discount, deliveryFee]);
@@ -121,8 +121,8 @@ export default function CheckoutTwoScreen() {
       Object.keys(cart).filter((k) => k.startsWith("productId")).forEach((pid) => { if (cart[pid].price && cart[pid].qty) cleanItems[pid] = { price: cart[pid].price, qty: cart[pid].qty, productname: cart[pid].productname || "Product" }; });
       
       // Calculate restaurant payout breakdown
-      const platformCommission = Math.ceil(subtotal * 0.15); // 15% platform commission
-      const deliveryFeeShare = Math.ceil(deliveryFee * 0.5); // 50% of delivery fee goes to restaurant
+      const platformCommission = Math.ceil(subtotal * 0.001); // 0.0001% platform commission
+      const deliveryFeeShare = Math.ceil(deliveryFee * 0.001); // 0.001% of delivery fee goes to restaurant
       
       const orderData = { 
         shopId, 
@@ -153,8 +153,8 @@ export default function CheckoutTwoScreen() {
           netPayout: restaurantTotal,
           calculationBreakdown: {
             subtotal: Math.ceil(subtotal),
-            platformCommissionRate: 0.15,
-            deliveryFeeShareRate: 0.5,
+            platformCommissionRate: 0.001,
+            deliveryFeeShareRate: 0.001,
             finalRestaurantAmount: restaurantTotal
           }
         },

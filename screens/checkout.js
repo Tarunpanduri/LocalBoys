@@ -32,9 +32,12 @@ export default function CheckoutScreen() {
   const [userData, setUserData] = useState(null), [loading, setLoading] = useState(true), [placingOrder, setPlacingOrder] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState(0), [couponCode, setCouponCode] = useState(""), [discount, setDiscount] = useState(0);
   const [paymentMode, setPaymentMode] = useState("COD"), [transactionId, setTransactionId] = useState("");
-  const [platformFee] = useState(10), [total, setTotal] = useState(0), [deliveryChargePerKm, setDeliveryChargePerKm] = useState(5), [subtotal, setSubtotal] = useState(0);
+  const [platformFee, setPlatformFee] = useState(10), [total, setTotal] = useState(0), [deliveryChargePerKm, setDeliveryChargePerKm] = useState(5), [subtotal, setSubtotal] = useState(0);
   const [restaurantTotal, setRestaurantTotal] = useState(0);
   const user = auth.currentUser;
+
+  // Check if order is premium (above 10k)
+  const isPremiumOrder = subtotal > 10000;
 
   useEffect(() => {
     const loadData = async () => {
@@ -72,12 +75,23 @@ export default function CheckoutScreen() {
         if (fetchedUser && finalCart && finalShop?.location) {
           const calculatedSubtotal = Object.keys(finalCart).filter((k) => k.startsWith("productId")).reduce((s, pid) => s + finalCart[pid].price * finalCart[pid].qty, 0);
           setSubtotal(calculatedSubtotal);
+          
+          // Calculate platform fee based on order value
+          const calculatedPlatformFee = calculatedSubtotal > 10000 ? Math.ceil(calculatedSubtotal * 0.00001) : 10;
+          setPlatformFee(calculatedPlatformFee);
+
           const uLat = Number(fetchedUser.location?.lat), uLng = Number(fetchedUser.location?.lng), sLat = Number(finalShop.location?.lat), sLng = Number(finalShop.location?.lng);
           if (!isNaN(uLat) && !isNaN(uLng) && !isNaN(sLat) && !isNaN(sLng)) {
             const distanceKm = getDistanceInKm(sLat, sLng, uLat, uLng) * 1.3; 
             const baseFee = 20, freeThreshold = 1000000;
             let fee = baseFee + distanceKm * deliveryCharge;
-            if (calculatedSubtotal >= freeThreshold) fee = 0;
+            
+            // For premium orders, restaurant bears delivery cost
+            if (calculatedSubtotal > 10000) {
+              fee = 0; // Free delivery for customer
+            } else if (calculatedSubtotal >= freeThreshold) {
+              fee = 0;
+            }
             setDeliveryFee(Math.ceil(fee));
           } else setDeliveryFee(0);
         }
@@ -93,15 +107,31 @@ export default function CheckoutScreen() {
     if (!cart) return;
     const calculatedSubtotal = Object.keys(cart).filter((k) => k.startsWith("productId")).reduce((s, pid) => s + cart[pid].price * cart[pid].qty, 0);
     setSubtotal(calculatedSubtotal);
-    setTotal(calculatedSubtotal - discount + deliveryFee + platformFee);
     
-    // Calculate restaurant total (subtotal - platform commission + delivery fee share)
-    const platformCommission = calculatedSubtotal * 0.10; // 10% platform commission
-    const deliveryFeeShare = deliveryFee * 0.5; // 50% of delivery fee goes to restaurant
+    // Recalculate platform fee whenever subtotal changes
+    const calculatedPlatformFee = calculatedSubtotal > 10000 ? Math.ceil(calculatedSubtotal * 0.00001) : 10;
+    setPlatformFee(calculatedPlatformFee);
+    
+    setTotal(calculatedSubtotal - discount + deliveryFee + calculatedPlatformFee);
+    
+    // Calculate restaurant total with premium order logic
+    let platformCommission, deliveryFeeShare;
+    
+    if (calculatedSubtotal > 10000) {
+      // Premium order: 0.001% platform commission, restaurant bears delivery cost
+      platformCommission = Math.ceil(calculatedSubtotal * 0.00001);
+      deliveryFeeShare = -deliveryFee; // Restaurant pays for delivery
+    } else {
+      // Regular order: 15% platform commission, 50% delivery fee share
+      platformCommission = Math.ceil(calculatedSubtotal * 0.15);
+      deliveryFeeShare = Math.ceil(deliveryFee * 0.5);
+    }
+    
     const restaurantPayout = calculatedSubtotal - platformCommission + deliveryFeeShare;
     setRestaurantTotal(Math.ceil(restaurantPayout));
-  }, [cart, discount, deliveryFee]);
-console.log("userData:", userData);
+  }, [cart, discount, deliveryFee, subtotal]);
+
+  console.log("userData:", userData);
 
   const applyCoupon = async () => {
     if (!couponCode) return Toast.show("Enter a coupon code", { duration: Toast.durations.SHORT });
@@ -119,10 +149,23 @@ console.log("userData:", userData);
       const cleanItems = {};
       Object.keys(cart).filter((k) => k.startsWith("productId")).forEach((pid) => { if (cart[pid].price && cart[pid].qty) cleanItems[pid] = { price: cart[pid].price, qty: cart[pid].qty, productname: cart[pid].productname || "Product" }; });
       
-      // Calculate restaurant payout breakdown
-      const platformCommission = Math.ceil(subtotal * 0.15); // 15% platform commission
-      const deliveryFeeShare = Math.ceil(deliveryFee * 0.5); // 50% of delivery fee goes to restaurant
+      // Calculate restaurant payout breakdown based on order value
+      let platformCommission, deliveryFeeShare, platformCommissionRate, deliveryFeeShareRate;
       
+      if (subtotal > 10000) {
+        // Premium order pricing
+        platformCommission = Math.ceil(subtotal * 0.00001); // 0.001%
+        deliveryFeeShare = -deliveryFee; // Restaurant bears delivery cost
+        platformCommissionRate = 0.00001;
+        deliveryFeeShareRate = -1; // Indicates restaurant pays full delivery
+      } else {
+        // Regular order pricing
+        platformCommission = Math.ceil(subtotal * 0.15); // 15%
+        deliveryFeeShare = Math.ceil(deliveryFee * 0.5); // 50% of delivery fee
+        platformCommissionRate = 0.15;
+        deliveryFeeShareRate = 0.5;
+      }
+
       const orderData = {
         shopId, shopname: shop?.name || "Unknown Shop", shopimage: shop?.image || "", items: cleanItems,
         subtotal: Math.ceil(subtotal), discount: Math.ceil(discount), deliveryFee: Math.ceil(deliveryFee), platformFee, total: Math.ceil(total),
@@ -138,16 +181,22 @@ console.log("userData:", userData);
           netPayout: restaurantTotal,
           calculationBreakdown: {
             subtotal: Math.ceil(subtotal),
-            platformCommissionRate: 0.15,
-            deliveryFeeShareRate: 0.5,
-            finalRestaurantAmount: restaurantTotal
+            platformCommissionRate: platformCommissionRate,
+            deliveryFeeShareRate: deliveryFeeShareRate,
+            finalRestaurantAmount: restaurantTotal,
+            isPremiumOrder: subtotal > 10000
           }
         },
         
         calculationMetadata: {
-          deliveryChargePerKm, freeDeliveryThreshold: 1000000, baseDeliveryFee: 20, platformFee: 10,
+          deliveryChargePerKm, 
+          freeDeliveryThreshold: 1000000, 
+          baseDeliveryFee: 20, 
+          platformFee: platformFee,
+          isPremiumOrder: subtotal > 10000,
           userLocation: userData?.location ? { area: userData.location.area, city: userData.location.city, state: userData.location.state, pincode: userData.location.pincode, formattedAddress: userData.location.formattedAddress, lat: userData.location.lat, lng: userData.location.lng, updatedAt: userData.location.updatedAt } : null,
-          shopLocation: shop?.location ? { lat: shop.location.lat, lng: shop.location.lng } : null, calculatedAt: Date.now(),
+          shopLocation: shop?.location ? { lat: shop.location.lat, lng: shop.location.lng } : null, 
+          calculatedAt: Date.now(),
         },
       };
       const newOrderRef = push(ref(db, `orders/${user.uid}`));
@@ -176,6 +225,13 @@ console.log("userData:", userData);
 
         <View style={styles.bottomSheet}>
           <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }}>
+            {/* Premium Order Badge */}
+            {isPremiumOrder && (
+              <View style={styles.premiumBadge}>
+                <Text style={styles.premiumBadgeText}>🎉 PREMIUM ORDER - Free Delivery & Low Platform Fee</Text>
+              </View>
+            )}
+
             <View style={styles.section}>
               <View style={styles.headerRow}><Text style={styles.sectionTitle}>YOUR ITEMS</Text><TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.editText}>EDIT ITEMS</Text></TouchableOpacity></View>
               {products.map((i, idx) => <View key={idx} style={styles.itemCard}><View style={styles.itemInfo}><Text style={styles.itemName}>{i.productname}</Text><Text style={styles.itemQty}>Qty: {i.qty}</Text></View><Text style={styles.itemPrice}>₹{i.price * i.qty}</Text></View>)}
@@ -189,8 +245,20 @@ console.log("userData:", userData);
             <View style={styles.summaryCard}>
               <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal</Text><Text style={styles.summaryValue}>₹{Math.ceil(subtotal)}</Text></View>
               <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Discount</Text><Text style={[styles.summaryValue, styles.discountText]}>-₹{Math.ceil(discount)}</Text></View>
-              <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Platform Fee</Text><Text style={styles.summaryValue}>₹{platformFee}</Text></View>
-              <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Delivery Fee</Text><Text style={styles.summaryValue}>₹{Math.ceil(deliveryFee)}</Text></View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Platform Fee</Text>
+                <View style={styles.feeContainer}>
+                  {isPremiumOrder && <Text style={styles.premiumFeeNote}>(0.001%)</Text>}
+                  <Text style={styles.summaryValue}>₹{platformFee}</Text>
+                </View>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Delivery Fee</Text>
+                <View style={styles.feeContainer}>
+                  {isPremiumOrder && <Text style={styles.freeDeliveryNote}>FREE</Text>}
+                  <Text style={styles.summaryValue}>{isPremiumOrder ? "₹0" : `₹${Math.ceil(deliveryFee)}`}</Text>
+                </View>
+              </View>
               <View style={styles.divider} />
               <View style={styles.summaryRow}><Text style={styles.totalText}>TOTAL</Text><Text style={styles.totalValue}>₹{Math.ceil(total)}</Text></View>
             </View>
@@ -206,7 +274,11 @@ console.log("userData:", userData);
           </ScrollView>
 
           <View style={styles.bottomBar}>
-            <View><Text style={styles.totalLabel}>TOTAL</Text><Text style={styles.totalAmount}>₹{Math.ceil(total)}</Text></View>
+            <View>
+              <Text style={styles.totalLabel}>TOTAL</Text>
+              <Text style={styles.totalAmount}>₹{Math.ceil(total)}</Text>
+              {isPremiumOrder && <Text style={styles.premiumSavings}>You save ₹{Math.ceil(deliveryFee + (10 - platformFee))} on this order!</Text>}
+            </View>
             <TouchableOpacity style={[styles.orderBtn, placingOrder && styles.orderBtnDisabled]} onPress={handlePlaceOrder} disabled={placingOrder}>{placingOrder ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.orderText}>PLACE ORDER</Text>}</TouchableOpacity>
           </View>
         </View>
@@ -230,6 +302,8 @@ const styles = StyleSheet.create({
   addressText: { color: "#fff", fontSize: 14, fontFamily: "Sen_Regular" },
   addressSub: { color: "#888", fontSize: 13, marginTop: 4, fontFamily: "Sen_Regular" },
   bottomSheet: { position: "absolute", bottom: Platform.OS === "ios" ? -40 : -20, width: "100%", backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, shadowColor: "#000", shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 10, paddingBottom: Platform.OS === "ios" ? 34 : 26, overflow: "hidden" },
+  premiumBadge: { backgroundColor: "#28a745", padding: 10, alignItems: "center", marginHorizontal: 16, marginTop: 10, borderRadius: 8 },
+  premiumBadgeText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 12 },
   itemCard: { backgroundColor: "#f5f5f5", padding: 14, borderRadius: 12, marginBottom: 10, flexDirection: "row", justifyContent: "space-between" },
   itemInfo: { flex: 1 },
   itemName: { color: "#0e0e12", fontSize: 15, fontFamily: "Sen_Medium" },
@@ -244,6 +318,9 @@ const styles = StyleSheet.create({
   summaryLabel: { color: "#555", fontSize: 14, fontFamily: "Sen_Regular" },
   summaryValue: { color: "#0e0e12", fontSize: 14, fontFamily: "Sen_Regular" },
   discountText: { color: "#28a745" },
+  feeContainer: { flexDirection: "row", alignItems: "center" },
+  premiumFeeNote: { fontSize: 10, color: "#28a745", marginRight: 5, fontFamily: "Sen_Regular" },
+  freeDeliveryNote: { fontSize: 10, color: "#28a745", marginRight: 5, fontFamily: "Sen_Bold" },
   divider: { borderBottomWidth: 1, borderBottomColor: "#ddd", marginVertical: 8 },
   totalText: { color: "#0e0e12", fontFamily: "Sen_Bold", fontSize: 15 },
   totalValue: { color: "#0e0e12", fontFamily: "Sen_Bold", fontSize: 15 },
@@ -259,6 +336,7 @@ const styles = StyleSheet.create({
   bottomBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: 16, borderTopWidth: 1, borderTopColor: "#ddd", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   totalLabel: { color: "#555", fontSize: 12, fontFamily: "Sen_Regular" },
   totalAmount: { color: "#0e0e12", fontSize: 18, fontFamily: "Sen_Bold" },
+  premiumSavings: { color: "#28a745", fontSize: 10, fontFamily: "Sen_Regular", marginTop: 2 },
   orderBtn: { backgroundColor: "#ff7a00", borderRadius: 10, paddingVertical: 12, paddingHorizontal: 26 },
   orderBtnDisabled: { backgroundColor: "#ccc" },
   orderText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 14 },

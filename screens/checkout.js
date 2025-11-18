@@ -6,211 +6,392 @@ import { auth, db } from "../firebase";
 import { ref, get, set, push, remove } from "firebase/database";
 import Toast from "react-native-root-toast";
 
-function getDistanceInKm(lat1, lon1, lat2, lon2) {
+// Utils
+const getDistanceInKm = (lat1, lon1, lat2, lon2) => {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
-}
+};
+
+const calculateCommission = (subtotal, shopCommission, isPremiumOrder = false) => {
+  if (isPremiumOrder) {
+    return Math.ceil(subtotal * 0.00001); // 0.001% for premium
+  }
+  return Math.ceil(subtotal * (shopCommission / 100)); // Use actual shop commission
+};
 
 export default function CheckoutScreen() {
-  const route = useRoute(), navigation = useNavigation();
+  const route = useRoute();
+  const navigation = useNavigation();
   const { shopId: paramShopId, shop: paramShop, cart: paramCart } = route.params || {};
-  const [shop, setShop] = useState(() => paramShop ? { id: paramShop.id, name: paramShop.name, image: paramShop.image, location: paramShop.location ? { lat: paramShop.location.lat, lng: paramShop.location.lng } : null } : null);
-  const [shopId, setShopId] = useState(paramShopId || null);
+  
+  // State
+  const [shop, setShop] = useState(null);
+  const [shopId, setShopId] = useState(paramShopId);
   const [cart, setCart] = useState(() => {
     if (!paramCart) return null;
     const cleanCart = {};
     Object.keys(paramCart).forEach((k) => {
-      if (paramCart[k] && typeof paramCart[k] === "object") cleanCart[k] = { price: paramCart[k].price, qty: paramCart[k].qty, productname: paramCart[k].productname };
+      if (paramCart[k] && typeof paramCart[k] === "object") {
+        cleanCart[k] = { 
+          price: paramCart[k].price, 
+          qty: paramCart[k].qty, 
+          productname: paramCart[k].productname 
+        };
+      }
     });
     return cleanCart;
   });
-
-  const [userData, setUserData] = useState(null), [loading, setLoading] = useState(true), [placingOrder, setPlacingOrder] = useState(false);
-  const [deliveryFee, setDeliveryFee] = useState(0), [couponCode, setCouponCode] = useState(""), [discount, setDiscount] = useState(0);
-  const [paymentMode, setPaymentMode] = useState("COD"), [transactionId, setTransactionId] = useState("");
-  const [platformFee, setPlatformFee] = useState(10), [total, setTotal] = useState(0), [deliveryChargePerKm, setDeliveryChargePerKm] = useState(5), [subtotal, setSubtotal] = useState(0);
+  
+  const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [placingOrder, setPlacingOrder] = useState(false);
+  const [deliveryFee, setDeliveryFee] = useState(0);
+  const [couponCode, setCouponCode] = useState("");
+  const [discount, setDiscount] = useState(0);
+  const [paymentMode, setPaymentMode] = useState("COD");
+  const [transactionId, setTransactionId] = useState("");
+  const [platformFee, setPlatformFee] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [deliveryChargePerKm, setDeliveryChargePerKm] = useState(5);
+  const [subtotal, setSubtotal] = useState(0);
   const [restaurantTotal, setRestaurantTotal] = useState(0);
+  const [shopCommission, setShopCommission] = useState(15); // Will be updated from shop data
+  
   const user = auth.currentUser;
-
-  // Check if order is premium (above 10k)
   const isPremiumOrder = subtotal > 10000;
 
+  // Load all data including shop commission
   useEffect(() => {
     const loadData = async () => {
       try {
-        let finalShopId = shopId || route.params?.shopId, finalShop = shop, finalCart = cart;
-        if (!finalShop && finalShopId) {
-          const shopSnap = await get(ref(db, `shops/${finalShopId}`));
-          if (shopSnap.exists()) {
-            const shopData = shopSnap.val();
-            finalShop = { id: finalShopId, name: shopData.name, image: shopData.image, location: shopData.location ? { lat: shopData.location.lat, lng: shopData.location.lng } : null };
-          }
+        setLoading(true);
+        const finalShopId = shopId || route.params?.shopId;
+        
+        if (!finalShopId) {
+          throw new Error("Shop ID not found");
         }
-        if (!finalCart && finalShopId && user?.uid) {
+
+        // Load shop data first to get commission
+        const shopSnap = await get(ref(db, `shops/${finalShopId}`));
+        if (!shopSnap.exists()) {
+          throw new Error("Shop not found");
+        }
+
+        const shopData = shopSnap.val();
+        const shopCommissionValue = Number(shopData.commission) || 15;
+        
+        const finalShop = { 
+          id: finalShopId, 
+          name: shopData.name, 
+          image: shopData.image, 
+          location: shopData.location ? { 
+            lat: shopData.location.lat, 
+            lng: shopData.location.lng 
+          } : null,
+          commission: shopCommissionValue
+        };
+
+        // Load cart data
+        let finalCart = cart;
+        if (!finalCart && user?.uid) {
           const cartSnap = await get(ref(db, `carts/${user.uid}/${finalShopId}`));
           if (cartSnap.exists()) {
-            const cartData = cartSnap.val(), cleanCart = {};
-            Object.keys(cartData).forEach((k) => { if (cartData[k] && typeof cartData[k] === "object") cleanCart[k] = { price: cartData[k].price, qty: cartData[k].qty, productname: cartData[k].productname }; });
-            finalCart = cleanCart;
+            const cartData = cartSnap.val();
+            finalCart = {};
+            Object.keys(cartData).forEach((k) => { 
+              if (cartData[k] && typeof cartData[k] === "object") {
+                finalCart[k] = { 
+                  price: cartData[k].price, 
+                  qty: cartData[k].qty, 
+                  productname: cartData[k].productname 
+                }; 
+              }
+            });
           }
         }
 
-        const [userSnap, adminSnap] = await Promise.all([get(ref(db, `users/${user.uid}`)), get(ref(db, `admin_data/general`))]);
-        let fetchedUser = null, deliveryCharge = deliveryChargePerKm;
+        // Load user and admin data
+        const [userSnap, adminSnap] = await Promise.all([
+          get(ref(db, `users/${user.uid}`)),
+          get(ref(db, `admin_data/general`))
+        ]);
+
+        let fetchedUser = null;
+        let deliveryCharge = deliveryChargePerKm;
 
         if (userSnap.exists()) {
           const u = userSnap.val();
-          fetchedUser = { uid: user.uid, firstName: u.firstName, lastName: u.lastName, name: u.name, phone: u.phone,mobile: u.mobile, email: u.email };
+          fetchedUser = { 
+            uid: user.uid, 
+            firstName: u.firstName, 
+            lastName: u.lastName, 
+            name: u.name, 
+            phone: u.phone,
+            mobile: u.mobile, 
+            email: u.email 
+          };
+          
           if (u.mainAddressId && u.addresses && u.addresses[u.mainAddressId]) {
             const main = u.addresses[u.mainAddressId];
-            fetchedUser.location = { area: main.area, city: main.city, state: main.state, pincode: main.pincode, formattedAddress: main.formattedAddress, lat: main.lat, lng: main.lng, updatedAt: main.updatedAt };
-          } else if (u.location) fetchedUser.location = { area: u.location.area, city: u.location.city, state: u.location.state, pincode: u.location.pincode, formattedAddress: u.location.formattedAddress, lat: u.location.lat, lng: u.location.lng, updatedAt: u.location.updatedAt };
+            fetchedUser.location = { 
+              area: main.area, 
+              city: main.city, 
+              state: main.state, 
+              pincode: main.pincode, 
+              formattedAddress: main.formattedAddress, 
+              lat: main.lat, 
+              lng: main.lng, 
+              updatedAt: main.updatedAt 
+            };
+          } else if (u.location) {
+            fetchedUser.location = { 
+              area: u.location.area, 
+              city: u.location.city, 
+              state: u.location.state, 
+              pincode: u.location.pincode, 
+              formattedAddress: u.location.formattedAddress, 
+              lat: u.location.lat, 
+              lng: u.location.lng, 
+              updatedAt: u.location.updatedAt 
+            };
+          }
         }
-        if (adminSnap.exists()) { const adminData = adminSnap.val(); if (adminData.deliveryChargePerKm) deliveryCharge = adminData.deliveryChargePerKm; setDeliveryChargePerKm(deliveryCharge); }
 
+        if (adminSnap.exists()) { 
+          const adminData = adminSnap.val(); 
+          if (adminData.deliveryChargePerKm) {
+            deliveryCharge = adminData.deliveryChargePerKm; 
+          }
+          setDeliveryChargePerKm(deliveryCharge); 
+        }
+
+        // Calculate pricing
         if (fetchedUser && finalCart && finalShop?.location) {
-          const calculatedSubtotal = Object.keys(finalCart).filter((k) => k.startsWith("productId")).reduce((s, pid) => s + finalCart[pid].price * finalCart[pid].qty, 0);
-          setSubtotal(calculatedSubtotal);
+          const calculatedSubtotal = Object.keys(finalCart)
+            .filter((k) => k.startsWith("productId"))
+            .reduce((s, pid) => s + finalCart[pid].price * finalCart[pid].qty, 0);
           
-          // Calculate platform fee based on order value
-          const calculatedPlatformFee = calculatedSubtotal > 10000 ? Math.ceil(calculatedSubtotal * 0.00001) : 10;
+          setSubtotal(calculatedSubtotal);
+
+          const calculatedPlatformFee = isPremiumOrder ? 
+            Math.ceil(calculatedSubtotal * 0.00001) : 10;
           setPlatformFee(calculatedPlatformFee);
 
-          const uLat = Number(fetchedUser.location?.lat), uLng = Number(fetchedUser.location?.lng), sLat = Number(finalShop.location?.lat), sLng = Number(finalShop.location?.lng);
+          // Calculate delivery fee
+          const uLat = Number(fetchedUser.location?.lat);
+          const uLng = Number(fetchedUser.location?.lng);
+          const sLat = Number(finalShop.location?.lat);
+          const sLng = Number(finalShop.location?.lng);
+          
           if (!isNaN(uLat) && !isNaN(uLng) && !isNaN(sLat) && !isNaN(sLng)) {
             const distanceKm = getDistanceInKm(sLat, sLng, uLat, uLng) * 1.3; 
-            const baseFee = 20, freeThreshold = 1000000;
-            let fee = baseFee + distanceKm * deliveryCharge;
-            
-            // For premium orders, restaurant bears delivery cost
-            if (calculatedSubtotal > 10000) {
-              fee = 0; // Free delivery for customer
-            } else if (calculatedSubtotal >= freeThreshold) {
-              fee = 0;
-            }
+            const baseFee = 20;
+            let fee = isPremiumOrder ? 0 : baseFee + distanceKm * deliveryCharge;
             setDeliveryFee(Math.ceil(fee));
-          } else setDeliveryFee(0);
+          } else {
+            setDeliveryFee(0);
+          }
         }
 
-        setShop(finalShop); setCart(finalCart); setUserData(fetchedUser);
-      } catch (e) { console.error("Checkout load error:", e); Toast.show("Failed to load checkout data", { duration: Toast.durations.SHORT }); }
-      finally { setLoading(false); }
+        // Set all state at once
+        setShop(finalShop);
+        setCart(finalCart);
+        setUserData(fetchedUser);
+        setShopCommission(shopCommissionValue); // This is crucial - set commission AFTER shop is loaded
+        
+
+      } catch (error) {
+        console.error("Checkout load error:", error);
+        Toast.show("Failed to load checkout data", { 
+          duration: Toast.durations.SHORT,
+          position: Toast.positions.BOTTOM
+        });
+      } finally {
+        setLoading(false);
+      }
     };
+
     loadData();
-  }, [user?.uid]);
+  }, [user?.uid, shopId]);
 
+  // Calculate totals when dependencies change
   useEffect(() => {
-    if (!cart) return;
-    const calculatedSubtotal = Object.keys(cart).filter((k) => k.startsWith("productId")).reduce((s, pid) => s + cart[pid].price * cart[pid].qty, 0);
-    setSubtotal(calculatedSubtotal);
-    
-    // Recalculate platform fee whenever subtotal changes
-    const calculatedPlatformFee = calculatedSubtotal > 10000 ? Math.ceil(calculatedSubtotal * 0.00001) : 10;
-    setPlatformFee(calculatedPlatformFee);
-    
-    setTotal(calculatedSubtotal - discount + deliveryFee + calculatedPlatformFee);
-    
-    // Calculate restaurant total with premium order logic
-    let platformCommission, deliveryFeeShare;
-    
-    if (calculatedSubtotal > 10000) {
-      // Premium order: 0.001% platform commission, restaurant bears delivery cost
-      platformCommission = Math.ceil(calculatedSubtotal * 0.00001);
-      deliveryFeeShare = -deliveryFee; // Restaurant pays for delivery
-    } else {
-      // Regular order: 15% platform commission, 50% delivery fee share
-      platformCommission = Math.ceil(calculatedSubtotal * 0.15);
-      deliveryFeeShare = Math.ceil(deliveryFee * 0.5);
-    }
-    
-    const restaurantPayout = calculatedSubtotal - platformCommission + deliveryFeeShare;
-    setRestaurantTotal(Math.ceil(restaurantPayout));
-  }, [cart, discount, deliveryFee, subtotal]);
+    if (!cart || !shopCommission) return;
 
-  console.log("userData:", userData);
+    const calculatedSubtotal = Object.keys(cart)
+      .filter((k) => k.startsWith("productId"))
+      .reduce((s, pid) => s + cart[pid].price * cart[pid].qty, 0);
+    
+    setSubtotal(calculatedSubtotal);
+
+    const calculatedPlatformFee = isPremiumOrder ? 
+      Math.ceil(calculatedSubtotal * 0.00001) : 10;
+    setPlatformFee(calculatedPlatformFee);
+
+    const finalTotal = calculatedSubtotal - discount + deliveryFee + calculatedPlatformFee;
+    setTotal(finalTotal);
+
+    // Calculate restaurant payout using ACTUAL shop commission
+    const platformCommission = calculateCommission(calculatedSubtotal, shopCommission, isPremiumOrder);
+    const restaurantPayout = calculatedSubtotal - platformCommission;
+    setRestaurantTotal(Math.ceil(restaurantPayout));
+
+
+
+  }, [cart, discount, deliveryFee, shopCommission, isPremiumOrder]);
 
   const applyCoupon = async () => {
-    if (!couponCode) return Toast.show("Enter a coupon code", { duration: Toast.durations.SHORT });
-    const couponSnap = await get(ref(db, `admin_data/general/coupons/${shopId}/${couponCode}`));
-    if (couponSnap.exists()) { setDiscount(couponSnap.val()); Toast.show(`Discount applied: ₹${couponSnap.val()}`, { duration: Toast.durations.SHORT }); }
-    else Toast.show("Invalid coupon code", { duration: Toast.durations.SHORT });
+    if (!couponCode.trim()) {
+      Toast.show("Enter a coupon code", { duration: Toast.durations.SHORT });
+      return;
+    }
+
+    try {
+      const couponSnap = await get(ref(db, `admin_data/general/coupons/${shopId}/${couponCode}`));
+      if (couponSnap.exists()) {
+        const discountValue = couponSnap.val();
+        setDiscount(discountValue);
+        Toast.show(`Discount applied: ₹${discountValue}`, { duration: Toast.durations.SHORT });
+      } else {
+        Toast.show("Invalid coupon code", { duration: Toast.durations.SHORT });
+      }
+    } catch (error) {
+      console.error("Coupon error:", error);
+      Toast.show("Failed to apply coupon", { duration: Toast.durations.SHORT });
+    }
   };
 
   const handlePlaceOrder = async () => {
-    const user = auth.currentUser;
-    if (!user) { Toast.show("Please login to place an order", { duration: Toast.durations.SHORT }); navigation.navigate("HomeScreen"); return; }
-    if (paymentMode === "Online" && !transactionId.trim()) { Toast.show("Enter transaction ID", { duration: Toast.durations.SHORT }); return; }
+    if (!user) {
+      Toast.show("Please login to place an order", { duration: Toast.durations.SHORT });
+      navigation.navigate("HomeScreen");
+      return;
+    }
+
+    if (paymentMode === "Online" && !transactionId.trim()) {
+      Toast.show("Enter transaction ID", { duration: Toast.durations.SHORT });
+      return;
+    }
+
     try {
       setPlacingOrder(true);
+
       const cleanItems = {};
-      Object.keys(cart).filter((k) => k.startsWith("productId")).forEach((pid) => { if (cart[pid].price && cart[pid].qty) cleanItems[pid] = { price: cart[pid].price, qty: cart[pid].qty, productname: cart[pid].productname || "Product" }; });
-      
-      // Calculate restaurant payout breakdown based on order value
-      let platformCommission, deliveryFeeShare, platformCommissionRate, deliveryFeeShareRate;
-      
-      if (subtotal > 10000) {
-        // Premium order pricing
-        platformCommission = Math.ceil(subtotal * 0.00001); // 0.001%
-        deliveryFeeShare = -deliveryFee; // Restaurant bears delivery cost
-        platformCommissionRate = 0.00001;
-        deliveryFeeShareRate = -1; // Indicates restaurant pays full delivery
-      } else {
-        // Regular order pricing
-        platformCommission = Math.ceil(subtotal * 0.15); // 15%
-        deliveryFeeShare = Math.ceil(deliveryFee * 0.5); // 50% of delivery fee
-        platformCommissionRate = 0.15;
-        deliveryFeeShareRate = 0.5;
-      }
+      Object.keys(cart)
+        .filter((k) => k.startsWith("productId"))
+        .forEach((pid) => {
+          if (cart[pid].price && cart[pid].qty) {
+            cleanItems[pid] = {
+              price: cart[pid].price,
+              qty: cart[pid].qty,
+              productname: cart[pid].productname || "Product"
+            };
+          }
+        });
+
+      const platformCommission = calculateCommission(subtotal, shopCommission, isPremiumOrder);
+      const driverPayout = Math.ceil(deliveryFee * 0.70);
+      const platformCommissionRate = isPremiumOrder ? 0.00001 : shopCommission / 100;
 
       const orderData = {
-        shopId, shopname: shop?.name || "Unknown Shop", shopimage: shop?.image || "", items: cleanItems,
-        subtotal: Math.ceil(subtotal), discount: Math.ceil(discount), deliveryFee: Math.ceil(deliveryFee), platformFee, total: Math.ceil(total),
-        paymentMode, transactionId: paymentMode === "Online" ? transactionId.trim() : null,
-        address: userData?.location?.formattedAddress || "No address", customerName: userData?.firstName || "Customer", customerPhone: userData?.mobile || "", customerEmail: user?.email || "",
-        status: "pending", createdAt: Date.now(),
+        shopId,
+        shopname: shop?.name || "Unknown Shop",
+        shopimage: shop?.image || "",
+        items: cleanItems,
+        subtotal: Math.ceil(subtotal),
+        discount: Math.ceil(discount),
+        deliveryFee: Math.ceil(deliveryFee),
+        platformFee,
+        total: Math.ceil(total),
+        paymentMode,
+        transactionId: paymentMode === "Online" ? transactionId.trim() : null,
+        address: userData?.location?.formattedAddress || "No address",
+        customerName: userData?.firstName || "Customer",
+        customerPhone: userData?.mobile || "",
+        customerEmail: user?.email || "",
+        status: "pending",
+        createdAt: Date.now(),
         
-        // Restaurant payout data (not displayed in frontend, only sent to cloud)
         restaurantPayout: {
-          restaurantTotal: restaurantTotal,
-          platformCommission: platformCommission,
-          deliveryFeeShare: deliveryFeeShare,
+          restaurantTotal,
+          platformCommission,
           netPayout: restaurantTotal,
           calculationBreakdown: {
             subtotal: Math.ceil(subtotal),
-            platformCommissionRate: platformCommissionRate,
-            deliveryFeeShareRate: deliveryFeeShareRate,
+            platformCommissionRate,
+            shopCommissionRate: shopCommission / 100,
             finalRestaurantAmount: restaurantTotal,
-            isPremiumOrder: subtotal > 10000
+            isPremiumOrder
           }
         },
         
+        driverPayout,
+        
         calculationMetadata: {
-          deliveryChargePerKm, 
-          freeDeliveryThreshold: 1000000, 
-          baseDeliveryFee: 20, 
-          platformFee: platformFee,
-          isPremiumOrder: subtotal > 10000,
-          userLocation: userData?.location ? { area: userData.location.area, city: userData.location.city, state: userData.location.state, pincode: userData.location.pincode, formattedAddress: userData.location.formattedAddress, lat: userData.location.lat, lng: userData.location.lng, updatedAt: userData.location.updatedAt } : null,
-          shopLocation: shop?.location ? { lat: shop.location.lat, lng: shop.location.lng } : null, 
+          deliveryChargePerKm,
+          freeDeliveryThreshold: 1000000,
+          baseDeliveryFee: 20,
+          platformFee,
+          isPremiumOrder,
+          userLocation: userData?.location,
+          shopLocation: shop?.location,
           calculatedAt: Date.now(),
+          shopCommission,
+          driverPayout,
         },
       };
+
+
       const newOrderRef = push(ref(db, `orders/${user.uid}`));
       await set(newOrderRef, orderData);
       await remove(ref(db, `carts/${user.uid}/${shopId}`));
-      navigation.replace("OrderConfirmation", { orderData: { order: { id: newOrderRef.key, ...orderData }, message: "Order placed successfully" } });
-    } catch (e) { console.error("❌ Order error:", e); Toast.show("Failed to place order. Please try again.", { duration: Toast.durations.LONG, position: Toast.positions.BOTTOM }); }
-    finally { setPlacingOrder(false); }
+      
+      navigation.replace("OrderConfirmation", {
+        orderData: {
+          order: { id: newOrderRef.key, ...orderData },
+          message: "Order placed successfully"
+        }
+      });
+
+    } catch (error) {
+      console.error("❌ Order error:", error);
+      Toast.show("Failed to place order. Please try again.", {
+        duration: Toast.durations.LONG,
+        position: Toast.positions.BOTTOM
+      });
+    } finally {
+      setPlacingOrder(false);
+    }
   };
 
-  if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#ff7a00" /></View>;
-  if (!cart || Object.keys(cart).filter((k) => k.startsWith("productId")).length === 0) return <View style={styles.center}><Text style={styles.emptyText}>No items in cart.</Text><TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}><Text style={styles.backButtonText}>Back to Shop</Text></TouchableOpacity></View>;
+  // Render loading
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#ff7a00" />
+      </View>
+    );
+  }
 
-  const products = Object.keys(cart).filter((k) => k.startsWith("productId")).map((pid) => cart[pid]);
+  // Render empty cart
+  if (!cart || Object.keys(cart).filter((k) => k.startsWith("productId")).length === 0) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.emptyText}>No items in cart.</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.backButtonText}>Back to Shop</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const products = Object.keys(cart)
+    .filter((k) => k.startsWith("productId"))
+    .map((pid) => cart[pid]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -218,14 +399,35 @@ export default function CheckoutScreen() {
       <View style={styles.container}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 180 }}>
           <View style={[styles.section, { marginTop: 40 }]}>
-            <View style={styles.headerRow}><Text style={styles.sectionTitle}>DELIVERY ADDRESS</Text><TouchableOpacity onPress={() => navigation.navigate("HomeScreen")}><Text style={styles.editText}>EDIT</Text></TouchableOpacity></View>
-            {userData?.location ? <View style={styles.addressBox}><Text style={styles.username}>{userData.firstName} {userData.lastName}</Text><Text style={styles.addressText}>{userData.location.formattedAddress}</Text><Text style={styles.addressSub}>{userData.location.city}, {userData.location.state} - {userData.location.pincode}</Text></View> : (<Text style={styles.emptyText}>No address found</Text>)}
+            <View style={styles.headerRow}>
+              <Text style={styles.sectionTitle}>DELIVERY ADDRESS</Text>
+              <TouchableOpacity onPress={() => navigation.navigate("HomeScreen")}>
+                <Text style={styles.editText}>EDIT</Text>
+              </TouchableOpacity>
+            </View>
+            {userData?.location ? (
+              <View style={styles.addressBox}>
+                <Text style={styles.username}>{userData.firstName} {userData.lastName}</Text>
+                <Text style={styles.addressText}>{userData.location.formattedAddress}</Text>
+                <Text style={styles.addressSub}>
+                  {userData.location.city}, {userData.location.state} - {userData.location.pincode}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.emptyText}>No address found</Text>
+            )}
+          </View>
+          
+          <View style={styles.section}>
+            <View style={styles.commissionInfo}>
+              <Text style={styles.commissionText}>Shop Commission: {shopCommission}%</Text>
+              <Text style={styles.commissionSubtext}>This shop's specific commission rate</Text>
+            </View>
           </View>
         </ScrollView>
 
         <View style={styles.bottomSheet}>
           <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }}>
-            {/* Premium Order Badge */}
             {isPremiumOrder && (
               <View style={styles.premiumBadge}>
                 <Text style={styles.premiumBadgeText}>🎉 PREMIUM ORDER - Free Delivery & Low Platform Fee</Text>
@@ -233,18 +435,48 @@ export default function CheckoutScreen() {
             )}
 
             <View style={styles.section}>
-              <View style={styles.headerRow}><Text style={styles.sectionTitle}>YOUR ITEMS</Text><TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.editText}>EDIT ITEMS</Text></TouchableOpacity></View>
-              {products.map((i, idx) => <View key={idx} style={styles.itemCard}><View style={styles.itemInfo}><Text style={styles.itemName}>{i.productname}</Text><Text style={styles.itemQty}>Qty: {i.qty}</Text></View><Text style={styles.itemPrice}>₹{i.price * i.qty}</Text></View>)}
+              <View style={styles.headerRow}>
+                <Text style={styles.sectionTitle}>YOUR ITEMS</Text>
+                <TouchableOpacity onPress={() => navigation.goBack()}>
+                  <Text style={styles.editText}>EDIT ITEMS</Text>
+                </TouchableOpacity>
+              </View>
+              {products.map((item, idx) => (
+                <View key={idx} style={styles.itemCard}>
+                  <View style={styles.itemInfo}>
+                    <Text style={styles.itemName}>{item.productname}</Text>
+                    <Text style={styles.itemQty}>Qty: {item.qty}</Text>
+                  </View>
+                  <Text style={styles.itemPrice}>₹{item.price * item.qty}</Text>
+                </View>
+              ))}
             </View>
 
             <View style={styles.sectiontwo}>
               <Text style={styles.sectionTitle}>COUPON</Text>
-              <View style={styles.couponRow}><TextInput style={styles.couponInput} placeholder="Enter code" placeholderTextColor="#aaa" value={couponCode} onChangeText={setCouponCode} /><TouchableOpacity style={styles.applyBtn} onPress={applyCoupon}><Text style={styles.applyText}>APPLY</Text></TouchableOpacity></View>
+              <View style={styles.couponRow}>
+                <TextInput
+                  style={styles.couponInput}
+                  placeholder="Enter code"
+                  placeholderTextColor="#aaa"
+                  value={couponCode}
+                  onChangeText={setCouponCode}
+                />
+                <TouchableOpacity style={styles.applyBtn} onPress={applyCoupon}>
+                  <Text style={styles.applyText}>APPLY</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.summaryCard}>
-              <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Subtotal</Text><Text style={styles.summaryValue}>₹{Math.ceil(subtotal)}</Text></View>
-              <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Discount</Text><Text style={[styles.summaryValue, styles.discountText]}>-₹{Math.ceil(discount)}</Text></View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Subtotal</Text>
+                <Text style={styles.summaryValue}>₹{Math.ceil(subtotal)}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Discount</Text>
+                <Text style={[styles.summaryValue, styles.discountText]}>-₹{Math.ceil(discount)}</Text>
+              </View>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Platform Fee</Text>
                 <View style={styles.feeContainer}>
@@ -260,16 +492,50 @@ export default function CheckoutScreen() {
                 </View>
               </View>
               <View style={styles.divider} />
-              <View style={styles.summaryRow}><Text style={styles.totalText}>TOTAL</Text><Text style={styles.totalValue}>₹{Math.ceil(total)}</Text></View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.totalText}>TOTAL</Text>
+                <Text style={styles.totalValue}>₹{Math.ceil(total)}</Text>
+              </View>
             </View>
 
             <View style={styles.sectiontwo}>
               <Text style={styles.sectionTitle}>PAYMENT MODE</Text>
               <View style={styles.paymentRow}>
-                <TouchableOpacity style={[styles.modeBtn, paymentMode === "COD" && styles.activeMode]} onPress={() => setPaymentMode("COD")}><Text style={[styles.modeText, paymentMode === "COD" && styles.activeModeText]}>CASH ON DELIVERY</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.modeBtn, paymentMode === "Online" && styles.activeMode]} onPress={() => setPaymentMode("Online")}><Text style={[styles.modeText, paymentMode === "Online" && styles.activeModeText]}>PAY ONLINE</Text></TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeBtn, paymentMode === "COD" && styles.activeMode]}
+                  onPress={() => setPaymentMode("COD")}
+                >
+                  <Text style={[styles.modeText, paymentMode === "COD" && styles.activeModeText]}>
+                    CASH ON DELIVERY
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeBtn, paymentMode === "Online" && styles.activeMode]}
+                  onPress={() => setPaymentMode("Online")}
+                >
+                  <Text style={[styles.modeText, paymentMode === "Online" && styles.activeModeText]}>
+                    PAY ONLINE
+                  </Text>
+                </TouchableOpacity>
               </View>
-              {paymentMode === "Online" && <View style={styles.onlineBox}><Image source={{ uri: "https://i.ibb.co/7WpZKqR/qr-placeholder.png" }} style={styles.qrImage} /><TextInput style={styles.transactionInput} placeholder="Enter Transaction ID" placeholderTextColor="#999" value={transactionId} onChangeText={setTransactionId} /><Text style={styles.qrNote}>Scan the QR to pay, then enter your transaction ID.</Text></View>}
+              {paymentMode === "Online" && (
+                <View style={styles.onlineBox}>
+                  <Image
+                    source={{ uri: "https://i.ibb.co/7WpZKqR/qr-placeholder.png" }}
+                    style={styles.qrImage}
+                  />
+                  <TextInput
+                    style={styles.transactionInput}
+                    placeholder="Enter Transaction ID"
+                    placeholderTextColor="#999"
+                    value={transactionId}
+                    onChangeText={setTransactionId}
+                  />
+                  <Text style={styles.qrNote}>
+                    Scan the QR to pay, then enter your transaction ID.
+                  </Text>
+                </View>
+              )}
             </View>
           </ScrollView>
 
@@ -277,9 +543,23 @@ export default function CheckoutScreen() {
             <View>
               <Text style={styles.totalLabel}>TOTAL</Text>
               <Text style={styles.totalAmount}>₹{Math.ceil(total)}</Text>
-              {isPremiumOrder && <Text style={styles.premiumSavings}>You save ₹{Math.ceil(deliveryFee + (10 - platformFee))} on this order!</Text>}
+              {isPremiumOrder && (
+                <Text style={styles.premiumSavings}>
+                  You save ₹{Math.ceil(deliveryFee + (10 - platformFee))} on this order!
+                </Text>
+              )}
             </View>
-            <TouchableOpacity style={[styles.orderBtn, placingOrder && styles.orderBtnDisabled]} onPress={handlePlaceOrder} disabled={placingOrder}>{placingOrder ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.orderText}>PLACE ORDER</Text>}</TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.orderBtn, placingOrder && styles.orderBtnDisabled]}
+              onPress={handlePlaceOrder}
+              disabled={placingOrder}
+            >
+              {placingOrder ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.orderText}>PLACE ORDER</Text>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -287,6 +567,7 @@ export default function CheckoutScreen() {
   );
 }
 
+// Keep your existing styles - they are good
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#0e0e12" },
   container: { flex: 1, backgroundColor: "#0e0e12" },
@@ -301,6 +582,9 @@ const styles = StyleSheet.create({
   username: { color: "#fff", fontSize: 16, fontFamily: "Sen_Bold", marginBottom: 4 },
   addressText: { color: "#fff", fontSize: 14, fontFamily: "Sen_Regular" },
   addressSub: { color: "#888", fontSize: 13, marginTop: 4, fontFamily: "Sen_Regular" },
+  commissionInfo: { backgroundColor: "#2a2a2f", padding: 12, borderRadius: 8, marginTop: 10 },
+  commissionText: { color: "#ff7a00", fontSize: 14, fontFamily: "Sen_Medium" },
+  commissionSubtext: { color: "#aaa", fontSize: 12, fontFamily: "Sen_Regular", marginTop: 2 },
   bottomSheet: { position: "absolute", bottom: Platform.OS === "ios" ? -40 : -20, width: "100%", backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, shadowColor: "#000", shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 10, paddingBottom: Platform.OS === "ios" ? 34 : 26, overflow: "hidden" },
   premiumBadge: { backgroundColor: "#28a745", padding: 10, alignItems: "center", marginHorizontal: 16, marginTop: 10, borderRadius: 8 },
   premiumBadgeText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 12 },

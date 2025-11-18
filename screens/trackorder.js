@@ -7,10 +7,11 @@ import { ref, onValue } from "firebase/database";
 
 const STATUS_STEPS = [
   { key: "pending", label: "Your order has been received" },
-  { key: "accepted", label: "The restaurant is preparing your food" },
+  { key: "accepted_restaurent", label: "Restaurant has accepted your order" },
   { key: "ready", label: "Your order is ready for pickup" },
+  { key: "accepted_driver", label: "Driver has accepted your order" },
   { key: "picked_up", label: "Your order has been picked up for delivery" },
-  { key: "delivered", label: "Order arriving soon!" },
+  { key: "completed", label: "Order Delivered!" },
 ];
 
 const TrackOrder = ({ navigation }) => {
@@ -27,7 +28,7 @@ const TrackOrder = ({ navigation }) => {
       if (data) {
         const formatted = Object.entries(data)
           .map(([id, order]) => ({ id, ...order }))
-          .filter((order) => order.status !== "delivered");
+          .filter((order) => order.status !== "completed" && order.status !== "REJECTED");
         setOrders(formatted);
         if (!selectedOrder && formatted.length > 0) setSelectedOrder(formatted[0]);
       } else {
@@ -47,13 +48,28 @@ const TrackOrder = ({ navigation }) => {
     </SafeAreaView>
   );
 
+  const getStatusColor = (status) => {
+    const colors = {
+      "pending": "#FF9800",
+      "accepted_restaurent": "#2196F3", 
+      "ready": "#f68afaff",
+      "accepted_driver": "#9C27B0",
+      "picked_up": "#FF5722",
+      "completed": "#4CAF50",
+      "REJECTED": "#ff0000ff"
+    };
+    return colors[status] || "#666";
+  };
+
   const renderOrderCard = (order) => (
     <TouchableOpacity key={order.id} style={[styles.orderCard, selectedOrder?.id === order.id && styles.orderCardSelected]} onPress={() => setSelectedOrder(order)} activeOpacity={0.8}>
       <Image source={{ uri: order.shopimage }} style={styles.shopImage} resizeMode="cover" />
       <View style={styles.cardInfo}>
         <Text style={styles.cardShop} numberOfLines={1}>{order.shopname}</Text>
         <Text style={styles.cardId}>#{order.id.slice(-6)}</Text>
-        <Text style={[styles.cardStatus, order.status === "pending" && { color: "#FF9800" }, order.status === "accepted" && { color: "#2196F3" },order.status === "ready" && { color: "#f68afaff" }, order.status === "picked_up" && { color: "#9C27B0" }, order.status === "REJECTED" && { color: "#ff0000ff" }, order.status === "delivered" && { color: "#4CAF50" }]}>{order.status.replace("_", " ").toUpperCase()}</Text>
+        <Text style={[styles.cardStatus, { color: getStatusColor(order.status) }]}>
+          {order.status.replace(/_/g, " ").toUpperCase()}
+        </Text>
         <Text style={styles.cardTotal}>₹{order.total}</Text>
       </View>
     </TouchableOpacity>

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image, Platform, Dimensions, KeyboardAvoidingView, ScrollView } from 'react-native';
 import MapView from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -28,7 +28,9 @@ export default function MapScreen({ navigation, route }) {
 
   const mapRef = useRef(null);
   const regionChangeTimeout = useRef(null);
+  const searchTimeout = useRef(null);
   const lastRegionRef = useRef(null);
+  const lastGeocodeRef = useRef(null);
   const scrollViewRef = useRef(null);
 
   useEffect(() => {
@@ -40,12 +42,20 @@ export default function MapScreen({ navigation, route }) {
       setPhone(initial.phone || '');
       setQuery(initial.formattedAddress || '');
     }
-    return () => { if (regionChangeTimeout.current) clearTimeout(regionChangeTimeout.current); };
+    return () => {
+      if (regionChangeTimeout.current) clearTimeout(regionChangeTimeout.current);
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    };
   }, []);
 
   const checkLocationPermission = async () => {
-    try { const { status } = await Location.getForegroundPermissionsAsync(); setHasPermission(status === 'granted'); }
-    catch (e) { console.error('Permission check failed:', e); setHasPermission(false); }
+    try { 
+      const { status } = await Location.getForegroundPermissionsAsync(); 
+      setHasPermission(status === 'granted'); 
+    } catch (e) { 
+      console.error('Permission check failed:', e); 
+      setHasPermission(false); 
+    }
   };
 
   const requestLocationPermission = async () => {
@@ -53,10 +63,18 @@ export default function MapScreen({ navigation, route }) {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') setHasPermission(true);
       else Alert.alert('Permission Required', 'Location permission is required to continue.');
-    } catch (e) { console.error('Request permission failed:', e); Alert.alert('Error', 'Could not request location permission.'); }
+    } catch (e) { 
+      console.error('Request permission failed:', e); 
+      Alert.alert('Error', 'Could not request location permission.'); 
+    }
   };
 
-  const reverseGeocode = async (lat, lng) => {
+  const reverseGeocode = useCallback(async (lat, lng) => {
+    const coordKey = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+    if (lastGeocodeRef.current === coordKey) {
+      return lastGeocodeRef.current.result;
+    }
+
     try {
       const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`);
       const data = await res.json();
@@ -67,21 +85,37 @@ export default function MapScreen({ navigation, route }) {
         const city = comp.find((c) => c.types.includes('locality'))?.long_name || comp.find((c) => c.types.includes('administrative_area_level_2'))?.long_name || '';
         const state = comp.find((c) => c.types.includes('administrative_area_level_1'))?.long_name || '';
         const pincode = comp.find((c) => c.types.includes('postal_code'))?.long_name || '';
-        return { formattedAddress: result.formatted_address || '', area, city, state, pincode };
+        
+        const geocodeResult = { formattedAddress: result.formatted_address || '', area, city, state, pincode };
+        lastGeocodeRef.current = { key: coordKey, result: geocodeResult };
+        return geocodeResult;
       }
       return { formattedAddress: 'Address not found', area: '', city: '', state: '', pincode: '' };
-    } catch (err) { console.error('Reverse geocode error:', err); return { formattedAddress: 'Error', area: '', city: '', state: '', pincode: '' }; }
-  };
+    } catch (err) { 
+      console.error('Reverse geocode error:', err); 
+      return { formattedAddress: 'Error', area: '', city: '', state: '', pincode: '' }; 
+    }
+  }, []);
 
-  const fetchSuggestions = async (text) => {
+  const fetchSuggestions = useCallback((text) => {
     setQuery(text);
-    if (text.length < 3) { setSuggestions([]); return; }
-    try {
-      const res = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${GOOGLE_MAPS_API_KEY}`);
-      const data = await res.json();
-      if (data && data.predictions) setSuggestions(data.predictions);
-    } catch (err) { console.error('Suggestion error:', err); }
-  };
+    if (text.length < 3) { 
+      setSuggestions([]); 
+      return; 
+    }
+    
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&key=${GOOGLE_MAPS_API_KEY}`);
+        const data = await res.json();
+        if (data && data.predictions) setSuggestions(data.predictions);
+      } catch (err) { 
+        console.error('Suggestion error:', err); 
+      }
+    }, 500);
+  }, []);
 
   const fetchCoordinates = async (placeId) => {
     try {
@@ -94,147 +128,251 @@ export default function MapScreen({ navigation, route }) {
         const place = await reverseGeocode(lat, lng);
         setSelectedPlace({ lat, lng, ...place });
       }
-    } catch (err) { console.error('Coordinate fetch error:', err); Alert.alert('Error', 'Could not fetch place coordinates.'); }
-    finally { setFetching(false); setSuggestions([]); Keyboard.dismiss(); }
+    } catch (err) { 
+      console.error('Coordinate fetch error:', err); 
+      Alert.alert('Error', 'Could not fetch place coordinates.'); 
+    } finally { 
+      setFetching(false); 
+      setSuggestions([]); 
+      Keyboard.dismiss(); 
+    }
   };
 
-  const onRegionChangeComplete = (region) => {
+  const onRegionChangeComplete = useCallback((region) => {
     lastRegionRef.current = region;
+    
     if (regionChangeTimeout.current) clearTimeout(regionChangeTimeout.current);
+    
     regionChangeTimeout.current = setTimeout(async () => {
-      try { const { latitude, longitude } = lastRegionRef.current; setFetching(true); const place = await reverseGeocode(latitude, longitude); setSelectedPlace({ lat: latitude, lng: longitude, ...place }); }
-      catch (e) { console.error('onRegionChangeComplete reverse geocode error:', e); }
-      finally { setFetching(false); }
-    }, 600);
-  };
+      try { 
+        const { latitude, longitude } = lastRegionRef.current; 
+        setFetching(true); 
+        const place = await reverseGeocode(latitude, longitude); 
+        setSelectedPlace({ lat: latitude, lng: longitude, ...place }); 
+      } catch (e) { 
+        console.error('onRegionChangeComplete reverse geocode error:', e); 
+      } finally { 
+        setFetching(false); 
+      }
+    }, 800);
+  }, [reverseGeocode]);
 
   const getCurrentLocation = async () => {
     try {
       setFetching(true);
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const lat = loc.coords.latitude; const lng = loc.coords.longitude;
+      const lat = loc.coords.latitude; 
+      const lng = loc.coords.longitude;
       mapRef.current?.animateToRegion({ latitude: lat, longitude: lng, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
       const place = await reverseGeocode(lat, lng);
       setSelectedPlace({ lat, lng, ...place });
-    } catch (err) { console.error('getCurrentLocation error:', err); Alert.alert('Error', 'Unable to fetch current location. Please select manually.'); }
-    finally { setFetching(false); }
+    } catch (err) { 
+      console.error('getCurrentLocation error:', err); 
+      Alert.alert('Error', 'Unable to fetch current location. Please select manually.'); 
+    } finally { 
+      setFetching(false); 
+    }
   };
 
-const handleConfirmLocation = async () => {
-  if (!selectedPlace) return Alert.alert('Error', 'Please pick a location first.');
-  if (!name || name.trim().length < 2) return Alert.alert('Validation', 'Please enter a name for this address.');
-  if (!phone || phone.trim().length < 6) return Alert.alert('Validation', 'Please enter a valid phone number.');
-  if (!auth.currentUser) return Alert.alert('Error', 'User not logged in.');
+  const handleConfirmLocation = async () => {
+    if (!selectedPlace) return Alert.alert('Error', 'Please pick a location first.');
+    if (!name || name.trim().length < 2) return Alert.alert('Validation', 'Please enter a name for this address.');
+    if (!phone || phone.trim().length < 6) return Alert.alert('Validation', 'Please enter a valid phone number.');
+    if (!auth.currentUser) return Alert.alert('Error', 'User not logged in.');
 
-  try {
-    setSaving(true);
-    const uid = auth.currentUser.uid;
-    const userRef = ref(database, `users/${uid}`);
-    const snapshot = await get(userRef);
-    const existingData = snapshot.val() || {};
-    const addressRef = ref(database, `users/${uid}/addresses`);
-    const addressSnap = await get(addressRef);
-    const hasExistingAddresses = addressSnap.exists();
+    try {
+      setSaving(true);
+      const uid = auth.currentUser.uid;
+      const userRef = ref(database, `users/${uid}`);
+      const snapshot = await get(userRef);
+      const existingData = snapshot.val() || {};
+      const addressRef = ref(database, `users/${uid}/addresses`);
+      const addressSnap = await get(addressRef);
+      const hasExistingAddresses = addressSnap.exists();
 
-    const addressObj = {
-      lat: selectedPlace.lat || null,
-      lng: selectedPlace.lng || null,
-      area: selectedPlace.area || '',
-      city: selectedPlace.city || '',
-      state: selectedPlace.state || '',
-      pincode: selectedPlace.pincode || '',
-      formattedAddress: selectedPlace.formattedAddress || '',
-      name: name.trim(),
-      phone: phone.trim(),
-      updatedAt: new Date().toISOString(),
-    };
+      const addressObj = {
+        lat: selectedPlace.lat || null,
+        lng: selectedPlace.lng || null,
+        area: selectedPlace.area || '',
+        city: selectedPlace.city || '',
+        state: selectedPlace.state || '',
+        pincode: selectedPlace.pincode || '',
+        formattedAddress: selectedPlace.formattedAddress || '',
+        name: name.trim(),
+        phone: phone.trim(),
+        updatedAt: new Date().toISOString(),
+      };
 
-    let keyToSet = editingId;
+      let keyToSet = editingId;
 
-    if (mode === 'edit' && editingId) {
-      await update(ref(database, `users/${uid}/addresses/${editingId}`), addressObj);
-    } else {
-      const newRef = push(addressRef);
-      await set(newRef, addressObj);
-      keyToSet = newRef.key;
+      if (mode === 'edit' && editingId) {
+        await update(ref(database, `users/${uid}/addresses/${editingId}`), addressObj);
+      } else {
+        const newRef = push(addressRef);
+        await set(newRef, addressObj);
+        keyToSet = newRef.key;
 
-      // Auto-set main address if this is the first address
-      if (!hasExistingAddresses) {
+        if (!hasExistingAddresses) {
+          await update(userRef, { mainAddressId: keyToSet });
+        }
+      }
+
+      if (setAsMain && keyToSet) {
         await update(userRef, { mainAddressId: keyToSet });
       }
+
+      if (existingData.expoPushToken) {
+        await update(userRef, { expoPushToken: existingData.expoPushToken });
+      } else if (expoPushToken) {
+        await update(userRef, { expoPushToken });
+      }
+
+      navigation.navigate('Addresses', { refresh: true });
+      await Notifications.scheduleNotificationAsync({
+        content: { title: 'Address saved', body: 'Your address was saved successfully.' },
+        trigger: null,
+      });
+    } catch (err) {
+      console.error('Save address error:', err);
+      Alert.alert('Error', err.message || 'Failed to save address.');
+    } finally {
+      setSaving(false);
     }
-
-    // If user checked "Set as main address", override
-    if (setAsMain && keyToSet) {
-      await update(userRef, { mainAddressId: keyToSet });
-    }
-
-    // Handle push token
-    if (existingData.expoPushToken) {
-      await update(userRef, { expoPushToken: existingData.expoPushToken });
-    } else if (expoPushToken) {
-      await update(userRef, { expoPushToken });
-    }
-
-    navigation.navigate('Addresses', { refresh: true });
-    await Notifications.scheduleNotificationAsync({
-      content: { title: 'Address saved', body: 'Your address was saved successfully.' },
-      trigger: null,
-    });
-  } catch (err) {
-    console.error('Save address error:', err);
-    Alert.alert('Error', err.message || 'Failed to save address.');
-  } finally {
-    setSaving(false);
-  }
-};
-
+  };
 
   async function registerForPushNotificationsAsync() {
     try {
-      if (!Constants.isDevice) { console.warn('Must use physical device for Push Notifications'); return; }
+      if (!Constants.isDevice) { 
+        console.warn('Must use physical device for Push Notifications'); 
+        return; 
+      }
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
-      if (existingStatus !== 'granted') { const { status } = await Notifications.requestPermissionsAsync(); finalStatus = status; }
+      if (existingStatus !== 'granted') { 
+        const { status } = await Notifications.requestPermissionsAsync(); 
+        finalStatus = status; 
+      }
       if (finalStatus !== 'granted') return;
-      const token = (await Notifications.getExpoPushTokenAsync()).data; setExpoPushToken(token);
-      if (auth.currentUser) { const uid = auth.currentUser.uid; const userRef = ref(database, `users/${uid}`); const snapshot = await get(userRef); const existingData = snapshot.val() || {}; if (!existingData.expoPushToken || existingData.expoPushToken !== token) await update(userRef, { expoPushToken: token }); }
-      if (Platform.OS === 'android') await Notifications.setNotificationChannelAsync('default', { name: 'default', importance: Notifications.AndroidImportance.MAX, vibrationPattern: [0, 250, 250, 250], lightColor: '#28A745' });
-    } catch (e) { console.error('registerForPushNotificationsAsync error:', e); }
+      const token = (await Notifications.getExpoPushTokenAsync()).data; 
+      setExpoPushToken(token);
+      if (auth.currentUser) { 
+        const uid = auth.currentUser.uid; 
+        const userRef = ref(database, `users/${uid}`); 
+        const snapshot = await get(userRef); 
+        const existingData = snapshot.val() || {}; 
+        if (!existingData.expoPushToken || existingData.expoPushToken !== token) 
+          await update(userRef, { expoPushToken: token }); 
+      }
+      if (Platform.OS === 'android') 
+        await Notifications.setNotificationChannelAsync('default', { 
+          name: 'default', 
+          importance: Notifications.AndroidImportance.MAX, 
+          vibrationPattern: [0, 250, 250, 250], 
+          lightColor: '#28A745' 
+        });
+    } catch (e) { 
+      console.error('registerForPushNotificationsAsync error:', e); 
+    }
   }
 
   if (!hasPermission) return (
     <View style={styles.permissionContainer}>
       <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
       <Text style={styles.permissionText}>LocalBoys needs your location to provide the best experience.</Text>
-      <TouchableOpacity style={styles.permissionButton} onPress={requestLocationPermission}><Text style={styles.permissionButtonText}>Grant Permission</Text></TouchableOpacity>
+      <TouchableOpacity style={styles.permissionButton} onPress={requestLocationPermission}>
+        <Text style={styles.permissionButtonText}>Grant Permission</Text>
+      </TouchableOpacity>
     </View>
   );
 
   return (
     <View style={{ flex: 1 }}>
       <StatusBar barStyle="dark-content" translucent={false} />
-      <MapView ref={mapRef} style={{ flex: 1 }} initialRegion={selectedPlace ? { latitude: selectedPlace.lat, longitude: selectedPlace.lng, latitudeDelta: 0.01, longitudeDelta: 0.01 } : { latitude: 20.5937, longitude: 78.9629, latitudeDelta: 0.5, longitudeDelta: 0.5 }} showsUserLocation showsMyLocationButton={false} onRegionChangeComplete={onRegionChangeComplete} />
-      <View pointerEvents="none" style={styles.centerMarkerContainer}><View style={styles.pickLabel}><Text style={styles.pickLabelText}>PICK</Text></View><View style={styles.pin}><View style={styles.pinDot} /></View></View>
-      <View style={styles.searchContainer}>
-        <TextInput style={styles.input} placeholder="Search address" placeholderTextColor="#666" value={query} onChangeText={fetchSuggestions} returnKeyType="search" />
-        {fetching && <ActivityIndicator size="small" color="#009688" style={{ marginLeft: 8 }} />}
-        {suggestions.length > 0 && (<View style={styles.suggestionsList}>{suggestions.map(item => (<TouchableOpacity key={item.place_id} style={styles.suggestion} onPress={() => fetchCoordinates(item.place_id)}><Text style={styles.suggestionText}>{item.description}</Text></TouchableOpacity>))}</View>)}
+      <MapView 
+        ref={mapRef} 
+        style={{ flex: 1 }} 
+        initialRegion={selectedPlace ? 
+          { latitude: selectedPlace.lat, longitude: selectedPlace.lng, latitudeDelta: 0.01, longitudeDelta: 0.01 } : 
+          { latitude: 20.5937, longitude: 78.9629, latitudeDelta: 0.5, longitudeDelta: 0.5 }} 
+        showsUserLocation 
+        showsMyLocationButton={false} 
+        onRegionChangeComplete={onRegionChangeComplete} 
+      />
+      <View pointerEvents="none" style={styles.centerMarkerContainer}>
+        <View style={styles.pickLabel}><Text style={styles.pickLabelText}>PICK</Text></View>
+        <View style={styles.pin}><View style={styles.pinDot} /></View>
       </View>
-      <TouchableOpacity style={styles.currentLocationButton} onPress={getCurrentLocation}><Text style={styles.currentLocationText}>Use Current Location</Text></TouchableOpacity>
+      <View style={styles.searchContainer}>
+        <TextInput 
+          style={styles.input} 
+          placeholder="Search address" 
+          placeholderTextColor="#666" 
+          value={query} 
+          onChangeText={fetchSuggestions} 
+          returnKeyType="search" 
+        />
+        {fetching && <ActivityIndicator size="small" color="#009688" style={{ marginLeft: 8 }} />}
+        {suggestions.length > 0 && (
+          <View style={styles.suggestionsList}>
+            {suggestions.map(item => (
+              <TouchableOpacity key={item.place_id} style={styles.suggestion} onPress={() => fetchCoordinates(item.place_id)}>
+                <Text style={styles.suggestionText}>{item.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </View>
+      <TouchableOpacity style={styles.currentLocationButton} onPress={getCurrentLocation}>
+        <Text style={styles.currentLocationText}>Use Current Location</Text>
+      </TouchableOpacity>
 
       {selectedPlace && (
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 90} style={styles.keyboardAvoidingView}>
           <View style={styles.detailsContainer}>
             <ScrollView ref={scrollViewRef} style={styles.scrollView} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               <View style={styles.row}>
-                <View style={styles.fieldFull}><Text style={styles.label}>Name</Text><TextInput value={name} onChangeText={setName} style={styles.inputSmall} placeholder="Home, Office or Name" returnKeyType="next" /></View>
-                <View style={styles.fieldFull}><Text style={styles.label}>Phone</Text><TextInput value={phone} onChangeText={setPhone} style={styles.inputSmall} placeholder="Phone number" keyboardType="phone-pad" returnKeyType="done" /></View>
+                <View style={styles.fieldFull}>
+                  <Text style={styles.label}>Name</Text>
+                  <TextInput value={name} onChangeText={setName} style={styles.inputSmall} placeholder="Home, Office or Name" returnKeyType="next" />
+                </View>
+                <View style={styles.fieldFull}>
+                  <Text style={styles.label}>Phone</Text>
+                  <TextInput value={phone} onChangeText={setPhone} style={styles.inputSmall} placeholder="Phone number" keyboardType="phone-pad" returnKeyType="done" />
+                </View>
               </View>
-              <View style={styles.row}><View style={styles.field}><Text style={styles.label}>Area</Text><Text style={styles.value}>{selectedPlace.area || '-'}</Text><View style={styles.underline} /></View><View style={styles.field}><Text style={styles.label}>City</Text><Text style={styles.value}>{selectedPlace.city || '-'}</Text><View style={styles.underline} /></View></View>
-              <View style={styles.row}><View style={styles.field}><Text style={styles.label}>State</Text><Text style={styles.value}>{selectedPlace.state || '-'}</Text><View style={styles.underline} /></View><View style={styles.field}><Text style={styles.label}>Pincode</Text><Text style={styles.value}>{selectedPlace.pincode || '-'}</Text><View style={styles.underline} /></View></View>
-              <View style={styles.checkboxContainer}><TouchableOpacity onPress={() => setSetAsMain(v => !v)} style={styles.checkbox}><View style={[styles.checkboxInner, setAsMain && styles.checkboxInnerChecked]} /></TouchableOpacity><Text style={styles.checkboxText}>Set as main address</Text></View>
-              <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmLocation} disabled={saving}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmButtonText}>{mode === 'edit' ? 'Save Address' : 'Add Address'}</Text>}</TouchableOpacity>
+              <View style={styles.row}>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Area</Text>
+                  <Text style={styles.value}>{selectedPlace.area || '-'}</Text>
+                  <View style={styles.underline} />
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.label}>City</Text>
+                  <Text style={styles.value}>{selectedPlace.city || '-'}</Text>
+                  <View style={styles.underline} />
+                </View>
+              </View>
+              <View style={styles.row}>
+                <View style={styles.field}>
+                  <Text style={styles.label}>State</Text>
+                  <Text style={styles.value}>{selectedPlace.state || '-'}</Text>
+                  <View style={styles.underline} />
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Pincode</Text>
+                  <Text style={styles.value}>{selectedPlace.pincode || '-'}</Text>
+                  <View style={styles.underline} />
+                </View>
+              </View>
+              <View style={styles.checkboxContainer}>
+                <TouchableOpacity onPress={() => setSetAsMain(v => !v)} style={styles.checkbox}>
+                  <View style={[styles.checkboxInner, setAsMain && styles.checkboxInnerChecked]} />
+                </TouchableOpacity>
+                <Text style={styles.checkboxText}>Set as main address</Text>
+              </View>
+              <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmLocation} disabled={saving}>
+                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmButtonText}>{mode === 'edit' ? 'Save Address' : 'Add Address'}</Text>}
+              </TouchableOpacity>
             </ScrollView>
           </View>
         </KeyboardAvoidingView>

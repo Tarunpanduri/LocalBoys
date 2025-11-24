@@ -356,16 +356,10 @@ export default function CheckoutTwoScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#0e0e12" />
       <View style={styles.container}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 180 }}>
-          <View style={styles.section}>
-            <View style={styles.commissionInfo}>
-              <Text style={styles.commissionText}>Shop Commission: {shopCommission}%</Text>
-              <Text style={styles.commissionSubtext}>This shop's specific commission rate</Text>
-            </View>
-          </View>
 
           <View style={[styles.section, { marginTop: 15 }]}>
             <View style={styles.headerRow}>
-              <Text style={styles.sectionTitle}>PICKUP ADDRESS</Text>
+              <Text style={[styles.sectionTitle, { marginBottom: 5 }]}>PICKUP ADDRESS</Text>
               <TouchableOpacity onPress={() => navigation.navigate("HomeScreen")}>
                 <Text style={styles.editText}>EDIT</Text>
               </TouchableOpacity>
@@ -381,7 +375,7 @@ export default function CheckoutTwoScreen() {
 
           <View style={styles.section}>
             <View style={styles.headerRow}>
-              <Text style={styles.sectionTitle}>DROP ADDRESS</Text>
+              <Text style={[styles.sectionTitle,{marginBottom:5, marginTop:20}]}>DROP ADDRESS</Text>
               <TouchableOpacity onPress={() => setShowAddressModal(true)}>
                 <Text style={styles.editText}>SELECT</Text>
               </TouchableOpacity>

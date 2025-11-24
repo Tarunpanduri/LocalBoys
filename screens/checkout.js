@@ -418,12 +418,6 @@ export default function CheckoutScreen() {
             )}
           </View>
           
-          <View style={styles.section}>
-            <View style={styles.commissionInfo}>
-              <Text style={styles.commissionText}>Shop Commission: {shopCommission}%</Text>
-              <Text style={styles.commissionSubtext}>This shop's specific commission rate</Text>
-            </View>
-          </View>
         </ScrollView>
 
         <View style={styles.bottomSheet}>

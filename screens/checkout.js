@@ -88,6 +88,7 @@ export default function CheckoutScreen() {
           id: finalShopId, 
           name: shopData.name, 
           image: shopData.image, 
+          phone: shopData.phone || "",
           location: shopData.location ? { 
             lat: shopData.location.lat, 
             lng: shopData.location.lng 
@@ -294,13 +295,14 @@ export default function CheckoutScreen() {
         });
 
       const platformCommission = calculateCommission(subtotal, shopCommission, isPremiumOrder);
-      const driverPayout = Math.ceil(deliveryFee * 0.70);
+      const driverPayout = Math.ceil(deliveryFee);
       const platformCommissionRate = isPremiumOrder ? 0.00001 : shopCommission / 100;
 
       const orderData = {
         shopId,
         shopname: shop?.name || "Unknown Shop",
         shopimage: shop?.image || "",
+        shopphone: shop?.phone || "",
         items: cleanItems,
         subtotal: Math.ceil(subtotal),
         discount: Math.ceil(discount),

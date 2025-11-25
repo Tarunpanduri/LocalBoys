@@ -141,7 +141,7 @@ const styles = StyleSheet.create({
     actionButton: { alignItems: "center", padding: 12, flex: 1, maxWidth: 150 },
     actionText: { marginTop: 8, fontSize: 12, color: "#666", fontFamily: "Sen_Medium" },
     summaryGrid: { marginTop: 8 },
-    summaryItem: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" },
+    summaryItem: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, },
     totalItem: { borderBottomWidth: 0, paddingTop: 12, marginTop: 4, borderTopWidth: 1, borderTopColor: "#e0e0e0" },
     summaryLabel: { color: "#666", fontSize: 14, fontFamily: "Sen_Regular" },
     summaryValue: { color: "#333", fontSize: 14, fontFamily: "Sen_Medium" },

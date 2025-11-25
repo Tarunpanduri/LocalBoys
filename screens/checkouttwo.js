@@ -246,8 +246,7 @@ export default function CheckoutTwoScreen() {
       const platformCommission = isPremiumOrder ?
         Math.ceil(subtotal * 0.00001) :
         Math.ceil(subtotal * (shopCommission / 100));
-      
-      const driverPayout = Math.ceil(deliveryFee * 0.70);
+      const driverPayout = Math.ceil(deliveryFee);
       const platformCommissionRate = isPremiumOrder ? 0.00001 : shopCommission / 100;
 
       const orderData = {

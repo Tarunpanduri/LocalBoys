@@ -25,6 +25,7 @@ export default function MapScreen({ navigation, route }) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [setAsMain, setSetAsMain] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const mapRef = useRef(null);
   const regionChangeTimeout = useRef(null);
@@ -36,15 +37,37 @@ export default function MapScreen({ navigation, route }) {
   useEffect(() => {
     checkLocationPermission();
     registerForPushNotificationsAsync();
+    
+    const keyboardWillShow = Keyboard.addListener('keyboardWillShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    
+    const keyboardWillHide = Keyboard.addListener('keyboardWillHide', () => {
+      setKeyboardHeight(0);
+    });
+    
+    const keyboardDidShow = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    
+    const keyboardDidHide = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
     if (mode === 'edit' && initial) {
       setSelectedPlace({ lat: initial.lat, lng: initial.lng, ...initial });
       setName(initial.name || '');
       setPhone(initial.phone || '');
       setQuery(initial.formattedAddress || '');
     }
+    
     return () => {
       if (regionChangeTimeout.current) clearTimeout(regionChangeTimeout.current);
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
+      keyboardWillShow.remove();
+      keyboardWillHide.remove();
+      keyboardDidShow.remove();
+      keyboardDidHide.remove();
     };
   }, []);
 
@@ -327,55 +350,71 @@ export default function MapScreen({ navigation, route }) {
       </TouchableOpacity>
 
       {selectedPlace && (
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 90} style={styles.keyboardAvoidingView}>
-          <View style={styles.detailsContainer}>
-            <ScrollView ref={scrollViewRef} style={styles.scrollView} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <View style={styles.row}>
-                <View style={styles.fieldFull}>
-                  <Text style={styles.label}>Name</Text>
-                  <TextInput value={name} onChangeText={setName} style={styles.inputSmall} placeholder="Home, Office or Name" returnKeyType="next" />
-                </View>
-                <View style={styles.fieldFull}>
-                  <Text style={styles.label}>Phone</Text>
-                  <TextInput value={phone} onChangeText={setPhone} style={styles.inputSmall} placeholder="Phone number" keyboardType="phone-pad" returnKeyType="done" />
-                </View>
+        <View style={[styles.detailsContainer, { bottom: keyboardHeight > 0 ? keyboardHeight : 0 }]}>
+          <ScrollView 
+            ref={scrollViewRef} 
+            style={styles.scrollView} 
+            showsVerticalScrollIndicator={false} 
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.row}>
+              <View style={styles.fieldFull}>
+                <Text style={styles.label}>Name</Text>
+                <TextInput 
+                  value={name} 
+                  onChangeText={setName} 
+                  style={styles.inputSmall} 
+                  placeholder="Home, Office or Name" 
+                  returnKeyType="next" 
+                />
               </View>
-              <View style={styles.row}>
-                <View style={styles.field}>
-                  <Text style={styles.label}>Area</Text>
-                  <Text style={styles.value}>{selectedPlace.area || '-'}</Text>
-                  <View style={styles.underline} />
-                </View>
-                <View style={styles.field}>
-                  <Text style={styles.label}>City</Text>
-                  <Text style={styles.value}>{selectedPlace.city || '-'}</Text>
-                  <View style={styles.underline} />
-                </View>
+              <View style={styles.fieldFull}>
+                <Text style={styles.label}>Phone</Text>
+                <TextInput 
+                  value={phone} 
+                  onChangeText={setPhone} 
+                  style={styles.inputSmall} 
+                  placeholder="Phone number" 
+                  keyboardType="phone-pad" 
+                  returnKeyType="done" 
+                />
               </View>
-              <View style={styles.row}>
-                <View style={styles.field}>
-                  <Text style={styles.label}>State</Text>
-                  <Text style={styles.value}>{selectedPlace.state || '-'}</Text>
-                  <View style={styles.underline} />
-                </View>
-                <View style={styles.field}>
-                  <Text style={styles.label}>Pincode</Text>
-                  <Text style={styles.value}>{selectedPlace.pincode || '-'}</Text>
-                  <View style={styles.underline} />
-                </View>
+            </View>
+            <View style={styles.row}>
+              <View style={styles.field}>
+                <Text style={styles.label}>Area</Text>
+                <Text style={styles.value}>{selectedPlace.area || '-'}</Text>
+                <View style={styles.underline} />
               </View>
-              <View style={styles.checkboxContainer}>
-                <TouchableOpacity onPress={() => setSetAsMain(v => !v)} style={styles.checkbox}>
-                  <View style={[styles.checkboxInner, setAsMain && styles.checkboxInnerChecked]} />
-                </TouchableOpacity>
-                <Text style={styles.checkboxText}>Set as main address</Text>
+              <View style={styles.field}>
+                <Text style={styles.label}>City</Text>
+                <Text style={styles.value}>{selectedPlace.city || '-'}</Text>
+                <View style={styles.underline} />
               </View>
-              <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmLocation} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmButtonText}>{mode === 'edit' ? 'Save Address' : 'Add Address'}</Text>}
+            </View>
+            <View style={styles.row}>
+              <View style={styles.field}>
+                <Text style={styles.label}>State</Text>
+                <Text style={styles.value}>{selectedPlace.state || '-'}</Text>
+                <View style={styles.underline} />
+              </View>
+              <View style={styles.field}>
+                <Text style={styles.label}>Pincode</Text>
+                <Text style={styles.value}>{selectedPlace.pincode || '-'}</Text>
+                <View style={styles.underline} />
+              </View>
+            </View>
+            <View style={styles.checkboxContainer}>
+              <TouchableOpacity onPress={() => setSetAsMain(v => !v)} style={styles.checkbox}>
+                <View style={[styles.checkboxInner, setAsMain && styles.checkboxInnerChecked]} />
               </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
+              <Text style={styles.checkboxText}>Set as main address</Text>
+            </View>
+            <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmLocation} disabled={saving}>
+              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmButtonText}>{mode === 'edit' ? 'Save Address' : 'Add Address'}</Text>}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
       )}
     </View>
   );
@@ -402,8 +441,7 @@ const styles = StyleSheet.create({
   pickLabelText: { fontSize: 12, fontWeight: '700', color: '#222' },
   pin: { width: PIN_SIZE, height: PIN_SIZE, borderRadius: PIN_SIZE / 2, backgroundColor: '#e53935', justifyContent: 'center', alignItems: 'center', transform: [{ scale: 1.0 }], elevation: 3 },
   pinDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff' },
-  keyboardAvoidingView: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 1000 },
-  detailsContainer: { backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, elevation: 6, maxHeight: SCREEN_H * 0.5 },
+  detailsContainer: { position: 'absolute', left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, elevation: 6, maxHeight: SCREEN_H * 0.5,zIndex: 1000},
   scrollView: { padding: 18 },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   field: { flex: 1, marginHorizontal: 6 },

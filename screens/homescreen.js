@@ -214,8 +214,8 @@ export default function HomeScreen({ navigation }) {
             </TouchableOpacity>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate("TrackOrder")}><Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} /></TouchableOpacity>  
             <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate("Profile")}><Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} /></TouchableOpacity>
-            <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate("TrackOrder")}><Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} /></TouchableOpacity>
           </View>
         </View>
         <View style={styles.mediumcontent}>

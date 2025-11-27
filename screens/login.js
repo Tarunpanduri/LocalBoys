@@ -27,9 +27,11 @@ export default function Login({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
-  // Request notification permission and get Expo Push Token
+  // Request notification permission and get FCM Device Token
   const registerForPushNotificationsAsync = async (userId) => {
     try {
+      console.log("🔄 Starting Push Notification Registration...");
+      
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
 
@@ -40,23 +42,29 @@ export default function Login({ navigation }) {
 
       if (finalStatus !== "granted") {
         Alert.alert("Permission denied", "Failed to get push token for notifications.");
-        console.warn("Permission denied for push notifications");
+        console.warn("❌ Permission denied for push notifications");
         return;
       }
 
-      const tokenData = await Notifications.getExpoPushTokenAsync();
-      const expoToken = tokenData.data;
+      // 🛑 CRITICAL UPDATE: Getting Native Device Token (FCM)
+      // This is required for direct Firebase messaging with Images
+      const tokenData = await Notifications.getDevicePushTokenAsync();
+      const fcmToken = tokenData.data;
 
-      if (!expoToken) {
-        console.warn("Expo token is null, cannot save to Firebase");
+      console.log("🔥 FCM Device Token Generated:", fcmToken);
+
+      if (!fcmToken) {
+        console.warn("⚠️ FCM token is null, cannot save to Firebase");
         return;
       }
 
       if (userId) {
-        await set(ref(db, `users/${userId}/expoPushToken`), expoToken);
+        // Saving as 'fcmToken' to match the Admin script logic
+        await set(ref(db, `users/${userId}/fcmToken`), fcmToken);
+        console.log("✅ FCM Token successfully saved to Firebase for user:", userId);
       }
     } catch (error) {
-      console.error("Push token registration error:", error);
+      console.error("❌ Push token registration error:", error);
     }
   };
 
@@ -70,6 +78,7 @@ export default function Login({ navigation }) {
     const firebaseAuth = getAuth();
 
     try {
+      console.log("🔐 Attempting login for:", email);
 
       const userCredential = await signInWithEmailAndPassword(
         firebaseAuth,
@@ -78,7 +87,9 @@ export default function Login({ navigation }) {
       );
 
       const userId = userCredential.user.uid;
+      console.log("👤 User Logged In, ID:", userId);
 
+      // Register Token after successful login
       await registerForPushNotificationsAsync(userId);
 
       navigation.reset({
@@ -86,7 +97,7 @@ export default function Login({ navigation }) {
         routes: [{ name: "Addresses" }],
       });
     } catch (error) {
-      console.error("Login failed:", error);
+      console.error("❌ Login failed:", error);
       Alert.alert("Login Failed", error.message);
     } finally {
       setLoading(false);

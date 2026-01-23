@@ -1,13 +1,10 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { getAuth } from "firebase/auth";
-import { ref, update } from "firebase/database";
-import { db } from "../firebase";
+import { updateUserData } from "../utils/profile_util";
 
 export default function EditProfile({ navigation, route }) {
   const { userData } = route.params || {};
-  const auth = getAuth();
   const [loading, setLoading] = useState(false);
 
   const [firstName, setFirstName] = useState(userData?.firstName || "");
@@ -19,16 +16,18 @@ export default function EditProfile({ navigation, route }) {
       Alert.alert("Validation Error", "First name and mobile number are required.");
       return;
     }
+
     setLoading(true);
     try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) throw new Error("No user logged in");
-      const updates = { firstName: firstName.trim(), lastName: lastName.trim(), mobile: mobile.trim() };
-      await update(ref(db, `users/${currentUser.uid}`), updates);
+      await updateUserData({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        mobile: mobile.trim(),
+      });
+
       Alert.alert("Success", "Profile updated successfully");
       navigation.goBack();
     } catch (error) {
-      console.error("Error updating profile:", error);
       Alert.alert("Error", error.message || "Failed to update profile");
     } finally {
       setLoading(false);

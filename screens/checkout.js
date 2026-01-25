@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform } from "react-native";
+import React, { useEffect, useState,useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform,Animated,Dimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { auth, db } from "../firebase";
 import { ref, get, set, push, remove } from "firebase/database";
 import Toast from "react-native-root-toast";
+import { LinearGradient } from "expo-linear-gradient";
+
+const { width, height } = Dimensions.get("window");
 
 // Utils
 const getDistanceInKm = (lat1, lon1, lat2, lon2) => {
@@ -14,6 +17,140 @@ const getDistanceInKm = (lat1, lon1, lat2, lon2) => {
   const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
+};
+
+const SkeletonItem = ({ width, height, style, borderRadius = 4, baseColor, highlightColor }) => {
+  const translateX = useRef(new Animated.Value(-width)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(translateX, {
+        toValue: width,
+        duration: 1000,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [width]);
+
+  return (
+    <View
+      style={[
+        {
+          width: width,
+          height: height,
+          backgroundColor: baseColor,
+          borderRadius: borderRadius,
+          overflow: "hidden",
+        },
+        style,
+      ]}
+    >
+      <Animated.View
+        style={{
+          width: "100%",
+          height: "100%",
+          transform: [{ translateX }],
+        }}
+      >
+        <LinearGradient
+          colors={[baseColor, highlightColor, baseColor]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={{ width: "100%", height: "100%" }}
+        />
+      </Animated.View>
+    </View>
+  );
+};
+
+const CheckoutSkeleton = () => {
+  // Config for Dark Mode area (Top)
+  const darkBase = "#1a1a1f";
+  const darkHigh = "#2a2a2f";
+
+  // Config for Light Mode area (Bottom Sheet)
+  const lightBase = "#f0f0f0";
+  const lightHigh = "#ffffff";
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" backgroundColor="#0e0e12" />
+      <View style={styles.container}>
+        
+        {/* Top Section - Address (Dark Theme) */}
+        <View style={{ marginTop: 40, paddingHorizontal: 16 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+            <SkeletonItem width={120} height={14} baseColor={darkBase} highlightColor={darkHigh} />
+            <SkeletonItem width={40} height={14} baseColor={darkBase} highlightColor={darkHigh} />
+          </View>
+          {/* Address Box */}
+          <View style={{ backgroundColor: "#1a1a1f", padding: 14, borderRadius: 10 }}>
+            <SkeletonItem width={150} height={18} baseColor="#2a2a2f" highlightColor="#3a3a3f" style={{ marginBottom: 8 }} />
+            <SkeletonItem width="90%" height={14} baseColor="#2a2a2f" highlightColor="#3a3a3f" style={{ marginBottom: 6 }} />
+            <SkeletonItem width="60%" height={14} baseColor="#2a2a2f" highlightColor="#3a3a3f" />
+          </View>
+        </View>
+
+        {/* Bottom Sheet Simulation (Light Theme) */}
+        <View style={[styles.bottomSheet, { height: height * 0.65, justifyContent: 'flex-start' }]}>
+           {/* Items Section */}
+           <View style={{ padding: 16 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }}>
+                <SkeletonItem width={100} height={16} baseColor={lightBase} highlightColor={lightHigh} />
+                <SkeletonItem width={60} height={14} baseColor={lightBase} highlightColor={lightHigh} />
+              </View>
+
+              {/* Item Rows */}
+              {[1, 2].map((i) => (
+                <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }}>
+                  <View>
+                    <SkeletonItem width={140} height={16} baseColor={lightBase} highlightColor={lightHigh} style={{ marginBottom: 6 }} />
+                    <SkeletonItem width={50} height={12} baseColor={lightBase} highlightColor={lightHigh} />
+                  </View>
+                  <SkeletonItem width={60} height={16} baseColor={lightBase} highlightColor={lightHigh} />
+                </View>
+              ))}
+
+              {/* Coupon Section */}
+              <View style={{ marginTop: 10, marginBottom: 20 }}>
+                 <SkeletonItem width={80} height={16} baseColor={lightBase} highlightColor={lightHigh} style={{ marginBottom: 10 }} />
+                 <View style={{ flexDirection: 'row' }}>
+                    <SkeletonItem width="75%" height={45} baseColor={lightBase} highlightColor={lightHigh} style={{ marginRight: 10, borderRadius: 8 }} />
+                    <SkeletonItem width="20%" height={45} baseColor={lightBase} highlightColor={lightHigh} style={{ borderRadius: 8 }} />
+                 </View>
+              </View>
+
+              {/* Summary Section */}
+              <View style={{ backgroundColor: "#f9f9f9", padding: 16, borderRadius: 12 }}>
+                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <SkeletonItem width={60} height={14} baseColor="#e0e0e0" highlightColor="#f0f0f0" />
+                    <SkeletonItem width={40} height={14} baseColor="#e0e0e0" highlightColor="#f0f0f0" />
+                 </View>
+                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <SkeletonItem width={60} height={14} baseColor="#e0e0e0" highlightColor="#f0f0f0" />
+                    <SkeletonItem width={40} height={14} baseColor="#e0e0e0" highlightColor="#f0f0f0" />
+                 </View>
+                 <View style={{ height: 1, backgroundColor: '#eee', marginVertical: 8 }} />
+                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <SkeletonItem width={80} height={18} baseColor="#e0e0e0" highlightColor="#f0f0f0" />
+                    <SkeletonItem width={60} height={18} baseColor="#e0e0e0" highlightColor="#f0f0f0" />
+                 </View>
+              </View>
+           </View>
+
+           {/* Bottom Bar Simulation */}
+           <View style={[styles.bottomBar, { position: 'absolute', bottom: 0, width: '100%' }]}>
+              <View>
+                 <SkeletonItem width={40} height={12} baseColor={lightBase} highlightColor={lightHigh} style={{ marginBottom: 4 }} />
+                 <SkeletonItem width={80} height={20} baseColor={lightBase} highlightColor={lightHigh} />
+              </View>
+              <SkeletonItem width={140} height={45} baseColor={lightBase} highlightColor={lightHigh} borderRadius={10} />
+           </View>
+        </View>
+
+      </View>
+    </SafeAreaView>
+  );
 };
 
 const calculateCommission = (subtotal, shopCommission, isPremiumOrder = false) => {
@@ -60,6 +197,7 @@ export default function CheckoutScreen() {
   const [subtotal, setSubtotal] = useState(0);
   const [restaurantTotal, setRestaurantTotal] = useState(0);
   const [shopCommission, setShopCommission] = useState(15); // Will be updated from shop data
+  const [qrImage, setQrImage] = useState("");
   
   const user = auth.currentUser;
   const isPremiumOrder = subtotal > 10000;
@@ -93,8 +231,10 @@ export default function CheckoutScreen() {
             lat: shopData.location.lat, 
             lng: shopData.location.lng 
           } : null,
-          commission: shopCommissionValue
+          commission: shopCommissionValue,
+          qrImage: shopData.qr || ""
         };
+        setQrImage(finalShop.qrImage);
 
         // Load cart data
         let finalCart = cart;
@@ -373,9 +513,7 @@ export default function CheckoutScreen() {
   // Render loading
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#ff7a00" />
-      </View>
+      <CheckoutSkeleton />
     );
   }
 
@@ -432,7 +570,7 @@ export default function CheckoutScreen() {
 
             <View style={styles.section}>
               <View style={styles.headerRow}>
-                <Text style={styles.sectionTitle}>YOUR ITEMS</Text>
+                <Text style={styles.sectionTitletwo}>YOUR ITEMS</Text>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                   <Text style={styles.editText}>EDIT ITEMS</Text>
                 </TouchableOpacity>
@@ -449,7 +587,7 @@ export default function CheckoutScreen() {
             </View>
 
             <View style={styles.sectiontwo}>
-              <Text style={styles.sectionTitle}>COUPON</Text>
+              <Text style={styles.sectionTitletwo}>COUPON</Text>
               <View style={styles.couponRow}>
                 <TextInput
                   style={styles.couponInput}
@@ -495,7 +633,7 @@ export default function CheckoutScreen() {
             </View>
 
             <View style={styles.sectiontwo}>
-              <Text style={styles.sectionTitle}>PAYMENT MODE</Text>
+              <Text style={styles.sectionTitletwo}>PAYMENT MODE</Text>
               <View style={styles.paymentRow}>
                 <TouchableOpacity
                   style={[styles.modeBtn, paymentMode === "COD" && styles.activeMode]}
@@ -516,10 +654,11 @@ export default function CheckoutScreen() {
               </View>
               {paymentMode === "Online" && (
                 <View style={styles.onlineBox}>
-                  <Image
-                    source={{ uri: "https://i.ibb.co/7WpZKqR/qr-placeholder.png" }}
-                    style={styles.qrImage}
-                  />
+                  {qrImage ? (
+                    <Image source={{ uri: qrImage }} style={styles.qrImage} />
+                  ) : (
+                    <Text style={styles.noQrText}>QR code not available</Text>
+                  )}
                   <TextInput
                     style={styles.transactionInput}
                     placeholder="Enter Transaction ID"
@@ -570,8 +709,9 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0e0e12" },
   emptyText: { color: "#aaa", fontSize: 15, fontFamily: "Sen_Regular" },
   section: { marginTop: 20, paddingHorizontal: 16 },
-  sectiontwo: { paddingHorizontal: 16 },
+  sectiontwo: { paddingHorizontal: 16, marginTop: 20 },
   sectionTitle: { color: "#fff", fontSize: 14, fontFamily: "Sen_Medium", marginBottom: 10, opacity: 0.9, marginLeft: 3 },
+  sectionTitletwo: { color: "#0e0e12", fontSize: 14, fontFamily: "Sen_Medium", marginBottom: 5, opacity: 0.9, marginLeft: 3 },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   editText: { color: "#ff7a00", fontSize: 13, fontFamily: "Sen_Medium" },
   addressBox: { backgroundColor: "#1a1a1f", padding: 14, borderRadius: 10 },
@@ -604,12 +744,12 @@ const styles = StyleSheet.create({
   divider: { borderBottomWidth: 1, borderBottomColor: "#ddd", marginVertical: 8 },
   totalText: { color: "#0e0e12", fontFamily: "Sen_Bold", fontSize: 15 },
   totalValue: { color: "#0e0e12", fontFamily: "Sen_Bold", fontSize: 15 },
-  paymentRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 10, marginBottom: 20 },
+  paymentRow: { flexDirection: "row", justifyContent: "space-between", marginTop:2, marginBottom: 20 },
   modeBtn: { flex: 1, backgroundColor: "#f0f0f0", borderRadius: 8, padding: 12, alignItems: "center", marginHorizontal: 4 },
   activeMode: { backgroundColor: "#ff7a00" },
   modeText: { color: "#0e0e12", fontFamily: "Sen_Medium", fontSize: 13 },
   activeModeText: { color: "#fff" },
-  onlineBox: { alignItems: "center", marginTop: 12, paddingBottom: 20 },
+  onlineBox: { alignItems: "center", paddingBottom: 20 },
   qrImage: { width: 140, height: 140, marginBottom: 12, borderRadius: 8 },
   transactionInput: { backgroundColor: "#f0f0f0", color: "#0e0e12", borderRadius: 8, width: "90%", padding: 10, marginBottom: 8, fontFamily: "Sen_Regular" },
   qrNote: { fontSize: 12, color: "#555", textAlign: "center", fontFamily: "Sen_Regular" },

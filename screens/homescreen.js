@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Image, ActivityIndicator, RefreshControl, Dimensions, StatusBar } from "react-native";
+import React, { useEffect, useState, useCallback,useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Image, RefreshControl, Dimensions, StatusBar,Animated } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db, auth } from "../firebase";
 import { ref as dbRef, get, onValue } from "firebase/database";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
+import { useFonts } from "expo-font";
 
 const { width } = Dimensions.get("window");
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
@@ -14,6 +15,105 @@ const haversineDistance = (lat1, lon1, lat2, lon2) => {
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
+
+const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
+  const translateX = useRef(new Animated.Value(-width)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(translateX, {
+        toValue: width,
+        duration: 1000,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [width]);
+
+  return (
+    <View
+      style={[
+        {
+          width: width,
+          height: height,
+          backgroundColor: "#E1E9EE",
+          borderRadius: borderRadius,
+          overflow: "hidden",
+        },
+        style,
+      ]}
+    >
+      <Animated.View
+        style={{
+          width: "100%",
+          height: "100%",
+          transform: [{ translateX }],
+        }}
+      >
+        <LinearGradient
+          colors={["transparent", "rgba(255, 255, 255, 0.6)", "transparent"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={{ width: "100%", height: "100%" }}
+        />
+      </Animated.View>
+    </View>
+  );
+};
+
+const SkeletonLoadingScreen = () => {
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" translucent={false} />
+      
+      <LinearGradient colors={["#E0E0E0", "#ffffff"]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 180 }} />
+
+      <View style={styles.screen}>
+        <View style={styles.headerRow}>
+          <View style={styles.deliveryCol}>
+            <SkeletonItem width={60} height={12} style={{ marginBottom: 6 }} />
+            <SkeletonItem width={150} height={16} />
+          </View>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <SkeletonItem width={36} height={36} borderRadius={5} />
+            <SkeletonItem width={36} height={36} borderRadius={5} />
+          </View>
+        </View>
+
+        <View style={styles.mediumcontent}>
+          <SkeletonItem width="100%" height={50} borderRadius={12} style={{ marginBottom: 20 }} />
+
+          <SkeletonItem width={width - 36} height={(width - 100) * 0.5} borderRadius={10} style={{ marginBottom: 20 }} />
+
+          <View style={styles.sectionHeader}>
+            <SkeletonItem width={100} height={20} />
+          </View>
+
+          <View style={{ flexDirection: "row", marginTop: 10, marginBottom: 15, gap: 10 }}>
+            {[1, 2, 3, 4].map((i) => (
+              <SkeletonItem key={i} width={80} height={35} borderRadius={10} />
+            ))}
+          </View>
+
+          {[1, 2].map((i) => (
+            <View key={i} style={[styles.shopCard, { borderWidth: 0, elevation: 0 }]}>
+              <SkeletonItem width="100%" height={Math.round(width * 0.38)} borderRadius={0} />
+              <View style={styles.shopInfo}>
+                <SkeletonItem width={180} height={18} style={{ marginBottom: 8 }} />
+                <SkeletonItem width={120} height={14} style={{ marginBottom: 12 }} />
+                <View style={{ flexDirection: "row", gap: 12 }}>
+                  <SkeletonItem width={40} height={12} />
+                  <SkeletonItem width={40} height={12} />
+                  <SkeletonItem width={40} height={12} />
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+};
+
 
 export default function HomeScreen({ navigation }) {
   const [uid, setUid] = useState(null);
@@ -33,6 +133,13 @@ export default function HomeScreen({ navigation }) {
   const [categoryMeta, setCategoryMeta] = useState({});
   const [activeTab, setActiveTab] = useState("products");
   const [eventUrl, setEventUrl] = useState("");
+
+  const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+    ...FontAwesome5.font,
+    ...MaterialIcons.font,
+  });
+
 
   useEffect(() => {
     const eventRef = dbRef(db, "admin_data/general/event");
@@ -184,7 +291,10 @@ export default function HomeScreen({ navigation }) {
     </TouchableOpacity>
   );
 
-  if (loading) return <SafeAreaView style={styles.containerCentered}><ActivityIndicator size="large" /></SafeAreaView>;
+
+  if (loading || !fontsLoaded) {
+    return <SkeletonLoadingScreen />;
+  }
 
   const renderContent = () => (
     <>

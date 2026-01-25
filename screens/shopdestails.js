@@ -1,19 +1,113 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, FlatList, Dimensions, StatusBar, Alert } from "react-native";
+import React, { useEffect, useState, useMemo, useCallback,useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, FlatList, Dimensions, StatusBar, Alert,Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { auth, db } from "../firebase";
 import { ref as dbRef, set, get, remove, onValue } from "firebase/database";
 import Toast from "react-native-root-toast";
+import { useFonts } from "expo-font";
 
 const { width } = Dimensions.get("window");
 const CARD_PADDING = 12, CARD_GUTTER = 12, CARD_WIDTH = Math.round((width - CARD_PADDING * 2 - CARD_GUTTER) / 2);
+const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
+  const translateX = useRef(new Animated.Value(-width)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(translateX, {
+        toValue: width,
+        duration: 1000,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [width]);
+
+  return (
+    <View
+      style={[
+        {
+          width: width,
+          height: height,
+          backgroundColor: "#E1E9EE",
+          borderRadius: borderRadius,
+          overflow: "hidden",
+        },
+        style,
+      ]}
+    >
+      <Animated.View
+        style={{
+          width: "100%",
+          height: "100%",
+          transform: [{ translateX }],
+        }}
+      >
+        <LinearGradient
+          colors={["transparent", "rgba(255, 255, 255, 0.6)", "transparent"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={{ width: "100%", height: "100%" }}
+        />
+      </Animated.View>
+    </View>
+  );
+};
+
+const ShopDetailsSkeleton = () => {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      <View style={[styles.headerRow, { marginBottom: 10 }]}>
+        <SkeletonItem width={38} height={38} borderRadius={19} />
+        <SkeletonItem width={120} height={20} />
+        <SkeletonItem width={38} height={38} borderRadius={19} />
+      </View>
+      <View style={{ paddingHorizontal: CARD_PADDING }}>
+        <SkeletonItem width="100%" height={160} borderRadius={18} style={{ marginBottom: 12 }} />
+        <SkeletonItem width={200} height={24} style={{ marginBottom: 8 }} />
+        <SkeletonItem width="90%" height={14} style={{ marginBottom: 6 }} />
+        <SkeletonItem width="60%" height={14} style={{ marginBottom: 14 }} />
+        <View style={{ flexDirection: 'row', gap: 15, marginBottom: 20 }}>
+          <SkeletonItem width={50} height={16} />
+          <SkeletonItem width={50} height={16} />
+          <SkeletonItem width={50} height={16} />
+        </View>
+        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+          {[1, 2, 3, 4].map((i) => (
+            <SkeletonItem key={i} width={70} height={32} borderRadius={22} />
+          ))}
+        </View>
+        <SkeletonItem width={100} height={20} style={{ marginBottom: 12 }} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+          {[1, 2, 3, 4].map((i) => (
+            <View key={i} style={{ width: CARD_WIDTH, marginBottom: CARD_GUTTER, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#eee' }}>
+              <SkeletonItem width="100%" height={CARD_WIDTH * 0.6} borderRadius={0} />
+              <View style={{ padding: 10 }}>
+                <SkeletonItem width="90%" height={16} style={{ marginBottom: 6 }} />
+                <SkeletonItem width="70%" height={12} style={{ marginBottom: 10 }} />
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <SkeletonItem width={40} height={16} />
+                  <SkeletonItem width={36} height={36} borderRadius={18} />
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+};
 
 export default function ShopDetails({ route, navigation }) {
   const { shopId, shop } = route.params || {};
   const [productsObj, setProductsObj] = useState({}), [loading, setLoading] = useState(true), [activeCategory, setActiveCategory] = useState(null),
     [adminCats, setAdminCats] = useState({}), [error, setError] = useState(null), [userCart, setUserCart] = useState({});
   const user = auth.currentUser;
+  const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+    ...MaterialIcons.font,
+  });
 
   const cartShopId = Object.keys(userCart || {}).find((k) => k !== "updatedAt");
   const cartShop = cartShopId ? userCart[cartShopId] : null;
@@ -160,7 +254,7 @@ const addToCart = async (product) => {
   const getCategoryTheme = useCallback((catLabel) => (catLabel === "All" ? "#28A745" : adminCats[catLabel]?.Theme || "#28A745"), [adminCats]);
   const themeColor = getCategoryTheme(activeCategory);
 
-  if (loading) return <SafeAreaView style={styles.centered}><ActivityIndicator size="large" /></SafeAreaView>;
+  if (loading || !fontsLoaded) return <ShopDetailsSkeleton />;
   if (error) return <SafeAreaView style={styles.centered}><Text style={{ color: "#b00020" }}>{error}</Text></SafeAreaView>;
   if (!shop) return <SafeAreaView style={styles.centered}><Text style={{ color: "#333" }}>Shop not found</Text></SafeAreaView>;
 
@@ -170,8 +264,8 @@ const addToCart = async (product) => {
         <Ionicons name="chevron-back" size={20} color="#10202A" />
       </TouchableOpacity>
       <Text style={styles.headerTitle}>Shop Details</Text>
-      <TouchableOpacity style={styles.iconBtn} onPress={() => Alert.alert("Menu", "Menu actions")} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-        <Ionicons name="ellipsis-vertical" size={18} color="#10202A" />
+      <TouchableOpacity >
+        <Ionicons name="ellipsis-vertical" size={18} color="#ffffff" />
       </TouchableOpacity>
     </View>
     <View style={styles.bannerWrap}>

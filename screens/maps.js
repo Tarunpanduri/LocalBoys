@@ -7,7 +7,8 @@ import Constants from 'expo-constants';
 import { auth, db as database } from '../firebase';
 import { ref, update, get, push, set } from 'firebase/database';
 
-const GOOGLE_MAPS_API_KEY = 'AIzaSyA_pgpDfyn6jEmXkOKww8OvueM7puMKD_g';
+const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
+
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 export default function MapScreen({ navigation, route }) {
@@ -425,20 +426,20 @@ const PICK_LABEL_HEIGHT = 26;
 const styles = StyleSheet.create({
   permissionContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#fff' },
   logo: { width: 80, height: 80, marginBottom: 10 },
-  permissionText: { fontSize: 16, textAlign: 'center', marginBottom: 20, color: '#333' },
+  permissionText: { fontSize: 16, textAlign: 'center', marginBottom: 20, color: '#333', fontFamily: "Sen_Medium" },
   permissionButton: { backgroundColor: '#28A745', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 8, alignItems: 'center' },
-  permissionButtonText: { color: '#fff', fontSize: 16 },
+  permissionButtonText: { color: '#fff', fontSize: 16, fontFamily: "Sen_Bold" },
   searchContainer: { position: 'absolute', top: Platform.OS === 'android' ? 54 : 70, left: 12, right: 12, zIndex: 1000 },
-  input: { height: 48, borderRadius: 10, paddingHorizontal: 12, fontSize: 15, backgroundColor: '#fff', borderColor: '#e4e7eb', borderWidth: 1 },
-  inputSmall: { height: 44, borderRadius: 8, paddingHorizontal: 10, fontSize: 14, backgroundColor: '#fff', borderColor: '#e4e7eb', borderWidth: 1 },
+  input: { height: 48, borderRadius: 10, paddingHorizontal: 12, fontSize: 15, backgroundColor: '#fff', borderColor: '#e4e7eb', borderWidth: 1,fontFamily: "Sen_Regular" },
+  inputSmall: { height: 44, borderRadius: 8, paddingHorizontal: 10, fontSize: 14, backgroundColor: '#fff', borderColor: '#e4e7eb', borderWidth: 1, fontFamily: "Sen_Regular" },
   suggestionsList: { marginTop: 6, backgroundColor: '#fff', borderRadius: 8, maxHeight: SCREEN_H * 0.28, borderColor: '#e6e6e6', borderWidth: 1 },
   suggestion: { paddingVertical: 12, paddingHorizontal: 12, borderBottomColor: '#f0f0f0', borderBottomWidth: 1 },
-  suggestionText: { fontSize: 14, color: '#222' },
+  suggestionText: { fontSize: 14, color: '#222', fontFamily: "Sen_Regular" },
   currentLocationButton: { position: 'absolute', top: Platform.OS === 'android' ? 120 : 138, right: 16, backgroundColor: '#009688', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, zIndex: 1001 },
-  currentLocationText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
+  currentLocationText: { color: '#fff', fontSize: 13, fontFamily: "Sen_Bold" },
   centerMarkerContainer: { position: 'absolute', top: '50%', left: '50%', marginLeft: -(PIN_SIZE / 2), marginTop: -(PIN_SIZE + PICK_LABEL_HEIGHT + 6), alignItems: 'center', justifyContent: 'center', zIndex: 1000, pointerEvents: 'none' },
   pickLabel: { backgroundColor: '#fff', paddingHorizontal: 8, height: PICK_LABEL_HEIGHT, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginBottom: 6, elevation: 2 },
-  pickLabelText: { fontSize: 12, fontWeight: '700', color: '#222' },
+  pickLabelText: { fontSize: 12, fontFamily: "Sen_Regular", color: '#222' },
   pin: { width: PIN_SIZE, height: PIN_SIZE, borderRadius: PIN_SIZE / 2, backgroundColor: '#e53935', justifyContent: 'center', alignItems: 'center', transform: [{ scale: 1.0 }], elevation: 3 },
   pinDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff' },
   detailsContainer: { position: 'absolute', left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, elevation: 6, maxHeight: SCREEN_H * 0.5,zIndex: 1000},
@@ -446,14 +447,14 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   field: { flex: 1, marginHorizontal: 6 },
   fieldFull: { flex: 1, marginHorizontal: 6 },
-  label: { fontSize: 12, color: '#888', marginBottom: 6 },
-  value: { fontSize: 16, color: '#000' },
+  label: { fontSize: 12, color: '#888', marginBottom: 6, fontFamily: "Sen_Regular" },
+  value: { fontSize: 16, color: '#000', fontFamily: "Sen_Medium" },
   underline: { height: 1, backgroundColor: '#E0E0E0', marginTop: 6 },
   checkboxContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 8 },
   checkbox: { width: 22, height: 22, borderRadius: 4, borderWidth: 1, borderColor: '#ccc', alignItems: 'center', justifyContent: 'center' },
   checkboxInner: { width: 12, height: 12 },
   checkboxInnerChecked: { backgroundColor: '#28A745' },
-  checkboxText: { marginLeft: 8, fontSize: 14 },
+  checkboxText: { marginLeft: 8, fontSize: 14, color: '#333', fontFamily: "Sen_Regular" },
   confirmButton: { backgroundColor: '#28A745', paddingVertical: 14, borderRadius: 10, alignItems: 'center', marginTop: 12, marginBottom: Platform.OS === 'ios' ? 20 : 10 },
-  confirmButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  confirmButtonText: { color: '#fff', fontSize: 15, fontFamily: "Sen_Bold" },
 });

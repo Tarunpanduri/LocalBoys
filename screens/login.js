@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState,useEffect,useRef } from "react";
 import {
   View,
   Text,
@@ -12,13 +12,104 @@ import {
   StatusBar,
   Image,
   ActivityIndicator,
+  Animated,
+  Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
+import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import { db } from "../firebase";
-import { ref, set } from "firebase/database";
+import { ref, update } from "firebase/database";
+import { useFonts } from "expo-font";
+import { LinearGradient } from "expo-linear-gradient";
+
+const { width, height } = Dimensions.get("window");
+
+const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
+  const translateX = useRef(new Animated.Value(-width)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(translateX, {
+        toValue: width,
+        duration: 1000,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [width]);
+
+  return (
+    <View
+      style={[
+        {
+          width: width,
+          height: height,
+          backgroundColor: "#E1E9EE",
+          borderRadius: borderRadius,
+          overflow: "hidden",
+        },
+        style,
+      ]}
+    >
+      <Animated.View
+        style={{
+          width: "100%",
+          height: "100%",
+          transform: [{ translateX }],
+        }}
+      >
+        <LinearGradient
+          colors={["transparent", "rgba(255, 255, 255, 0.6)", "transparent"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={{ width: "100%", height: "100%" }}
+        />
+      </Animated.View>
+    </View>
+  );
+};
+
+const SignUpSkeleton = () => {
+  return (
+    <SafeAreaView style={[styles.container, { paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0 }]}>
+      <StatusBar barStyle="dark-content" backgroundColor="#B0E57E" translucent={false} />
+      <View style={{ flex: 1, justifyContent: "flex-end" }}>
+        
+        {/* Header Skeleton */}
+        <View style={styles.header}>
+           {/* Logo Placeholder */}
+           <SkeletonItem width={80} height={80} borderRadius={10} style={{ marginBottom: 10 }} /> 
+           {/* Title Placeholder */}
+           <SkeletonItem width={120} height={30} style={{ marginBottom: 5 }} /> 
+           {/* Subtitle Placeholder */}
+           <SkeletonItem width={180} height={14} />
+        </View>
+
+        {/* Form Skeleton */}
+        <View style={styles.form}>
+           {/* Email */}
+           <SkeletonItem width={50} height={12} style={{ marginTop: 10, marginBottom: 5 }} />
+           <SkeletonItem width="100%" height={45} borderRadius={10} />
+
+           {/* Password */}
+           <SkeletonItem width={70} height={12} style={{ marginTop: 10, marginBottom: 5 }} />
+           <SkeletonItem width="100%" height={45} borderRadius={10} />
+
+           {/* Sign Up Button */}
+           <SkeletonItem width="100%" height={50} borderRadius={10} style={{ marginTop: 25 }} />
+
+           {/* Bottom Link */}
+           <View style={{ alignItems: 'center', marginTop: 20 }}>
+              <SkeletonItem width={200} height={14} />
+           </View>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+};
 
 export default function Login({ navigation }) {
   const [email, setEmail] = useState("");
@@ -26,12 +117,28 @@ export default function Login({ navigation }) {
   const [secureText, setSecureText] = useState(true);
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
 
-  // Request notification permission and get FCM Device Token
+    const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+  });
+
+
+    if ( !fontsLoaded) {
+    return <SignUpSkeleton />;
+  }
+
+
+  // Request notification permission and get Expo Push Token
   const registerForPushNotificationsAsync = async (userId) => {
+    // 1. Check if physical device
+    if (!Device.isDevice) {
+      console.log('Must use physical device for Push Notifications');
+      return;
+    }
+
     try {
-      console.log("🔄 Starting Push Notification Registration...");
-      
+      // 2. Permission Check
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
 
@@ -41,27 +148,35 @@ export default function Login({ navigation }) {
       }
 
       if (finalStatus !== "granted") {
-        Alert.alert("Permission denied", "Failed to get push token for notifications.");
+        Alert.alert("Permission denied", "Enable notifications to receive updates.");
         console.warn("❌ Permission denied for push notifications");
         return;
       }
 
-      // 🛑 CRITICAL UPDATE: Getting Native Device Token (FCM)
-      // This is required for direct Firebase messaging with Images
-      const tokenData = await Notifications.getDevicePushTokenAsync();
-      const fcmToken = tokenData.data;
+      // 3. Get Expo Push Token (Replaces Native Device Token)
+      // We explicitly pass projectId to ensure EAS compatibility
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+      
+      if (!projectId) {
+        console.log('⚠️ Project ID not found. Ensure EAS Configuration is correct.');
+      }
 
-      console.log("🔥 FCM Device Token Generated:", fcmToken);
+      const tokenData = await Notifications.getExpoPushTokenAsync({
+        projectId: projectId,
+      });
+      
+      const expoToken = tokenData.data;
 
-      if (!fcmToken) {
-        console.warn("⚠️ FCM token is null, cannot save to Firebase");
+      if (!expoToken) {
+        console.warn("⚠️ Expo token is null, cannot save to Firebase");
         return;
       }
 
+      // 4. Save to Firebase
       if (userId) {
-        // Saving as 'fcmToken' to match the Admin script logic
-        await set(ref(db, `users/${userId}/fcmToken`), fcmToken);
-        console.log("✅ FCM Token successfully saved to Firebase for user:", userId);
+        // Using 'update' to safely add the token without overwriting other user data
+        // Saving as 'expoPushToken' to match App.js logic
+        await update(ref(db, `users/${userId}`), { expoPushToken: expoToken });
       }
     } catch (error) {
       console.error("❌ Push token registration error:", error);
@@ -78,8 +193,6 @@ export default function Login({ navigation }) {
     const firebaseAuth = getAuth();
 
     try {
-      console.log("🔐 Attempting login for:", email);
-
       const userCredential = await signInWithEmailAndPassword(
         firebaseAuth,
         email.trim(),
@@ -87,7 +200,6 @@ export default function Login({ navigation }) {
       );
 
       const userId = userCredential.user.uid;
-      console.log("👤 User Logged In, ID:", userId);
 
       // Register Token after successful login
       await registerForPushNotificationsAsync(userId);

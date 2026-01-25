@@ -1,9 +1,123 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, ActivityIndicator } from "react-native";
+import React, { useEffect, useState,useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, ActivityIndicator,Animated, Dimensions } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from "../firebase";
 import { ref, onValue } from "firebase/database";
+import { LinearGradient } from "expo-linear-gradient";
+import { useFonts } from "expo-font"; 
+
+const { width,height } = Dimensions.get("window");
+
+
+// --- SKELETON COMPONENT START ---
+const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
+  const translateX = useRef(new Animated.Value(-width)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(translateX, {
+        toValue: width,
+        duration: 1000,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [width]);
+
+  return (
+    <View
+      style={[
+        {
+          width: width,
+          height: height,
+          backgroundColor: "#E1E9EE",
+          borderRadius: borderRadius,
+          overflow: "hidden",
+        },
+        style,
+      ]}
+    >
+      <Animated.View
+        style={{
+          width: "100%",
+          height: "100%",
+          transform: [{ translateX }],
+        }}
+      >
+        <LinearGradient
+          colors={["transparent", "rgba(255, 255, 255, 0.6)", "transparent"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={{ width: "100%", height: "100%" }}
+        />
+      </Animated.View>
+    </View>
+  );
+};
+
+const TrackOrderSkeleton = () => {
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={{ marginTop: 20 }}>
+        {/* Header Skeleton */}
+        <View style={styles.headerRow}>
+          <SkeletonItem width={38} height={38} borderRadius={19} />
+          <SkeletonItem width={120} height={20} style={{ marginLeft: 15 }} />
+        </View>
+
+        {/* Horizontal Orders Skeleton */}
+        <View style={{ flexDirection: 'row', paddingHorizontal: 12, marginTop: 10 }}>
+          {[1, 2, 3].map((i) => (
+            <View key={i} style={{ marginRight: 12, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#eee' }}>
+              <SkeletonItem width={160} height={90} borderRadius={0} />
+              <View style={{ padding: 10 }}>
+                <SkeletonItem width={100} height={15} style={{ marginBottom: 6 }} />
+                <SkeletonItem width={60} height={12} style={{ marginBottom: 6 }} />
+                <SkeletonItem width={80} height={12} style={{ marginBottom: 8 }} />
+                <SkeletonItem width={40} height={14} />
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* Details Card Skeleton */}
+      <View style={styles.detailsContainer}>
+        <View style={styles.detailsCard}>
+          {/* Shop Title & Time */}
+          <SkeletonItem width={180} height={22} style={{ marginBottom: 8 }} />
+          <SkeletonItem width={120} height={14} style={{ marginBottom: 20 }} />
+
+          {/* Items List */}
+          <SkeletonItem width="90%" height={16} style={{ marginBottom: 8 }} />
+          <SkeletonItem width="70%" height={16} style={{ marginBottom: 25 }} />
+
+          {/* Summary */}
+          <View style={{ alignItems: 'center', marginBottom: 25 }}>
+            <SkeletonItem width={100} height={12} style={{ marginBottom: 8 }} />
+            <SkeletonItem width={80} height={24} style={{ marginBottom: 12 }} />
+            <SkeletonItem width={120} height={12} style={{ marginBottom: 8 }} />
+            <SkeletonItem width={60} height={14} />
+          </View>
+
+          {/* Timeline Skeleton */}
+          <View style={{ marginLeft: 6 }}>
+            {[1, 2, 3, 4].map((i) => (
+              <View key={i} style={{ flexDirection: 'row', marginBottom: 18 }}>
+                <View style={{ marginRight: 10, alignItems: 'center' }}>
+                  <SkeletonItem width={12} height={12} borderRadius={6} />
+                  {i < 4 && <SkeletonItem width={2} height={32} style={{ marginTop: 2 }} />}
+                </View>
+                <SkeletonItem width={250} height={16} />
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+};
+
 
 const STATUS_STEPS = [
   { key: "pending", label: "Your order has been received" },
@@ -18,6 +132,11 @@ const TrackOrder = ({ navigation }) => {
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+    ...MaterialIcons.font,
+  });
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -40,7 +159,10 @@ const TrackOrder = ({ navigation }) => {
     return () => unsubscribe();
   }, []);
 
-  if (loading) return <SafeAreaView style={styles.center}><ActivityIndicator size="large" color="#4CAF50" /></SafeAreaView>;
+  if (loading || !fontsLoaded) {
+    return <TrackOrderSkeleton />;
+  }
+  
   if (orders.length === 0) return (
     <SafeAreaView style={styles.center}>
       <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />

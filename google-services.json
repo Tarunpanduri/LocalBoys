@@ -1,14 +1,14 @@
 {
   "project_info": {
-    "project_number": "792340084783",
-    "firebase_url": "https://localboys-9516a-default-rtdb.firebaseio.com",
-    "project_id": "localboys-9516a",
-    "storage_bucket": "localboys-9516a.firebasestorage.app"
+    "project_number": "44592964622",
+    "firebase_url": "https://localboys-new-default-rtdb.firebaseio.com",
+    "project_id": "localboys-new",
+    "storage_bucket": "localboys-new.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:792340084783:android:4d8741fbfd3a305435eeda",
+        "mobilesdk_app_id": "1:44592964622:android:8039b16f4d903f43c7c85f",
         "android_client_info": {
           "package_name": "com.tarunpanduri1388.LocalBoys"
         }
@@ -16,7 +16,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDE35vHFyYYFWGAWdXakK9YtbTV780EiXA"
+          "current_key": "AIzaSyB-F0boERbRhfTsiBMycirjSzEZ4mI7lGE"
         }
       ],
       "services": {

@@ -7,6 +7,9 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RootSiblingParent } from 'react-native-root-siblings';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import * as Device from 'expo-device'; 
+
+// Screens
 import Login from './screens/login';
 import SignUp from './screens/signup';
 import MapScreen from './screens/maps';
@@ -19,21 +22,29 @@ import AddressesScreen from './screens/AddressesScreen';
 import Profile from './screens/profile';
 import CheckoutScreentwo from './screens/checkouttwo';
 import EditProfile from './screens/editprofile';
+import PrivacyPolicyScreen from './screens/privacypolicy';
+import TermsAndConditionsScreen from './screens/Terms';
+
+// Firebase
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebase';
 import { ref, update } from 'firebase/database';
 
 SplashScreen.preventAutoHideAsync();
 
+// This handler determines how the app handles notifications while it is OPEN (Foreground)
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true, shouldShowBanner: true, shouldPlaySound: true, shouldSetBadge: true,
+    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
   })
 });
 
 const Stack = createNativeStackNavigator();
 export const navigationRef = createNavigationContainerRef();
-const allowedRoutes = ['HomeScreen','TrackOrder','OrderConfirmation','Profile','ShopDetails','Addresses'];
+const allowedRoutes = ['HomeScreen', 'TrackOrder', 'OrderConfirmation', 'Profile', 'ShopDetails', 'Addresses'];
 
 export default function App() {
   const [fontsLoaded] = useFonts({ Sen_Regular: Sen_400Regular, Sen_Medium: Sen_500Medium, Sen_Bold: Sen_700Bold, Sen_ExtraBold: Sen_800ExtraBold });
@@ -46,25 +57,61 @@ export default function App() {
   }, [fontsLoaded, checkingAuth]);
 
   const registerForPushNotificationsAsync = async (userId = null) => {
-    if (!Constants.isDevice) return null;
+    // 1. Check if physical device
+    if (!Device.isDevice) {
+      console.log('Must use physical device for Push Notifications');
+      return null;
+    }
+
+    // 2. Setup Android Channel (UPDATED ID TO FORCE REFRESH)
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('localboys_high_priority', {
-        name: 'High Priority Updates', importance: Notifications.AndroidImportance.MAX, vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FF231F7C', showBadge: true, lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      // We added '_v2' to force Android to create a fresh channel with new settings
+      await Notifications.setNotificationChannelAsync('localboys_high_priority_v2', {
+        name: 'High Priority Updates',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF231F7C',
+        showBadge: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
     }
+
     try {
+      // 3. Check Permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus === 'granted' ? 'granted' : (await Notifications.requestPermissionsAsync()).status;
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
       if (finalStatus !== 'granted') {
         Alert.alert('Permission Denied', 'Enable notifications to receive updates.');
         return null;
       }
-      const tokenData = await Notifications.getDevicePushTokenAsync();
-      if (userId) await update(ref(db, `users/${userId}`), { fcmToken: tokenData.data });
-      return tokenData.data;
+
+      // 4. Get Expo Push Token
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+      
+      if (!projectId) {
+        console.log('Project ID not found in app config');
+      }
+
+      const tokenData = await Notifications.getExpoPushTokenAsync({
+        projectId: projectId,
+      });
+      
+      const expoToken = tokenData.data;
+
+      // 5. Save to Firebase as expoPushToken
+      if (userId && expoToken) {
+        await update(ref(db, `users/${userId}`), { expoPushToken: expoToken });
+      }
+      
+      return expoToken;
     } catch (err) {
-      console.log('Push registration error:', err);
+      console.log('❌ Push registration error:', err);
       return null;
     }
   };
@@ -77,14 +124,22 @@ export default function App() {
       if (user) registerForPushNotificationsAsync(user.uid);
     });
 
+    // Handle Notification Response (User taps notification)
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
       try {
         const content = response.notification.request.content;
         const data = content.data || {};
         const route = data.screen;
+        
+        // Ensure we grab the image URL if provided in data
         const imageUrl = data.image || data.imageUrl;
+        
         if (route && allowedRoutes.includes(route) && navigationRef.isReady()) {
-          navigationRef.navigate(route, { ...data, notificationImage: imageUrl, fromNotification: true });
+          navigationRef.navigate(route, { 
+            ...data, 
+            notificationImage: imageUrl, 
+            fromNotification: true 
+          });
         }
       } catch (e) {
         console.error("Navigation error:", e);
@@ -116,6 +171,8 @@ export default function App() {
             <Stack.Screen name="CheckoutScreentwo" component={CheckoutScreentwo}/>
             <Stack.Screen name="EditProfile" component={EditProfile}/>
             <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }}/>
+            <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen}/>
+            <Stack.Screen name="Terms" component={TermsAndConditionsScreen}/>
           </Stack.Navigator>
         </NavigationContainer>
       </View>

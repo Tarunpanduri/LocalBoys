@@ -1,9 +1,110 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Animated, Linking, ActivityIndicator, Platform } from "react-native";
+import React, { useState, useEffect,useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Animated, Linking, ActivityIndicator, Platform,Dimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { ref, onValue, off } from "firebase/database";
 import { auth, db } from "../firebase";
+import { LinearGradient } from "expo-linear-gradient";
+import { useFonts } from "expo-font";
+
+const { width,height } = Dimensions.get("window");
+
+const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
+  const translateX = useRef(new Animated.Value(-width)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(translateX, {
+        toValue: width,
+        duration: 1000,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [width]);
+
+  return (
+    <View
+      style={[
+        {
+          width: width,
+          height: height,
+          backgroundColor: "#E1E9EE",
+          borderRadius: borderRadius,
+          overflow: "hidden",
+        },
+        style,
+      ]}
+    >
+      <Animated.View
+        style={{
+          width: "100%",
+          height: "100%",
+          transform: [{ translateX }],
+        }}
+      >
+        <LinearGradient
+          colors={["transparent", "rgba(255, 255, 255, 0.6)", "transparent"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={{ width: "100%", height: "100%" }}
+        />
+      </Animated.View>
+    </View>
+  );
+};
+
+const OrderConfirmationSkeleton = () => {
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        
+        <View style={styles.successContainer}>
+          <SkeletonItem width={80} height={80} borderRadius={40} style={{ marginBottom: 16 }} />
+          <SkeletonItem width={200} height={28} style={{ marginBottom: 12 }} />
+          <SkeletonItem width="90%" height={16} style={{ marginBottom: 6 }} />
+          <SkeletonItem width="60%" height={16} style={{ marginBottom: 16 }} />
+          <SkeletonItem width={100} height={24} borderRadius={20} />
+        </View>
+
+        <View style={styles.section}>
+          <SkeletonItem width={120} height={20} style={{ marginBottom: 16 }} />
+          <View style={styles.detailsGrid}>
+            {[1, 2, 3, 4].map((i) => (
+              <View key={i} style={styles.detailItem}>
+                <SkeletonItem width={60} height={12} style={{ marginBottom: 6 }} />
+                <SkeletonItem width={100} height={16} />
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <SkeletonItem width={140} height={20} style={{ marginBottom: 16 }} />
+          <View style={styles.summaryGrid}>
+            {[1, 2, 3].map((i) => (
+              <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+                <SkeletonItem width={80} height={14} />
+                <SkeletonItem width={60} height={14} />
+              </View>
+            ))}
+            <View style={{ height: 1, backgroundColor: '#eee', marginVertical: 8 }} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+              <SkeletonItem width={100} height={18} />
+              <SkeletonItem width={80} height={18} />
+            </View>
+          </View>
+        </View>
+        
+      </ScrollView>
+
+      <View style={styles.footer}>
+        <SkeletonItem width="100%" height={50} borderRadius={12} style={{ marginBottom: 12 }} />
+        <SkeletonItem width="100%" height={50} borderRadius={12} />
+      </View>
+    </SafeAreaView>
+  );
+};
 
 export default function OrderConfirmation({ route, navigation }) {
     const { orderData } = route.params;
@@ -11,6 +112,10 @@ export default function OrderConfirmation({ route, navigation }) {
     const [currentOrder, setCurrentOrder] = useState(order);
     const [loading, setLoading] = useState(true);
     const [fadeAnim] = useState(new Animated.Value(0));
+
+    const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+  });
 
     useEffect(() => {
         if (!auth.currentUser) { setLoading(false); return; }
@@ -34,8 +139,10 @@ export default function OrderConfirmation({ route, navigation }) {
     };
     const formatOrderId = (orderId) => { if (!orderId) return "N/A"; const shortId = orderId.length > 8 ? orderId.slice(-8) : orderId; return `#${shortId.toUpperCase()}`; };
 
-    if (loading) return (<View style={styles.loadingContainer}><ActivityIndicator size="large" color="#28a745" /><Text style={styles.loadingText}>Loading order details...</Text></View>);
-
+    if (loading || !fontsLoaded) {
+        return <OrderConfirmationSkeleton />;
+    }
+    
     return (
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
@@ -55,14 +162,6 @@ export default function OrderConfirmation({ route, navigation }) {
                             <View style={styles.detailItem}><Text style={styles.detailLabel}>Shop</Text><Text style={styles.detailValue}>{currentOrder.shopname || "Unknown Shop"}</Text></View>
                             <View style={styles.detailItem}><Text style={styles.detailLabel}>Payment</Text><Text style={styles.detailValue}>{currentOrder.paymentMode || "COD"}</Text></View>
                             <View style={styles.detailItem}><Text style={styles.detailLabel}>Order Time</Text><Text style={styles.detailValue}>{new Date(currentOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text></View>
-                        </View>
-                    </View>
-
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Quick Actions</Text>
-                        <View style={styles.actionGrid}>
-                            <TouchableOpacity style={styles.actionButton} onPress={handleContactSupport}><Ionicons name="headset-outline" size={24} color="#28a745" /><Text style={styles.actionText}>Support</Text></TouchableOpacity>
-                            <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate("TrackOrder")}><Ionicons name="navigate-outline" size={24} color="#28a745" /><Text style={styles.actionText}>Track</Text></TouchableOpacity>
                         </View>
                     </View>
 

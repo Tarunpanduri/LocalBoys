@@ -123,7 +123,6 @@ export default function Profile({ navigation, route }) {
     ...MaterialIcons.font,
   });
 
-  // Replaced useEffect with useFocusEffect to reload data whenever screen appears
   useFocusEffect(
     useCallback(() => {
       loadUser();
@@ -162,9 +161,9 @@ export default function Profile({ navigation, route }) {
   const menuItems = [
     { title: "Edit Profile", icon: <Ionicons name="person-circle-outline" size={22} color="#FF6B6B" />, route: "EditProfile", params: { userData } },
     { title: "Addresses", icon: <Ionicons name="home-outline" size={22} color="#6C63FF" />, route: "Addresses" },
-    { title: "Current Orders", icon: <MaterialIcons name="shopping-cart" size={22} color="#FFD93D" />, route: "TrackOrder" },
-    { title: "Terms & Conditions", icon: <MaterialIcons name="gavel" size={22} color="#4ECDC4" />, route: "Terms" },
     { title: "Privacy Policy", icon: <FontAwesome5 name="user-shield" size={18} color="#FFAA00" />, route: "PrivacyPolicy" },
+    { title: "Terms & Conditions", icon: <MaterialIcons name="gavel" size={22} color="#4ECDC4" />, route: "Terms" },
+    { title: "Contact Us", icon: <Ionicons name="information-circle-outline" size={22} color="#1DD1A1" />, route: "ContactUs" },
   ];
 
   const getDisplayName = () =>

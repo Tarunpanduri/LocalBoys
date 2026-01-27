@@ -3,7 +3,22 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db as database } from '../firebase';
-import { ref, onValue, remove, update } from 'firebase/database';
+import { ref, onValue, remove, update, get } from 'firebase/database';
+
+// --- ROBUST DISTANCE CALCULATION ---
+const haversineDistance = (lat1, lon1, lat2, lon2) => {
+  const toRad = (v) => (v * Math.PI) / 180;
+  const R = 6371; // Earth Radius in km
+  
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
 
 export default function AddressesScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
@@ -13,6 +28,8 @@ export default function AddressesScreen({ navigation }) {
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) { setLoading(false); return; }
+    
+    // Listen to user's addresses and mainAddressId
     const userRef = ref(database, `users/${uid}`);
     const unsubscribe = onValue(userRef, snap => {
       const val = snap.val() || {};
@@ -29,24 +46,84 @@ export default function AddressesScreen({ navigation }) {
   const onDelete = (id) => {
     Alert.alert('Delete address', 'Are you sure you want to delete this address?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
           try {
             const uid = auth.currentUser.uid;
             await remove(ref(database, `users/${uid}/addresses/${id}`));
-            if (mainAddressId === id) await update(ref(database, `users/${uid}`), { mainAddressId: null });
-          } catch (e) { console.error('Delete address error:', e); Alert.alert('Error', 'Could not delete address.'); }
+            // If deleting the main address, remove the reference
+            if (mainAddressId === id) {
+               await update(ref(database, `users/${uid}`), { mainAddressId: null });
+            }
+          } catch (e) { 
+            console.error('Delete address error:', e); 
+            Alert.alert('Error', 'Could not delete address.'); 
+          }
         }
       }
     ]);
   };
 
+  // --- LOGIC TO SET MAIN ADDRESS AND UPDATE SUPPORT CONTACT ---
   const onSetMain = async (id) => {
-    try { const uid = auth.currentUser.uid; await update(ref(database, `users/${uid}`), { mainAddressId: id }); }
-    catch (e) { console.error('Set main address error:', e); Alert.alert('Error', 'Could not set main address.'); }
+    try {
+      const uid = auth.currentUser.uid;
+      const selectedAddress = addresses[id];
+      
+      if (!selectedAddress) return;
+
+      // 1. Prepare base update
+      const updates = {};
+      updates[`users/${uid}/mainAddressId`] = id;
+
+      // 2. If address has coordinates, find nearest branch
+      if (selectedAddress.lat && selectedAddress.lng) {
+        // Fetch branches once (fresh data)
+        const branchesSnap = await get(ref(database, 'branches'));
+        const branches = branchesSnap.val();
+
+        if (branches) {
+          let minDist = Infinity;
+          let nearestContact = null;
+          let nearestBranchName = "";
+
+          Object.values(branches).forEach(branch => {
+            if (branch.lat && branch.lng && branch.contactNumber) {
+              const dist = haversineDistance(
+                parseFloat(selectedAddress.lat), 
+                parseFloat(selectedAddress.lng), 
+                parseFloat(branch.lat), 
+                parseFloat(branch.lng)
+              );
+
+              if (dist < minDist) {
+                minDist = dist;
+                nearestContact = branch.contactNumber;
+                nearestBranchName = branch.name;
+              }
+            }
+          });
+
+          if (nearestContact) {
+            updates[`users/${uid}/supportcontact`] = nearestContact;
+          }
+        }
+      }
+
+      // 3. Update Database
+      await update(ref(database), updates);
+
+    } catch (e) {
+      console.error('Set main address error:', e);
+      Alert.alert('Error', 'Could not set main address.');
+    }
   };
 
   const renderItem = ({ item }) => {
-    const id = item[0]; const addr = item[1]; const isMain = mainAddressId === id;
+    const id = item[0]; 
+    const addr = item[1]; 
+    const isMain = mainAddressId === id;
+    
     return (
       <View style={styles.card} key={id}>
         <View style={styles.cardLeft}>
@@ -93,10 +170,15 @@ export default function AddressesScreen({ navigation }) {
       <StatusBar barStyle="dark-content" backgroundColor="#f6f7f9" />
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity onPress={() => navigation.navigate('HomeScreen')} style={styles.backBtn}><Ionicons name="chevron-back" size={22} color="#222" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('HomeScreen')} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={22} color="#222" />
+          </TouchableOpacity>
           <Text style={styles.headerTitle}>My Addresses</Text>
         </View>
-          <TouchableOpacity onPress={() => navigation.navigate('HomeScreen')} style={styles.headerAdd}><Ionicons name="home" size={18} color="#fff" /><Text style={styles.headerAddText}>Proceed to Home</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('HomeScreen')} style={styles.headerAdd}>
+          <Ionicons name="home" size={18} color="#fff" />
+          <Text style={styles.headerAddText}>Proceed to Home</Text>
+        </TouchableOpacity>
       </View>
 
       {entries.length === 0 ? (
@@ -104,7 +186,9 @@ export default function AddressesScreen({ navigation }) {
           <Ionicons name="location-outline" size={56} color="#d3d3d3" />
           <Text style={styles.emptyTitle}>No addresses yet</Text>
           <Text style={styles.emptySub}>Add an address to get started. You can select as main and we’ll use it by default.</Text>
-          <TouchableOpacity onPress={onAdd} style={[styles.addPrimary, { marginTop: 18 }]}><Text style={styles.addPrimaryText}>Add address</Text></TouchableOpacity>
+          <TouchableOpacity onPress={onAdd} style={[styles.addPrimary, { marginTop: 18 }]}>
+            <Text style={styles.addPrimaryText}>Add address</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -116,7 +200,9 @@ export default function AddressesScreen({ navigation }) {
         />
       )}
 
-      <TouchableOpacity onPress={onAdd} style={styles.fab} activeOpacity={0.9}><Ionicons name="add" size={26} color="#fff" /></TouchableOpacity>
+      <TouchableOpacity onPress={onAdd} style={styles.fab} activeOpacity={0.9}>
+        <Ionicons name="add" size={26} color="#fff" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }

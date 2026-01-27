@@ -24,6 +24,7 @@ import CheckoutScreentwo from './screens/checkouttwo';
 import EditProfile from './screens/editprofile';
 import PrivacyPolicyScreen from './screens/privacypolicy';
 import TermsAndConditionsScreen from './screens/Terms';
+import ContactUs from './screens/contact';
 
 // Firebase
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -32,13 +33,12 @@ import { ref, update } from 'firebase/database';
 
 SplashScreen.preventAutoHideAsync();
 
-// This handler determines how the app handles notifications while it is OPEN (Foreground)
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
     shouldShowBanner: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    shouldShowList: true, 
   })
 });
 
@@ -173,6 +173,7 @@ export default function App() {
             <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }}/>
             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen}/>
             <Stack.Screen name="Terms" component={TermsAndConditionsScreen}/>
+            <Stack.Screen name="ContactUs" component={ContactUs}/>
           </Stack.Navigator>
         </NavigationContainer>
       </View>

@@ -1,4 +1,4 @@
-import React, { useState,useEffect,useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -16,7 +16,11 @@ import {
   Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  sendPasswordResetEmail
+} from "firebase/auth";
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
 import Constants from 'expo-constants';
@@ -25,9 +29,11 @@ import { db } from "../firebase";
 import { ref, update } from "firebase/database";
 import { useFonts } from "expo-font";
 import { LinearGradient } from "expo-linear-gradient";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get("window");
 
+// --- SKELETON COMPONENTS ---
 const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   const translateX = useRef(new Animated.Value(-width)).current;
 
@@ -77,31 +83,23 @@ const SignUpSkeleton = () => {
     <SafeAreaView style={[styles.container, { paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0 }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#B0E57E" translucent={false} />
       <View style={{ flex: 1, justifyContent: "flex-end" }}>
-        
         {/* Header Skeleton */}
         <View style={styles.header}>
-           {/* Logo Placeholder */}
            <SkeletonItem width={80} height={80} borderRadius={10} style={{ marginBottom: 10 }} /> 
-           {/* Title Placeholder */}
            <SkeletonItem width={120} height={30} style={{ marginBottom: 5 }} /> 
-           {/* Subtitle Placeholder */}
            <SkeletonItem width={180} height={14} />
         </View>
 
         {/* Form Skeleton */}
         <View style={styles.form}>
-           {/* Email */}
            <SkeletonItem width={50} height={12} style={{ marginTop: 10, marginBottom: 5 }} />
            <SkeletonItem width="100%" height={45} borderRadius={10} />
 
-           {/* Password */}
            <SkeletonItem width={70} height={12} style={{ marginTop: 10, marginBottom: 5 }} />
            <SkeletonItem width="100%" height={45} borderRadius={10} />
 
-           {/* Sign Up Button */}
            <SkeletonItem width="100%" height={50} borderRadius={10} style={{ marginTop: 25 }} />
 
-           {/* Bottom Link */}
            <View style={{ alignItems: 'center', marginTop: 20 }}>
               <SkeletonItem width={200} height={14} />
            </View>
@@ -111,34 +109,46 @@ const SignUpSkeleton = () => {
   );
 };
 
+// --- MAIN LOGIN COMPONENT ---
 export default function Login({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [secureText, setSecureText] = useState(true);
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [pageLoading, setPageLoading] = useState(true);
-
-    const [fontsLoaded] = useFonts({
+  
+  const [fontsLoaded] = useFonts({
     ...Ionicons.font,
   });
 
+  // 1. Load Remembered Email on Mount
+  useEffect(() => {
+    const loadRememberedUser = async () => {
+      try {
+        const savedEmail = await AsyncStorage.getItem("rememberedEmail");
+        if (savedEmail) {
+          setEmail(savedEmail);
+          setRememberMe(true);
+        }
+      } catch (error) {
+        console.log("Error loading saved email", error);
+      }
+    };
+    loadRememberedUser();
+  }, []);
 
-    if ( !fontsLoaded) {
+  if (!fontsLoaded) {
     return <SignUpSkeleton />;
   }
 
-
-  // Request notification permission and get Expo Push Token
+  // Request notification permission
   const registerForPushNotificationsAsync = async (userId) => {
-    // 1. Check if physical device
     if (!Device.isDevice) {
       console.log('Must use physical device for Push Notifications');
       return;
     }
 
     try {
-      // 2. Permission Check
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
 
@@ -149,43 +159,68 @@ export default function Login({ navigation }) {
 
       if (finalStatus !== "granted") {
         Alert.alert("Permission denied", "Enable notifications to receive updates.");
-        console.warn("❌ Permission denied for push notifications");
         return;
       }
 
-      // 3. Get Expo Push Token (Replaces Native Device Token)
-      // We explicitly pass projectId to ensure EAS compatibility
       const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
       
-      if (!projectId) {
-        console.log('⚠️ Project ID not found. Ensure EAS Configuration is correct.');
-      }
-
       const tokenData = await Notifications.getExpoPushTokenAsync({
         projectId: projectId,
       });
       
       const expoToken = tokenData.data;
 
-      if (!expoToken) {
-        console.warn("⚠️ Expo token is null, cannot save to Firebase");
-        return;
-      }
+      if (!expoToken) return;
 
-      // 4. Save to Firebase
       if (userId) {
-        // Using 'update' to safely add the token without overwriting other user data
-        // Saving as 'expoPushToken' to match App.js logic
         await update(ref(db, `users/${userId}`), { expoPushToken: expoToken });
       }
     } catch (error) {
-      console.error("❌ Push token registration error:", error);
+      console.error("Push token registration error:", error);
     }
   };
 
+  // 2. Forgot Password Logic with Custom Alerts
+  const handleForgotPassword = async () => {
+    if (!email) {
+      Alert.alert("Input Required", "Please enter your email address in the field above to reset your password.");
+      return;
+    }
+
+    try {
+      const auth = getAuth();
+      await sendPasswordResetEmail(auth, email.trim());
+      Alert.alert(
+        "Check your Inbox",
+        "A password reset link has been sent to your email address."
+      );
+    } catch (error) {
+      let errorMessage = "An error occurred while sending the reset link.";
+      
+      // Map Firebase errors to user-friendly messages
+      switch (error.code) {
+        case 'auth/user-not-found':
+          errorMessage = "No account exists with this email address.";
+          break;
+        case 'auth/invalid-email':
+          errorMessage = "Please enter a valid email address.";
+          break;
+        case 'auth/too-many-requests':
+          errorMessage = "Too many requests. Please try again later.";
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = "Network error. Please check your internet connection.";
+          break;
+      }
+      
+      Alert.alert("Request Failed", errorMessage);
+    }
+  };
+
+  // 3. Login Logic with Custom Alerts
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert("Error", "Please enter both email and password");
+      Alert.alert("Missing Details", "Please enter both email and password to continue.");
       return;
     }
 
@@ -201,7 +236,14 @@ export default function Login({ navigation }) {
 
       const userId = userCredential.user.uid;
 
-      // Register Token after successful login
+      // Handle Remember Me
+      if (rememberMe) {
+        await AsyncStorage.setItem("rememberedEmail", email.trim());
+      } else {
+        await AsyncStorage.removeItem("rememberedEmail");
+      }
+
+      // Register Token
       await registerForPushNotificationsAsync(userId);
 
       navigation.reset({
@@ -209,8 +251,43 @@ export default function Login({ navigation }) {
         routes: [{ name: "Addresses" }],
       });
     } catch (error) {
-      console.error("❌ Login failed:", error);
-      Alert.alert("Login Failed", error.message);
+      console.log("Login Error Code:", error.code); // Good for debugging
+      
+      let title = "Login Failed";
+      let message = "An unexpected error occurred. Please try again.";
+
+      // Map Firebase errors to user-friendly messages
+      switch (error.code) {
+        case 'auth/invalid-email':
+          message = "The email address format is invalid.";
+          break;
+        
+        // Note: Firebase often groups 'user-not-found' and 'wrong-password' 
+        // into 'invalid-credential' for security in newer versions.
+        case 'auth/user-not-found':
+        case 'auth/wrong-password':
+        case 'auth/invalid-credential':
+          message = "Incorrect email or password. Please check your credentials.";
+          break;
+
+        case 'auth/user-disabled':
+          message = "This account has been disabled. Please contact support.";
+          break;
+
+        case 'auth/too-many-requests':
+          message = "Too many failed attempts. Please try again later.";
+          break;
+          
+        case 'auth/network-request-failed':
+          title = "Connection Error";
+          message = "Please check your internet connection and try again.";
+          break;
+          
+        default:
+          message = "Unable to sign in. Please try again."; // Fallback generic message
+      }
+
+      Alert.alert(title, message);
     } finally {
       setLoading(false);
     }
@@ -283,17 +360,27 @@ export default function Login({ navigation }) {
                 </TouchableOpacity>
               </View>
               <View style={styles.rowBetween}>
-                <TouchableOpacity style={styles.rememberMe}>
-                  <TouchableOpacity
-                    style={[styles.checkbox, rememberMe && { backgroundColor: "#28A745" }]}
-                    onPress={() => setRememberMe(!rememberMe)}
-                  />
+                <TouchableOpacity 
+                  style={styles.rememberMe}
+                  onPress={() => setRememberMe(!rememberMe)}
+                  activeOpacity={0.8}
+                >
+                  <View
+                    style={[
+                      styles.checkbox,
+                      rememberMe && { backgroundColor: "#28A745", borderColor: "#28A745", justifyContent: 'center', alignItems: 'center' },
+                    ]}
+                  >
+                     {rememberMe && <Ionicons name="checkmark" size={12} color="white" />}
+                  </View>
                   <Text style={styles.rememberText}>Remember me</Text>
                 </TouchableOpacity>
-                <TouchableOpacity>
+
+                <TouchableOpacity onPress={handleForgotPassword}>
                   <Text style={styles.forgotText}>Forgot Password</Text>
                 </TouchableOpacity>
               </View>
+
               <TouchableOpacity
                 style={styles.loginButton}
                 onPress={handleLogin}

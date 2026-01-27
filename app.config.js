@@ -15,6 +15,7 @@ export default {
       backgroundColor: "#ffffff"
     },
     ios: {
+      googleServicesFile: "./GoogleService-Info.plist",
       supportsTablet: true,
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "LocalBoys needs your location to provide the best experience and products",

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback,useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Image, RefreshControl, Dimensions, StatusBar,Animated } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Image, RefreshControl, Dimensions, StatusBar,Animated,Platform } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db, auth } from "../firebase";
@@ -351,30 +351,30 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 14 },
   deliveryCol: { flex: 1 },
-  deliverLabel: { fontSize: 13, fontFamily: "Sen_Bold", letterSpacing: 0.5 },
+  deliverLabel: { fontSize: Platform.OS === 'ios' ? 12 : 13, fontFamily: "Sen_Bold", letterSpacing: 0.5 },
   locationRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
-  locationText: { fontSize: 14, color: "#000", marginRight: 6, fontFamily: "Sen_Medium" },
+  locationText: { fontSize: Platform.OS === 'ios' ? 13 : 14, color: "#000", marginRight: 6, fontFamily: "Sen_Medium" },
   notifBtn: { width: 36, height: 36, borderRadius: 5, justifyContent: "center", alignItems: "center" },
   mediumcontent: { flex: 1, paddingHorizontal: 18, paddingTop: 12 },
   searchBox: { height: 50, backgroundColor: "#fff", borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: "#ddd" },
-  searchInput: { flex: 1, fontSize: 15, fontFamily: "Sen_Regular" },
+  searchInput: { flex: 1, fontSize: Platform.OS === 'ios' ? 12 : 15, fontFamily: "Sen_Regular" },
   sectionHeader: { marginTop: 18, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  sectionTitle: { fontSize: 18, fontFamily: "Sen_Bold", color: "#111", marginBottom: 5 },
+  sectionTitle: { fontSize: Platform.OS === 'ios' ? 16 : 18, fontFamily: "Sen_Bold", color: "#111", marginBottom: 5 },
   categoryChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: "#fff", marginRight: 10, borderWidth: 1, borderColor: "#ddd" },
-  categoryLabel: { fontSize: 14, color: "#333", fontFamily: "Sen_Medium" },
+  categoryLabel: { fontSize: Platform.OS === 'ios' ? 12 : 14, color: "#333", fontFamily: "Sen_Medium" },
   shopCard: { marginTop: 14, backgroundColor: "#fff", borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#ddd", elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
   shopImage: { width: "100%", height: Math.round(width * 0.38) },
   shopInfo: { padding: 12, borderColor: "#ddd", borderTopWidth: 1 },
-  shopName: { fontSize: 16, fontFamily: "Sen_Bold", color: "#222" },
-  shopSubtitle: { fontSize: 13, color: "#8b9aa4", marginTop: 4, fontFamily: "Sen_Medium" },
+  shopName: { fontSize: Platform.OS === 'ios' ? 14 : 16, fontFamily: "Sen_Bold", color: "#222" },
+  shopSubtitle: { fontSize: Platform.OS === 'ios' ? 11 : 13, color: "#8b9aa4", marginTop: 4, fontFamily: "Sen_Medium" },
   shopMetaRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
   metaItem: { flexDirection: "row", alignItems: "center" },
-  metaText: { fontSize: 13, color: "#444", fontFamily: "Sen_Regular" },
+  metaText: { fontSize: Platform.OS === 'ios' ? 11 : 13, color: "#444", fontFamily: "Sen_Regular" },
   emptyState: { marginTop: 40, alignItems: "center", justifyContent: "center" },
-  emptytext: { fontSize: 15, color: "#555", textAlign: "center", paddingHorizontal: 20, fontFamily: "Sen_Regular" },
+  emptytext: { fontSize: Platform.OS === 'ios' ? 12 : 15, color: "#555", textAlign: "center", paddingHorizontal: 20, fontFamily: "Sen_Regular" },
   bottomNav: { position: "absolute", bottom: 20, left: 20, right: 20, flexDirection: "row", borderRadius: 30, overflow: "hidden", zIndex: 999, elevation: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, height: 50 },
   navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
-  navText: { fontSize: 16, fontFamily: "Sen_Bold", color: "#fff" }
+  navText: { fontSize: Platform.OS === 'ios' ? 14 : 16, fontFamily: "Sen_Bold", color: "#fff" }
 });
 
 

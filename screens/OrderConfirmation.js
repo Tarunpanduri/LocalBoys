@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
     timelineStep: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
     timelineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#28a745", marginRight: 12 },
     timelineText: { color: "#666", fontSize: 14, fontFamily: "Sen_Regular" },
-    footer: { padding: 20, paddingBottom: Platform.OS === 'android' ? 20 : 30, backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#e0e0e0", borderWidth: 1, borderColor: "#e0e0e0", },
+    footer: { padding: 20, paddingBottom: Platform.OS === 'android' ? 20 : 30, backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#e0e0e0", borderWidth: 1, borderColor: "#e0e0e0", marginBottom: Platform.OS === 'ios' ? -40 : 0},
     primaryButton: { backgroundColor: "#28a745", padding: 16, borderRadius: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", marginBottom: 12, shadowColor: "#28a745", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
     primaryButtonText: { color: "#fff", fontSize: 16, marginLeft: 8, fontFamily: "Sen_Bold" },
     secondaryButton: { padding: 16, borderRadius: 12, alignItems: "center", borderWidth: 1, borderColor: "#28a745" },

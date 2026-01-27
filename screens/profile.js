@@ -10,7 +10,8 @@ import {
   Image, 
   Linking,
   Animated,
-  Dimensions
+  Dimensions,
+  Platform
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons, FontAwesome5 } from "@expo/vector-icons";
@@ -232,23 +233,23 @@ export default function Profile({ navigation, route }) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#F9FAFB" },
-  logo: { width: 80, height: 80, marginBottom: 10, marginTop: 30 },
+  logo: { width: 80, height: 80, marginBottom: 10, marginTop: Platform.OS === 'ios' ? 0 : 30 },
   scrollContainer: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 40 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   headerTitle: { fontSize: 18, color: "#000" },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 10, fontSize: 16, color: "#666" },
   profileSection: { alignItems: "center", marginVertical: 25 },
-  username: { fontSize: 20, marginTop: 10, color: "#1A1A1A" },
-  userInfo: { color: "#666", marginTop: 2, fontSize: 12 },
+  username: { fontSize: Platform.OS === 'ios' ? 18 : 20, marginTop: 10, color: "#1A1A1A" },
+  userInfo: { color: "#666", marginTop: 2, fontSize: Platform.OS === 'ios' ? 12 : 14 },
   menuContainer: { backgroundColor: "#fff", borderRadius: 20, paddingVertical: 10, borderWidth: 1, borderColor: "#E5E7EB" },
   menuItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 15, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: "#F0F0F0" },
   logoutItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 15, paddingHorizontal: 15 },
   menuLeft: { flexDirection: "row", alignItems: "center" },
   iconBox: { backgroundColor: "#F3F4F6", borderRadius: 10, padding: 8, marginRight: 15 },
-  menuTitle: { fontSize: 16, color: "#1A1A1A" },
-  footerContainer: { marginTop: 40, alignItems: "center", justifyContent: "center", padding: 10, opacity: 0.8 },
-  footerText: { fontSize: 12, color: "#888", marginBottom: 2 },
-  footerSubText: { fontSize: 13, color: "#04a60a", textDecorationStyle: 'solid', textDecorationLine: 'underline' },
+  menuTitle: { fontSize: Platform.OS === 'ios' ? 14 : 16, color: "#1A1A1A" },
+  footerContainer: { marginTop: 40, alignItems: "center", justifyContent: "center", padding: Platform.OS === 'ios' ? 0 : 10, opacity: 0.8 },
+  footerText: { fontSize: Platform.OS === 'ios' ? 10 : 12, color: "#888", marginBottom: 2 },
+  footerSubText: { fontSize: Platform.OS === 'ios' ? 11 : 13, color: "#04a60a", textDecorationStyle: 'solid', textDecorationLine: 'underline' },
   heart: { color: "#E63946", fontSize: 10 },
 });

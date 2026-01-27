@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback,useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, FlatList, Dimensions, StatusBar, Alert,Animated } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, FlatList, Dimensions, StatusBar, Alert,Animated, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -356,31 +356,31 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 16, fontFamily: "Sen_Medium", color: "#10202A" },
   bannerWrap: { marginTop: 14 },
   banner: { width: "100%", height: 160, borderRadius: 18, overflow: "hidden", borderColor: "#ddd", borderWidth: 1 },
-  info: { paddingHorizontal: 12, marginTop: 12 },
-  shopName: { fontSize: 20, fontFamily: "Sen_Bold", color: "#0b1b22", marginBottom: 8 },
-  shopDesc: { fontSize: 13, fontFamily: "Sen_Regular", color: "#9aa5ad", lineHeight: 20 },
+  info: { paddingHorizontal: Platform.OS === 'ios' ? 10 : 12, marginTop: 12 },
+  shopName: { fontSize: Platform.OS === 'ios' ? 16 : 20, fontFamily: "Sen_Bold", color: "#0b1b22", marginBottom: 8 },
+  shopDesc: { fontSize: Platform.OS === 'ios' ? 10 : 13, fontFamily: "Sen_Regular", color: "#9aa5ad", lineHeight: 20 },
   metaRow: { flexDirection: "row", alignItems: "center", marginTop: 14 },
   metaItem: { flexDirection: "row", alignItems: "center" },
-  metaText: { fontSize: 13, fontFamily: "Sen_Medium", color: "#222", marginLeft: 6 },
+  metaText: { fontSize: Platform.OS === 'ios' ? 10 : 13, fontFamily: "Sen_Medium", color: "#222", marginLeft: 6 },
   catChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 22, backgroundColor: "#fff", borderWidth: 1, borderColor: "#eee", marginRight: 10, flexDirection: "row", alignItems: "center" },
-  catLabel: { fontSize: 14, color: "#333", fontFamily: "Sen_Medium" },
-  sectionHeading: { fontSize: 18, fontFamily: "Sen_Bold", color: "#111" },
+  catLabel: { fontSize: Platform.OS === 'ios' ? 10 : 14, color: "#333", fontFamily: "Sen_Medium" },
+  sectionHeading: { fontSize: Platform.OS === 'ios' ? 14 : 18, fontFamily: "Sen_Bold", color: "#111" },
   sectionCount: { fontSize: 16, color: "#8a98a0", fontFamily: "Sen_Regular" },
   productCard: { width: CARD_WIDTH, backgroundColor: "#fff", borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: "#eee", elevation: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3 },
   productImage: { width: "100%", height: CARD_WIDTH * 0.6, backgroundColor: "#e6ecf0" },
   productBody: { padding: 10, minHeight: 86, justifyContent: "space-between" },
-  productTitle: { fontSize: 14, fontFamily: "Sen_Bold", color: "#111" },
-  productSubtitle: { fontSize: 12, fontFamily: "Sen_Regular", color: "#8a98a0", marginTop: 6 },
-  productquantity: { fontSize: 12, fontFamily: "Sen_Regular", color: "#8a98a0", marginTop: 2 },
+  productTitle: { fontSize: Platform.OS === 'ios' ? 12 : 16, fontFamily: "Sen_Bold", color: "#111" },
+  productSubtitle: { fontSize: Platform.OS === 'ios' ? 10 : 12, fontFamily: "Sen_Regular", color: "#8a98a0", marginTop: 6 },
+  productquantity: { fontSize: Platform.OS === 'ios' ? 10 : 12, fontFamily: "Sen_Regular", color: "#8a98a0", marginTop: 2 },
   productRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
-  price: { fontSize: 15, fontFamily: "Sen_Bold", color: "#222" },
+  price: { fontSize: Platform.OS === 'ios' ? 12 : 15, fontFamily: "Sen_Bold", color: "#222" },
   addBtn: { width: 36, height: 36, borderRadius: 18, justifyContent: "center", alignItems: "center" },
   cartBar: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#fff", borderTopWidth: 1, borderColor: "#ddd", padding: 12, paddingBottom: 23, flexDirection: "row", alignItems: "center", justifyContent: "space-between", elevation: 10, shadowColor: "#000", shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 4 },
   cartInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
   cartShopImage: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#e6ecf0" },
-  cartText: { fontSize: 14, fontFamily: "Sen_Medium", color: "#111" },
+  cartText: { fontSize: Platform.OS === 'ios' ? 10 : 14, fontFamily: "Sen_Medium", color: "#111" },
   cartSubText: { fontSize: 12, fontFamily: "Sen_Regular", color: "#666", marginTop: 2 },
   cartActions: { flexDirection: "row", alignItems: "center" },
   cartBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginLeft: 10 },
-  cartBtnText: { fontSize: 14, fontFamily: "Sen_Medium", color: "#333" }
+  cartBtnText: { fontSize: Platform.OS === 'ios' ? 10 : 14, fontFamily: "Sen_Medium", color: "#333" }
 });

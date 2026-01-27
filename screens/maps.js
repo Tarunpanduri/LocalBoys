@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image, Platform, Dimensions, KeyboardAvoidingView, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image, Platform, Dimensions, ScrollView } from 'react-native';
 import MapView from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -8,8 +8,22 @@ import { auth, db as database } from '../firebase';
 import { ref, update, get, push, set } from 'firebase/database';
 
 const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
-
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+
+// --- 1. ADDED DISTANCE CALCULATION FUNCTION ---
+const haversineDistance = (lat1, lon1, lat2, lon2) => {
+  const toRad = (v) => (v * Math.PI) / 180;
+  const R = 6371; // Earth Radius in km
+  
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
 
 export default function MapScreen({ navigation, route }) {
   const mode = route?.params?.mode || 'add';
@@ -39,21 +53,14 @@ export default function MapScreen({ navigation, route }) {
     checkLocationPermission();
     registerForPushNotificationsAsync();
     
-    const keyboardWillShow = Keyboard.addListener('keyboardWillShow', (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    
-    const keyboardWillHide = Keyboard.addListener('keyboardWillHide', () => {
-      setKeyboardHeight(0);
-    });
-    
-    const keyboardDidShow = Keyboard.addListener('keyboardDidShow', (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    
-    const keyboardDidHide = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardHeight(0);
-    });
+    const keyboardWillShow = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => setKeyboardHeight(e.endCoordinates.height)
+    );
+    const keyboardWillHide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardHeight(0)
+    );
 
     if (mode === 'edit' && initial) {
       setSelectedPlace({ lat: initial.lat, lng: initial.lng, ...initial });
@@ -67,8 +74,6 @@ export default function MapScreen({ navigation, route }) {
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
       keyboardWillShow.remove();
       keyboardWillHide.remove();
-      keyboardDidShow.remove();
-      keyboardDidHide.remove();
     };
   }, []);
 
@@ -95,7 +100,7 @@ export default function MapScreen({ navigation, route }) {
 
   const reverseGeocode = useCallback(async (lat, lng) => {
     const coordKey = `${lat.toFixed(6)},${lng.toFixed(6)}`;
-    if (lastGeocodeRef.current === coordKey) {
+    if (lastGeocodeRef.current && lastGeocodeRef.current.key === coordKey) {
       return lastGeocodeRef.current.result;
     }
 
@@ -198,6 +203,7 @@ export default function MapScreen({ navigation, route }) {
     }
   };
 
+  // --- 2. UPDATED HANDLE CONFIRM LOCATION ---
   const handleConfirmLocation = async () => {
     if (!selectedPlace) return Alert.alert('Error', 'Please pick a location first.');
     if (!name || name.trim().length < 2) return Alert.alert('Validation', 'Please enter a name for this address.');
@@ -210,6 +216,7 @@ export default function MapScreen({ navigation, route }) {
       const userRef = ref(database, `users/${uid}`);
       const snapshot = await get(userRef);
       const existingData = snapshot.val() || {};
+      
       const addressRef = ref(database, `users/${uid}/addresses`);
       const addressSnap = await get(addressRef);
       const hasExistingAddresses = addressSnap.exists();
@@ -229,33 +236,80 @@ export default function MapScreen({ navigation, route }) {
 
       let keyToSet = editingId;
 
+      // Save or Edit Address
       if (mode === 'edit' && editingId) {
         await update(ref(database, `users/${uid}/addresses/${editingId}`), addressObj);
       } else {
         const newRef = push(addressRef);
         await set(newRef, addressObj);
         keyToSet = newRef.key;
+      }
 
-        if (!hasExistingAddresses) {
-          await update(userRef, { mainAddressId: keyToSet });
+      // Prepare updates for user profile (Main Address, Support Contact, Push Token)
+      const userUpdates = {};
+
+      // Handle Expo Push Token
+      if (!existingData.expoPushToken && expoPushToken) {
+        userUpdates['expoPushToken'] = expoPushToken;
+      } else if (existingData.expoPushToken !== expoPushToken && expoPushToken) {
+        userUpdates['expoPushToken'] = expoPushToken;
+      }
+
+      // --- 3. LOGIC TO SET MAIN AND CALCULATE SUPPORT CONTACT ---
+      const shouldSetAsMain = setAsMain || !hasExistingAddresses;
+
+      if (shouldSetAsMain && keyToSet) {
+        userUpdates['mainAddressId'] = keyToSet;
+
+        // Calculate nearest branch only if setting as main
+        if (selectedPlace.lat && selectedPlace.lng) {
+          try {
+            const branchesSnap = await get(ref(database, 'branches'));
+            const branches = branchesSnap.val();
+
+            if (branches) {
+              let minDist = Infinity;
+              let nearestContact = null;
+
+              Object.values(branches).forEach(branch => {
+                if (branch.lat && branch.lng && branch.contactNumber) {
+                  const dist = haversineDistance(
+                    parseFloat(selectedPlace.lat), 
+                    parseFloat(selectedPlace.lng), 
+                    parseFloat(branch.lat), 
+                    parseFloat(branch.lng)
+                  );
+
+                  if (dist < minDist) {
+                    minDist = dist;
+                    nearestContact = branch.contactNumber;
+                  }
+                }
+              });
+
+              if (nearestContact) {
+                userUpdates['supportcontact'] = nearestContact;
+              }
+            }
+          } catch (branchError) {
+            console.error("Error fetching branches for support contact:", branchError);
+            // We proceed even if branch calculation fails
+          }
         }
       }
 
-      if (setAsMain && keyToSet) {
-        await update(userRef, { mainAddressId: keyToSet });
+      // Apply all user updates in one go
+      if (Object.keys(userUpdates).length > 0) {
+        await update(userRef, userUpdates);
       }
 
-      if (existingData.expoPushToken) {
-        await update(userRef, { expoPushToken: existingData.expoPushToken });
-      } else if (expoPushToken) {
-        await update(userRef, { expoPushToken });
-      }
-
+      // Finish
       navigation.navigate('Addresses', { refresh: true });
       await Notifications.scheduleNotificationAsync({
         content: { title: 'Address saved', body: 'Your address was saved successfully.' },
         trigger: null,
       });
+
     } catch (err) {
       console.error('Save address error:', err);
       Alert.alert('Error', err.message || 'Failed to save address.');
@@ -279,14 +333,7 @@ export default function MapScreen({ navigation, route }) {
       if (finalStatus !== 'granted') return;
       const token = (await Notifications.getExpoPushTokenAsync()).data; 
       setExpoPushToken(token);
-      if (auth.currentUser) { 
-        const uid = auth.currentUser.uid; 
-        const userRef = ref(database, `users/${uid}`); 
-        const snapshot = await get(userRef); 
-        const existingData = snapshot.val() || {}; 
-        if (!existingData.expoPushToken || existingData.expoPushToken !== token) 
-          await update(userRef, { expoPushToken: token }); 
-      }
+      
       if (Platform.OS === 'android') 
         await Notifications.setNotificationChannelAsync('default', { 
           name: 'default', 
@@ -434,7 +481,7 @@ const styles = StyleSheet.create({
   inputSmall: { height: 44, borderRadius: 8, paddingHorizontal: 10, fontSize: 14, backgroundColor: '#fff', borderColor: '#e4e7eb', borderWidth: 1, fontFamily: "Sen_Regular" },
   suggestionsList: { marginTop: 6, backgroundColor: '#fff', borderRadius: 8, maxHeight: SCREEN_H * 0.28, borderColor: '#e6e6e6', borderWidth: 1 },
   suggestion: { paddingVertical: 12, paddingHorizontal: 12, borderBottomColor: '#f0f0f0', borderBottomWidth: 1 },
-  suggestionText: { fontSize:Platform.OS === 'ios' ? 8 : 14, color: '#222', fontFamily: "Sen_Regular" },
+  suggestionText: { fontSize:Platform.OS === 'ios' ? 8 : 12, color: '#222', fontFamily: "Sen_Regular" },
   currentLocationButton: { position: 'absolute', top: Platform.OS === 'android' ? 120 : 138, right: 16, backgroundColor: '#009688', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, zIndex: 1001 },
   currentLocationText: { color: '#fff', fontSize:Platform.OS === 'ios' ? 10 : 13, fontFamily: "Sen_Bold" },
   centerMarkerContainer: { position: 'absolute', top: '50%', left: '50%', marginLeft: -(PIN_SIZE / 2), marginTop: -(PIN_SIZE + PICK_LABEL_HEIGHT + 6), alignItems: 'center', justifyContent: 'center', zIndex: 1000, pointerEvents: 'none' },

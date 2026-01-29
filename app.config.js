@@ -2,7 +2,7 @@ import 'dotenv/config';
 
 export default {
   expo: {
-    name: "LocalBoys",
+    name: "Localboys",
     slug: "LocalBoys",
     version: "1.0.0",
     orientation: "portrait",

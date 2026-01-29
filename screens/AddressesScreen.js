@@ -29,7 +29,6 @@ export default function AddressesScreen({ navigation }) {
     const uid = auth.currentUser?.uid;
     if (!uid) { setLoading(false); return; }
     
-    // Listen to user's addresses and mainAddressId
     const userRef = ref(database, `users/${uid}`);
     const unsubscribe = onValue(userRef, snap => {
       const val = snap.val() || {};
@@ -51,7 +50,6 @@ export default function AddressesScreen({ navigation }) {
           try {
             const uid = auth.currentUser.uid;
             await remove(ref(database, `users/${uid}/addresses/${id}`));
-            // If deleting the main address, remove the reference
             if (mainAddressId === id) {
                await update(ref(database, `users/${uid}`), { mainAddressId: null });
             }
@@ -64,28 +62,22 @@ export default function AddressesScreen({ navigation }) {
     ]);
   };
 
-  // --- LOGIC TO SET MAIN ADDRESS AND UPDATE SUPPORT CONTACT ---
   const onSetMain = async (id) => {
     try {
       const uid = auth.currentUser.uid;
       const selectedAddress = addresses[id];
-      
       if (!selectedAddress) return;
 
-      // 1. Prepare base update
       const updates = {};
       updates[`users/${uid}/mainAddressId`] = id;
 
-      // 2. If address has coordinates, find nearest branch
       if (selectedAddress.lat && selectedAddress.lng) {
-        // Fetch branches once (fresh data)
         const branchesSnap = await get(ref(database, 'branches'));
         const branches = branchesSnap.val();
 
         if (branches) {
           let minDist = Infinity;
           let nearestContact = null;
-          let nearestBranchName = "";
 
           Object.values(branches).forEach(branch => {
             if (branch.lat && branch.lng && branch.contactNumber) {
@@ -95,28 +87,40 @@ export default function AddressesScreen({ navigation }) {
                 parseFloat(branch.lat), 
                 parseFloat(branch.lng)
               );
-
               if (dist < minDist) {
                 minDist = dist;
                 nearestContact = branch.contactNumber;
-                nearestBranchName = branch.name;
               }
             }
           });
-
           if (nearestContact) {
             updates[`users/${uid}/supportcontact`] = nearestContact;
           }
         }
       }
-
-      // 3. Update Database
       await update(ref(database), updates);
-
     } catch (e) {
       console.error('Set main address error:', e);
-      Alert.alert('Error', 'Could not set main address.');
     }
+  };
+
+  // --- NEW: PROCEED HOME LOGIC ---
+  const onProceedHome = async () => {
+    const entries = Object.entries(addresses);
+    
+    // 1. Check if at least one address exists
+    if (entries.length === 0) {
+      Alert.alert('No Address Found', 'Please add at least one address to continue.');
+      return;
+    }
+
+    // 2. If no main address is selected, pick the first one automatically
+    if (!mainAddressId) {
+      const firstAddressId = entries[0][0];
+      await onSetMain(firstAddressId);
+    }
+
+    navigation.navigate('HomeScreen');
   };
 
   const renderItem = ({ item }) => {
@@ -164,6 +168,7 @@ export default function AddressesScreen({ navigation }) {
   );
 
   const entries = Object.entries(addresses || {});
+  const hasAddresses = entries.length > 0;
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.container}>
@@ -175,7 +180,13 @@ export default function AddressesScreen({ navigation }) {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Addresses</Text>
         </View>
-        <TouchableOpacity onPress={() => navigation.navigate('HomeScreen')} style={styles.headerAdd}>
+        
+        {/* Updated Proceed Button with Conditional Styling */}
+        <TouchableOpacity 
+          onPress={onProceedHome} 
+          style={[styles.headerAdd, !hasAddresses && styles.disabledBtn]}
+          activeOpacity={hasAddresses ? 0.7 : 1}
+        >
           <Ionicons name="home" size={18} color="#fff" />
           <Text style={styles.headerAddText}>Proceed to Home</Text>
         </TouchableOpacity>
@@ -185,7 +196,7 @@ export default function AddressesScreen({ navigation }) {
         <View style={styles.empty}>
           <Ionicons name="location-outline" size={56} color="#d3d3d3" />
           <Text style={styles.emptyTitle}>No addresses yet</Text>
-          <Text style={styles.emptySub}>Add an address to get started. You can select as main and we’ll use it by default.</Text>
+          <Text style={styles.emptySub}>Add at least one address to continue to Home. We’ll use your main address to find the nearest branch.</Text>
           <TouchableOpacity onPress={onAdd} style={[styles.addPrimary, { marginTop: 18 }]}>
             <Text style={styles.addPrimaryText}>Add address</Text>
           </TouchableOpacity>
@@ -216,6 +227,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: Platform.OS === 'ios' ? 12 : 16, fontFamily: 'Sen_Bold', color: '#222' },
   headerAdd: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#009688', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
   headerAddText: { color: '#fff', fontFamily: 'Sen_Bold', marginLeft: 6, fontSize: Platform.OS === 'ios' ? 10 : 16 },
+  disabledBtn: { backgroundColor: '#cccccc', opacity: 0.8 }, // Style for disabled state
   listContent: { padding: 14, paddingBottom: 120 },
   card: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, padding: 14, elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, alignItems: 'flex-start' },
   cardLeft: { width: 44, alignItems: 'center', justifyContent: 'center' },

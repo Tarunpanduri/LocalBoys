@@ -1,34 +1,36 @@
-import React, { useState, useCallback, useRef } from "react";
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ScrollView, 
-  Alert, 
-  ActivityIndicator, 
-  Image, 
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  Image,
   Linking,
   Animated,
   Dimensions,
-  Platform
+  Platform,
+  Modal
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons, FontAwesome5 } from "@expo/vector-icons";
-import { getAuth, signOut } from "firebase/auth";
+import { getAuth, signOut, deleteUser } from "firebase/auth";
+import { getDatabase, ref, remove } from "firebase/database";
 import { useFonts } from "expo-font";
 import { Sen_400Regular, Sen_500Medium, Sen_700Bold, Sen_800ExtraBold } from "@expo-google-fonts/sen";
 import { fetchUserData } from "../utils/profile_util";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
 
+const { width } = Dimensions.get('window');
 
-const { width, height } = Dimensions.get('window');
-
+// --- Skeleton Component ---
 const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   const translateX = useRef(new Animated.Value(-width)).current;
 
-  React.useEffect(() => {
+  useEffect(() => {
     Animated.loop(
       Animated.timing(translateX, {
         toValue: width,
@@ -106,13 +108,16 @@ const ProfileSkeleton = () => {
   );
 };
 
+// --- Main Profile Component ---
 export default function Profile({ navigation, route }) {
   const { greetingName = "User" } = route.params || {};
   const auth = getAuth();
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const MY_PROFILE_URL = "https://tarunpanduri.github.io/Portfolio/"; 
+  const MY_PROFILE_URL = "https://tarunpanduri.github.io/Portfolio/";
 
   const [fontsLoaded] = useFonts({
     Sen_Regular: Sen_400Regular,
@@ -150,6 +155,39 @@ export default function Profile({ navigation, route }) {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    setIsDeleting(true);
+    try {
+      const db = getDatabase();
+      const userId = user.uid;
+
+      await Promise.all([
+        remove(ref(db, `users/${userId}`)),
+        remove(ref(db, `orders/${userId}`))
+      ]);
+
+      await deleteUser(user);
+
+      setShowDeleteModal(false);
+      Alert.alert("Account Deleted", "Your data has been erased. We're sorry to see you go.");
+      navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+    } catch (error) {
+      if (error.code === 'auth/requires-recent-login') {
+        Alert.alert(
+          "Security Sensitive", 
+          "For security reasons, please log out and log back in before deleting your account."
+        );
+      } else {
+        Alert.alert("Error", error.message);
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleCraftedByPress = async () => {
     const supported = await Linking.canOpenURL(MY_PROFILE_URL);
     if (supported) {
@@ -177,6 +215,8 @@ export default function Profile({ navigation, route }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+        
+        {/* Header */}
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Ionicons name="chevron-back-outline" size={26} color="#000" />
@@ -184,9 +224,12 @@ export default function Profile({ navigation, route }) {
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <Text style={[styles.headerTitle, { fontFamily: "Sen_Bold" }]}>Profile</Text>
           </View>
-          <Ionicons name="ellipsis-horizontal" size={24} color="#ffffff" />
+          <TouchableOpacity onPress={() => setShowDeleteModal(true)}>
+            <Ionicons name="person-remove" size={23} color="#000" />
+          </TouchableOpacity>
         </View>
 
+        {/* Profile Info */}
         <View style={styles.profileSection}>
           <Image source={require("../assets/logo.png")} style={styles.logo} resizeMode="contain" />
           <Text style={[styles.username, { fontFamily: "Sen_Bold" }]}>{getDisplayName()}</Text>
@@ -195,9 +238,14 @@ export default function Profile({ navigation, route }) {
           </Text>
         </View>
 
+        {/* Menu Items */}
         <View style={styles.menuContainer}>
           {menuItems.map((item, index) => (
-            <TouchableOpacity key={index} style={styles.menuItem} onPress={() => navigation.navigate(item.route, item.params || {})}>
+            <TouchableOpacity 
+              key={index} 
+              style={styles.menuItem} 
+              onPress={() => navigation.navigate(item.route, item.params || {})}
+            >
               <View style={styles.menuLeft}>
                 <View style={styles.iconBox}>{item.icon}</View>
                 <Text style={[styles.menuTitle, { fontFamily: "Sen_Medium" }]}>{item.title}</Text>
@@ -206,6 +254,7 @@ export default function Profile({ navigation, route }) {
             </TouchableOpacity>
           ))}
 
+          {/* Logout */}
           <TouchableOpacity style={styles.logoutItem} onPress={handleLogout}>
             <View style={styles.menuLeft}>
               <View style={[styles.iconBox, { backgroundColor: "#FFECEC" }]}>
@@ -217,16 +266,58 @@ export default function Profile({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
+        {/* Footer */}
         <TouchableOpacity style={styles.footerContainer} onPress={handleCraftedByPress} activeOpacity={0.7}>
           <Text style={[styles.footerText, { fontFamily: "Sen_Medium" }]}>
             Rooted with <Text style={styles.heart}>❤️</Text> in India by
           </Text>
-          <Text style={[styles.footerSubText, { fontFamily: "Sen_Bold" }]}>Tarun Panduri
-          </Text>
+          <Text style={[styles.footerSubText, { fontFamily: "Sen_Bold" }]}>Tarun Panduri</Text>
         </TouchableOpacity>
-        {/* ------------------------- */}
-
       </ScrollView>
+
+      {/* Delete Account Modal */}
+      <Modal
+        visible={showDeleteModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.warningIcon}>
+              <MaterialIcons name="report-problem" size={40} color="#E63946" />
+            </View>
+            <Text style={[styles.modalTitle, { fontFamily: "Sen_Bold" }]}>Delete Account?</Text>
+            <Text style={[styles.modalText, { fontFamily: "Sen_Regular" }]}>
+              No data is stored after this. We will miss you!{"\n\n"}
+              This will permanently delete your profile and order history.
+            </Text>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={styles.cancelBtn} 
+                onPress={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+              >
+                <Text style={[styles.cancelBtnText, { fontFamily: "Sen_Medium" }]}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.deleteBtn} 
+                onPress={handleDeleteAccount}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={[styles.deleteBtnText, { fontFamily: "Sen_Bold" }]}>Delete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -237,8 +328,6 @@ const styles = StyleSheet.create({
   scrollContainer: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 40 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   headerTitle: { fontSize: 18, color: "#000" },
-  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loadingText: { marginTop: 10, fontSize: 16, color: "#666" },
   profileSection: { alignItems: "center", marginVertical: 25 },
   username: { fontSize: Platform.OS === 'ios' ? 18 : 20, marginTop: 10, color: "#1A1A1A" },
   userInfo: { color: "#666", marginTop: 2, fontSize: Platform.OS === 'ios' ? 12 : 14 },
@@ -250,6 +339,36 @@ const styles = StyleSheet.create({
   menuTitle: { fontSize: Platform.OS === 'ios' ? 14 : 16, color: "#1A1A1A" },
   footerContainer: { marginTop: 40, alignItems: "center", justifyContent: "center", padding: Platform.OS === 'ios' ? 0 : 10, opacity: 0.8 },
   footerText: { fontSize: Platform.OS === 'ios' ? 10 : 12, color: "#888", marginBottom: 2 },
-  footerSubText: { fontSize: Platform.OS === 'ios' ? 11 : 13, color: "#04a60a", textDecorationStyle: 'solid', textDecorationLine: 'underline' },
+  footerSubText: { fontSize: Platform.OS === 'ios' ? 11 : 13, color: "#04a60a", textDecorationLine: 'underline' },
   heart: { color: "#E63946", fontSize: 10 },
+  
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 25,
+    width: '100%',
+    alignItems: 'center',
+    elevation: 10
+  },
+  warningIcon: {
+    backgroundColor: '#FFECEC',
+    padding: 15,
+    borderRadius: 50,
+    marginBottom: 15
+  },
+  modalTitle: { fontSize: 20, color: '#1A1A1A', marginBottom: 10 },
+  modalText: { fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 20, marginBottom: 25 },
+  modalButtons: { flexDirection: 'row', width: '100%', gap: 12 },
+  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#F3F4F6', alignItems: 'center' },
+  cancelBtnText: { color: '#666', fontSize: 16 },
+  deleteBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#E63946', alignItems: 'center', justifyContent: 'center' },
+  deleteBtnText: { color: '#fff', fontSize: 16 }
 });

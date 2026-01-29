@@ -11,7 +11,7 @@ export default {
     newArchEnabled: true,
     splash: {
       image: "./assets/splash-icon.png",
-      resizeMode: "cover",
+      resizeMode: "contain",
       backgroundColor: "#ffffff"
     },
     ios: {

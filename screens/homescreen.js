@@ -231,16 +231,19 @@ export default function HomeScreen({ navigation }) {
     setFilteredShops(filtered);
   }, [shops, userLocation, radiusKm, activeCategory, searchText, activeTab]);
 
-  const filteredCategories = categories.filter((c) => {
-    if (c.id === "all") return true;
-    const shopsInCategory = shops.filter(
-      (s) =>
-        s.type?.toLowerCase() === c.label.toLowerCase() &&
-        ((activeTab === "products" && s.category === "products") ||
-         (activeTab === "services" && s.category === "services"))
+const filteredCategories = categories.filter((c) => {
+  if (c.id === "all") {
+    return shops.some(s => 
+      s.isActive !== false && 
+      s.category?.toLowerCase() === activeTab &&
+      (s.location?.lat ? haversineDistance(userLocation.lat, userLocation.lng, Number(s.location.lat), Number(s.location.lng)) <= radiusKm : false)
     );
-    return shopsInCategory.length > 0;
-  });
+  }
+
+  return filteredShops.some(
+    (s) => s.type?.toLowerCase() === c.label.toLowerCase()
+  );
+});
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -337,8 +340,8 @@ export default function HomeScreen({ navigation }) {
           {renderContent()}
         </View>
         <View style={[styles.bottomNav, { backgroundColor: activeCategoryColor }]}>
-          <TouchableOpacity style={[styles.navButton, activeTab === "products" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("products")}><Text style={styles.navText}>Products</Text></TouchableOpacity>
-          <TouchableOpacity style={[styles.navButton, activeTab === "services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => setActiveTab("services")}><Text style={styles.navText}>Services</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.navButton, activeTab === "products" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("products"); setActiveCategory("all"); }}><Text style={styles.navText}>Products</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.navButton, activeTab === "services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("services"); setActiveCategory("all"); }}><Text style={styles.navText}>Services</Text></TouchableOpacity>
         </View>
       </View>
     </SafeAreaView>

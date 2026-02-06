@@ -18,11 +18,8 @@ export default {
       googleServicesFile: "./GoogleService-Info.plist",
       supportsTablet: true,
       infoPlist: {
-        NSLocationWhenInUseUsageDescription: "LocalBoys needs your location to provide the best experience and products",
-        NSLocationAlwaysAndWhenInUseUsageDescription: "LocalBoys needs your location in background to update your deliveries accurately",
-        NSUserTrackingUsageDescription: "LocalBoys may send notifications to keep you updated",
+        NSLocationWhenInUseUsageDescription: "LocalBoys needs your location to help you pin your delivery address.",
         UIBackgroundModes: [
-          "location",
           "fetch",
           "remote-notification"
         ],
@@ -44,7 +41,6 @@ export default {
       permissions: [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
         "POST_NOTIFICATIONS",
         "FOREGROUND_SERVICE",
         "RECEIVE_BOOT_COMPLETED",

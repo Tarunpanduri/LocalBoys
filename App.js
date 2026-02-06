@@ -25,6 +25,7 @@ import EditProfile from './screens/editprofile';
 import PrivacyPolicyScreen from './screens/privacypolicy';
 import TermsAndConditionsScreen from './screens/Terms';
 import ContactUs from './screens/contact';
+import Settings from './screens/settings';
 
 // Firebase
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -174,6 +175,7 @@ export default function App() {
             <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen}/>
             <Stack.Screen name="Terms" component={TermsAndConditionsScreen}/>
             <Stack.Screen name="ContactUs" component={ContactUs}/>
+            <Stack.Screen name="Settings" component={Settings}/>
           </Stack.Navigator>
         </NavigationContainer>
       </View>

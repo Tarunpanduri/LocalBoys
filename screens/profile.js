@@ -6,18 +6,15 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
-  ActivityIndicator,
   Image,
   Linking,
   Animated,
   Dimensions,
   Platform,
-  Modal
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons, FontAwesome5 } from "@expo/vector-icons";
-import { getAuth, signOut, deleteUser } from "firebase/auth";
-import { getDatabase, ref, remove } from "firebase/database";
+import { getAuth, signOut } from "firebase/auth";
 import { useFonts } from "expo-font";
 import { Sen_400Regular, Sen_500Medium, Sen_700Bold, Sen_800ExtraBold } from "@expo-google-fonts/sen";
 import { fetchUserData } from "../utils/profile_util";
@@ -114,8 +111,6 @@ export default function Profile({ navigation, route }) {
   const auth = getAuth();
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   const MY_PROFILE_URL = "https://tarunpanduri.github.io/Portfolio/";
 
@@ -155,39 +150,6 @@ export default function Profile({ navigation, route }) {
     }
   };
 
-  const handleDeleteAccount = async () => {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    setIsDeleting(true);
-    try {
-      const db = getDatabase();
-      const userId = user.uid;
-
-      await Promise.all([
-        remove(ref(db, `users/${userId}`)),
-        remove(ref(db, `orders/${userId}`))
-      ]);
-
-      await deleteUser(user);
-
-      setShowDeleteModal(false);
-      Alert.alert("Account Deleted", "Your data has been erased. We're sorry to see you go.");
-      navigation.reset({ index: 0, routes: [{ name: "Login" }] });
-    } catch (error) {
-      if (error.code === 'auth/requires-recent-login') {
-        Alert.alert(
-          "Security Sensitive", 
-          "For security reasons, please log out and log back in before deleting your account."
-        );
-      } else {
-        Alert.alert("Error", error.message);
-      }
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
   const handleCraftedByPress = async () => {
     const supported = await Linking.canOpenURL(MY_PROFILE_URL);
     if (supported) {
@@ -221,11 +183,14 @@ export default function Profile({ navigation, route }) {
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Ionicons name="chevron-back-outline" size={26} color="#000" />
           </TouchableOpacity>
+          
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
             <Text style={[styles.headerTitle, { fontFamily: "Sen_Bold" }]}>Profile</Text>
           </View>
-          <TouchableOpacity onPress={() => setShowDeleteModal(true)}>
-            <Ionicons name="person-remove" size={23} color="#000" />
+          
+          {/* UPDATED: Settings Icon instead of Delete */}
+          <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
+            <Ionicons name="settings-outline" size={24} color="#000" />
           </TouchableOpacity>
         </View>
 
@@ -275,49 +240,6 @@ export default function Profile({ navigation, route }) {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Delete Account Modal */}
-      <Modal
-        visible={showDeleteModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowDeleteModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.warningIcon}>
-              <MaterialIcons name="report-problem" size={40} color="#E63946" />
-            </View>
-            <Text style={[styles.modalTitle, { fontFamily: "Sen_Bold" }]}>Delete Account?</Text>
-            <Text style={[styles.modalText, { fontFamily: "Sen_Regular" }]}>
-              No data is stored after this. We will miss you!{"\n\n"}
-              This will permanently delete your profile and order history.
-            </Text>
-            
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={styles.cancelBtn} 
-                onPress={() => setShowDeleteModal(false)}
-                disabled={isDeleting}
-              >
-                <Text style={[styles.cancelBtnText, { fontFamily: "Sen_Medium" }]}>Cancel</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.deleteBtn} 
-                onPress={handleDeleteAccount}
-                disabled={isDeleting}
-              >
-                {isDeleting ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={[styles.deleteBtnText, { fontFamily: "Sen_Bold" }]}>Delete</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
     </SafeAreaView>
   );
 }
@@ -341,34 +263,4 @@ const styles = StyleSheet.create({
   footerText: { fontSize: Platform.OS === 'ios' ? 10 : 12, color: "#888", marginBottom: 2 },
   footerSubText: { fontSize: Platform.OS === 'ios' ? 11 : 13, color: "#04a60a", textDecorationLine: 'underline' },
   heart: { color: "#E63946", fontSize: 10 },
-  
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 25,
-    width: '100%',
-    alignItems: 'center',
-    elevation: 10
-  },
-  warningIcon: {
-    backgroundColor: '#FFECEC',
-    padding: 15,
-    borderRadius: 50,
-    marginBottom: 15
-  },
-  modalTitle: { fontSize: 20, color: '#1A1A1A', marginBottom: 10 },
-  modalText: { fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 20, marginBottom: 25 },
-  modalButtons: { flexDirection: 'row', width: '100%', gap: 12 },
-  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#F3F4F6', alignItems: 'center' },
-  cancelBtnText: { color: '#666', fontSize: 16 },
-  deleteBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#E63946', alignItems: 'center', justifyContent: 'center' },
-  deleteBtnText: { color: '#fff', fontSize: 16 }
 });

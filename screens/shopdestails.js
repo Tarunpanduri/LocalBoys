@@ -1,15 +1,20 @@
-import React, { useEffect, useState, useMemo, useCallback,useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, FlatList, Dimensions, StatusBar, Alert,Animated, Platform } from "react-native";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, Dimensions, StatusBar, Alert, Animated, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { auth, db } from "../firebase";
-import { ref as dbRef, set, get, remove, onValue } from "firebase/database";
+import { ref as dbRef, onValue } from "firebase/database"; // Removed set, remove, get for cart
 import Toast from "react-native-root-toast";
 import { useFonts } from "expo-font";
 
+// --- IMPORT CART CONTEXT ---
+import { useCart } from "../context/CartContext"; // Adjust path if necessary
+
 const { width } = Dimensions.get("window");
 const CARD_PADDING = 12, CARD_GUTTER = 12, CARD_WIDTH = Math.round((width - CARD_PADDING * 2 - CARD_GUTTER) / 2);
+
+// --- SKELETON COMPONENTS ---
 const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   const translateX = useRef(new Animated.Value(-width)).current;
 
@@ -101,156 +106,85 @@ const ShopDetailsSkeleton = () => {
 
 export default function ShopDetails({ route, navigation }) {
   const { shopId, shop } = route.params || {};
-  const [productsObj, setProductsObj] = useState({}), [loading, setLoading] = useState(true), [activeCategory, setActiveCategory] = useState(null),
-    [adminCats, setAdminCats] = useState({}), [error, setError] = useState(null), [userCart, setUserCart] = useState({});
+  const [productsObj, setProductsObj] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState(null);
+  const [adminCats, setAdminCats] = useState({});
+  const [error, setError] = useState(null);
+  
   const user = auth.currentUser;
+  
+  // --- USE CART CONTEXT ---
+  const { 
+    cartShopId, 
+    cartShop, 
+    cartItems,
+    cartItemCount,
+    addToCart, 
+    decreaseQty, 
+    clearCart 
+  } = useCart();
+
   const [fontsLoaded] = useFonts({
     ...Ionicons.font,
     ...MaterialIcons.font,
   });
 
-  const cartShopId = Object.keys(userCart || {}).find((k) => k !== "updatedAt");
-  const cartShop = cartShopId ? userCart[cartShopId] : null;
-  const cartItemsCount = cartShop ? Object.keys(cartShop).filter((k) => !["shopname", "shopimage"].includes(k)).length : 0;
+  // --- CHECKOUT LOGIC ---
+  const handleProceedCheckout = async () => {
+    if (!cartShopId) return;
 
-  const handleClearCart = async () => {
-    if (!user || !cartShopId) return;
-    Alert.alert("Clear Cart", "Are you sure you want to clear your cart?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear", style: "destructive", onPress: async () => {
-          try {
-            await remove(dbRef(db, `carts/${user.uid}`));
-            Toast.show("Cart cleared.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-          } catch {
-            Toast.show("Failed to clear cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-          }
-        }
-      },
-    ]);
-  };
+    // Use cartItems from context directly
+    if (!cartItems || !cartItems.length) return Toast.show("Cart is empty.", { duration: Toast.durations.SHORT });
 
-const handleProceedCheckout = async () => {
-  if (!cartShopId) return;
+    const hasRideService = cartItems.some(item => item.serviceType === "ride");
+    const hasDeliveryService = cartItems.some(item => item.serviceType === "delivery");
 
-  const shopCart = userCart[cartShopId] || {};
-  const cartItems = Object.keys(shopCart).filter(k => !["shopname", "shopimage"].includes(k)).map(k => shopCart[k]);
-  
-  if (!cartItems.length) return Toast.show("Cart is empty.", { duration: Toast.durations.SHORT });
-
-  const hasRideService = cartItems.some(item => item.serviceType === "ride");
-  const hasDeliveryService = cartItems.some(item => item.serviceType === "delivery");
-
-  if (hasRideService && !hasDeliveryService) {
-    navigation.navigate("CheckoutScreentwo", { shopId: cartShopId, shop, cart: shopCart });
-  } else if (hasDeliveryService && !hasRideService) {
-    navigation.navigate("Checkout", { shopId: cartShopId, shop, cart: shopCart });
-  } else {
-    Alert.alert(
-      "Multiple Service Types",
-      "Your cart contains items with different service types. Please separate them into different orders.",
-      [{ text: "OK" }]
-    );
-  }
-};
-
-
-
-  useEffect(() => {
-    if (!user) return;
-    const userCartRef = dbRef(db, `carts/${user.uid}`);
-    const unsub = onValue(userCartRef, (snap) => setUserCart(snap.val() || {}));
-    return () => unsub();
-  }, [user]);
-
-const addToCart = async (product) => {
-  if (!user) return Toast.show("Please login to add items to cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-  if (product.inStock === false) return Toast.show("Product is out of stock.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-
-  const userCartRef = dbRef(db, `carts/${user.uid}`);
-  try {
-    const snapshot = await get(userCartRef);
-    const cart = snapshot.val() || {}, cartShops = Object.keys(cart).filter((k) => k !== "updatedAt"), currentShopId = shopId;
-
-    if (cartShops.length && cartShops[0] !== currentShopId) {
-      Alert.alert("Cart contains items from another shop", "Do you want to clear the old cart and start a new one?", [
-        { text: "No", style: "cancel" },
-        {
-          text: "Yes", onPress: async () => {
-            await set(userCartRef, {
-              [currentShopId]: {
-                shopname: shop.name,
-                shopimage: shop.image,
-                [product.id]: { 
-                  productname: product.name, 
-                  price: product.price, 
-                  qty: 1,
-                  serviceType: product.serviceType || null // <-- add serviceType here
-                }
-              },
-              updatedAt: Date.now()
-            });
-            Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-          }
-        },
-      ]);
-      return;
-    }
-
-    const shopCart = cart[currentShopId] || { shopname: shop.name, shopimage: shop.image };
-    const existingProduct = shopCart[product.id], newQty = existingProduct ? existingProduct.qty + 1 : 1;
-    const updateObj = {
-      [currentShopId]: {
-        ...shopCart,
-        [product.id]: { 
-          ...existingProduct, 
-          productname: product.name, 
-          price: product.price, 
-          qty: newQty, 
-          serviceType: product.serviceType || null // <-- add serviceType here
-        }
-      },
-      updatedAt: Date.now()
-    };
-    await set(userCartRef, updateObj);
-    Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-  } catch (err) {
-    console.error(err);
-    Toast.show("Failed to add product to cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM });
-  }
-};
-
-  const removeFromCart = async (productId) => {
-    if (!user) return;
-    try { await remove(dbRef(db, `carts/${user.uid}/${shopId}/${productId}`)); }
-    catch (err) { console.error(err); Toast.show("Failed to remove product from cart.", { duration: Toast.durations.SHORT, position: Toast.positions.BOTTOM }); }
-  };
-
-  const decreaseCartQty = async (product) => {
-    if (!user) return;
-    const shopCart = userCart[shopId] || {}, existingProduct = shopCart[product.id];
-    if (!existingProduct) return;
-    const newQty = existingProduct.qty - 1;
-    if (newQty <= 0) await removeFromCart(product.id);
-    else {
-      const updateObj = { [shopId]: { ...shopCart, [product.id]: { ...existingProduct, qty: newQty } }, updatedAt: Date.now() };
-      await set(dbRef(db, `carts/${user.uid}`), updateObj);
+    // Passing `cart: cartShop` because your checkout screens expect the object format { [itemId]: item }
+    // which corresponds exactly to what `cartShop` holds (minus shopname/image keys).
+    if (hasRideService && !hasDeliveryService) {
+      navigation.navigate("CheckoutScreentwo", { shopId: cartShopId, shop, cart: cartShop });
+    } else if (hasDeliveryService && !hasRideService) {
+      navigation.navigate("Checkout", { shopId: cartShopId, shop, cart: cartShop });
+    } else {
+      Alert.alert(
+        "Multiple Service Types",
+        "Your cart contains items with different service types. Please separate them into different orders.",
+        [{ text: "OK" }]
+      );
     }
   };
 
+  // --- FETCH PRODUCTS (Local Shop Data) ---
   useEffect(() => {
     if (!shopId) { setError("No shopId provided"); setLoading(false); return; }
     setLoading(true);
-    const productsRef = dbRef(db, `products/${shopId}`), adminCatsRef = dbRef(db, `admin_data/categories`);
-    const unsubProducts = onValue(productsRef, (snap) => { setProductsObj(snap.val() || {}); setLoading(false); }, (err) => { console.warn("products read error", err); setError("Failed to load products"); setLoading(false); });
+    
+    const productsRef = dbRef(db, `products/${shopId}`);
+    const adminCatsRef = dbRef(db, `admin_data/categories`);
+    
+    const unsubProducts = onValue(productsRef, (snap) => { 
+        setProductsObj(snap.val() || {}); 
+        setLoading(false); 
+    }, (err) => { 
+        console.warn("products read error", err); 
+        setError("Failed to load products"); 
+        setLoading(false); 
+    });
+
     const unsubAdminCats = onValue(adminCatsRef, (snap) => setAdminCats(snap.val() || {}));
+    
     return () => { unsubProducts(); unsubAdminCats(); };
   }, [shopId]);
 
+  // --- DERIVED DATA ---
   const productsArray = useMemo(() => Object.keys(productsObj || {}).map((pid) => ({ id: pid, ...productsObj[pid] })), [productsObj]);
   const categories = useMemo(() => ["All", ...Array.from(new Set(productsArray.map((p) => p.category || "Other")))], [productsArray]);
+  
   useEffect(() => { if (categories.length && !activeCategory) setActiveCategory("All"); }, [categories, activeCategory]);
+  
   const productsByActiveCategory = useMemo(() => (!activeCategory || activeCategory === "All") ? productsArray : productsArray.filter((p) => (p.category || "Other") === activeCategory), [productsArray, activeCategory]);
+  
   const getCategoryTheme = useCallback((catLabel) => (catLabel === "All" ? "#28A745" : adminCats[catLabel]?.Theme || "#28A745"), [adminCats]);
   const themeColor = getCategoryTheme(activeCategory);
 
@@ -258,94 +192,142 @@ const addToCart = async (product) => {
   if (error) return <SafeAreaView style={styles.centered}><Text style={{ color: "#b00020" }}>{error}</Text></SafeAreaView>;
   if (!shop) return <SafeAreaView style={styles.centered}><Text style={{ color: "#333" }}>Shop not found</Text></SafeAreaView>;
 
-  const renderHeader = () => (<>
-    <View style={styles.headerRow}>
-      <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-        <Ionicons name="chevron-back" size={20} color="#10202A" />
-      </TouchableOpacity>
-      <Text style={styles.headerTitle}>Shop Details</Text>
-      <TouchableOpacity >
-        <Ionicons name="ellipsis-vertical" size={18} color="#ffffff" />
-      </TouchableOpacity>
-    </View>
-    <View style={styles.bannerWrap}>
-      <Image source={shop.image ? { uri: shop.image } : { uri: "https://www.trueangle.in/public/assets/img/product-default.png" }} style={styles.banner} resizeMode="cover" />
-    </View>
-    <View style={styles.info}>
-      <Text style={styles.shopName}>{shop.name}</Text>
-      <Text style={styles.shopDesc}>{shop.description || "No description available."}</Text>
-      <View style={styles.metaRow}>
-        <View style={styles.metaItem}><Ionicons name="star" size={16} color="#28A745" /><Text style={styles.metaText}>{shop.rating ?? "—"}</Text></View>
-        <View style={[styles.metaItem, { marginLeft: 18 }]}><MaterialIcons name="local-shipping" size={16} color="#444" /><Text style={styles.metaText}> Free</Text></View>
-        <View style={[styles.metaItem, { marginLeft: 18 }]}><Ionicons name="time-outline" size={16} color="#444" /><Text style={styles.metaText}>{shop.deliveryTime ?? `${shop.avgPrepTime ?? "—"} min`}</Text></View>
+  const renderHeader = () => (
+    <>
+      <View style={styles.headerRow}>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Ionicons name="chevron-back" size={20} color="#10202A" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Shop Details</Text>
+        <TouchableOpacity >
+          <Ionicons name="ellipsis-vertical" size={18} color="#ffffff" />
+        </TouchableOpacity>
       </View>
-    </View>
-    <View style={{ marginTop: 18 }}>
-      <FlatList horizontal data={categories} keyExtractor={(item, idx) => `${item}-${idx}`} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 6, paddingHorizontal: 12 }}
-        renderItem={({ item, index }) => {
-          const active = activeCategory === item, catColor = getCategoryTheme(item);
-          return (<TouchableOpacity onPress={() => setActiveCategory(item)} style={[styles.catChip, active && { backgroundColor: catColor, borderColor: catColor }, index === categories.length - 1 ? { marginRight: 0 } : null]} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-            <Text style={[styles.catLabel, active && { color: "#fff", fontFamily: "Sen_Bold" }]}>{item}</Text>
-          </TouchableOpacity>);
+      <View style={styles.bannerWrap}>
+        <Image source={shop.image ? { uri: shop.image } : { uri: "https://www.trueangle.in/public/assets/img/product-default.png" }} style={styles.banner} resizeMode="cover" />
+      </View>
+      <View style={styles.info}>
+        <Text style={styles.shopName}>{shop.name}</Text>
+        <Text style={styles.shopDesc}>{shop.description || "No description available."}</Text>
+        <View style={styles.metaRow}>
+          <View style={styles.metaItem}><Ionicons name="star" size={16} color="#28A745" /><Text style={styles.metaText}>{shop.rating ?? "—"}</Text></View>
+          <View style={[styles.metaItem, { marginLeft: 18 }]}><MaterialIcons name="local-shipping" size={16} color="#444" /><Text style={styles.metaText}> Free</Text></View>
+          <View style={[styles.metaItem, { marginLeft: 18 }]}><Ionicons name="time-outline" size={16} color="#444" /><Text style={styles.metaText}>{shop.deliveryTime ?? `${shop.avgPrepTime ?? "—"} min`}</Text></View>
+        </View>
+      </View>
+      <View style={{ marginTop: 18 }}>
+        <FlatList 
+            horizontal 
+            data={categories} 
+            keyExtractor={(item, idx) => `${item}-${idx}`} 
+            showsHorizontalScrollIndicator={false} 
+            contentContainerStyle={{ paddingVertical: 6, paddingHorizontal: 12 }}
+            renderItem={({ item, index }) => {
+                const active = activeCategory === item, catColor = getCategoryTheme(item);
+                return (
+                    <TouchableOpacity 
+                        onPress={() => setActiveCategory(item)} 
+                        style={[styles.catChip, active && { backgroundColor: catColor, borderColor: catColor }, index === categories.length - 1 ? { marginRight: 0 } : null]} 
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                        <Text style={[styles.catLabel, active && { color: "#fff", fontFamily: "Sen_Bold" }]}>{item}</Text>
+                    </TouchableOpacity>
+                );
         }} />
-    </View>
-    <View style={{ marginVertical: 12 }}>
-      <Text style={styles.sectionHeading}>{activeCategory} <Text style={styles.sectionCount}>({productsByActiveCategory.length})</Text></Text>
-    </View>
-  </>);
-
-  return (<SafeAreaView style={styles.safe}>
-    <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-    <FlatList
-      data={productsByActiveCategory}
-      keyExtractor={(item) => item.id}
-      numColumns={2}
-      showsVerticalScrollIndicator={false}
-      columnWrapperStyle={{ justifyContent: "space-between", marginBottom: CARD_GUTTER }}
-      contentContainerStyle={{ paddingHorizontal: CARD_PADDING, paddingBottom: 140 }}
-      ListHeaderComponent={renderHeader}
-      renderItem={({ item }) => {
-        const shopCart = userCart[shopId] || {}, cartItem = shopCart[item.id];
-        return (<View style={styles.productCard}>
-          <Image source={{ uri: item.image }} style={styles.productImage} resizeMode="cover" />
-          <View style={styles.productBody}>
-            <Text style={styles.productTitle} numberOfLines={2}>{item.name}</Text>
-            <Text style={styles.productSubtitle} numberOfLines={1}>{item.description || "No description"}</Text>
-            <Text style={styles.productquantity}>{item.quantity || "N/A"}</Text>
-            <View style={styles.productRow}>
-              <Text style={styles.price}>₹{item.price}</Text>
-              {cartItem ? (<View style={{ flexDirection: "row", alignItems: "center" }}>
-                <TouchableOpacity onPress={() => decreaseCartQty(item)} style={[styles.addBtn, { marginRight: 6, backgroundColor: "#ccc" }]}>
-                  <Ionicons name="remove" size={18} color="#fff" />
-                </TouchableOpacity>
-                <Text style={{ marginHorizontal: 4 }}>{cartItem.qty}</Text>
-                <TouchableOpacity onPress={() => addToCart(item)} style={[styles.addBtn, { backgroundColor: themeColor }]}>
-                  <Ionicons name="add" size={18} color="#fff" />
-                </TouchableOpacity>
-              </View>) : (<TouchableOpacity style={[styles.addBtn, { backgroundColor: themeColor }]} onPress={() => addToCart(item)}>
-                <Ionicons name="add" size={18} color="#fff" />
-              </TouchableOpacity>)}
-            </View>
-            {item.inStock === false && <Text style={{ color: "red", fontSize: 12, marginTop: 4,fontFamily:'Sen_Medium' }}>Out of Stock</Text>}
-          </View>
-        </View>);
-      }}
-      ListEmptyComponent={() => <View style={{ padding: 20 }}><Text style={{ color: "#666", textAlign: "center" }}>No items in this category.</Text></View>}
-    />
-    {cartShop && cartItemsCount > 0 && (<View style={styles.cartBar}>
-      <View style={styles.cartInfo}>
-        <Image source={{ uri: cartShop.shopimage }} style={styles.cartShopImage} />
-        <View style={{ flex: 1, marginLeft: 10 }}>
-          <Text style={styles.cartText}>You have {cartItemsCount} {cartItemsCount > 1 ? "items" : "item"}</Text>
-          <Text style={styles.cartSubText}>from {cartShop.shopname}</Text>
-        </View>
-        <View style={styles.cartActions}>
-          <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#ccc" }]} onPress={handleClearCart}><Text style={styles.cartBtnText}>Clear</Text></TouchableOpacity>
-          <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#28A745" }]} onPress={handleProceedCheckout}><Text style={[styles.cartBtnText, { color: "#fff" }]}>Checkout</Text></TouchableOpacity>
-        </View>
       </View>
-    </View>)}
-  </SafeAreaView>);
+      <View style={{ marginVertical: 12 }}>
+        <Text style={styles.sectionHeading}>{activeCategory} <Text style={styles.sectionCount}>({productsByActiveCategory.length})</Text></Text>
+      </View>
+    </>
+  );
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      <FlatList
+        data={productsByActiveCategory}
+        keyExtractor={(item) => item.id}
+        numColumns={2}
+        showsVerticalScrollIndicator={false}
+        columnWrapperStyle={{ justifyContent: "space-between", marginBottom: CARD_GUTTER }}
+        contentContainerStyle={{ paddingHorizontal: CARD_PADDING, paddingBottom: 140 }}
+        ListHeaderComponent={renderHeader}
+        renderItem={({ item }) => {
+          
+          // Check if the current context cart matches this shop
+          // If so, see if this specific product is in the cart
+          const isCurrentShopInCart = cartShopId === shopId;
+          const cartItem = (isCurrentShopInCart && cartShop) ? cartShop[item.id] : null;
+
+          return (
+            <View style={styles.productCard}>
+              <Image source={{ uri: item.image }} style={styles.productImage} resizeMode="cover" />
+              <View style={styles.productBody}>
+                <Text style={styles.productTitle} numberOfLines={2}>{item.name}</Text>
+                <Text style={styles.productSubtitle} numberOfLines={1}>{item.description || "No description"}</Text>
+                <Text style={styles.productquantity}>{item.quantity || "N/A"}</Text>
+                
+                <View style={styles.productRow}>
+                  <Text style={styles.price}>₹{item.price}</Text>
+                  
+                  {cartItem ? (
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <TouchableOpacity 
+                        onPress={() => decreaseQty(shopId, item)} 
+                        style={[styles.addBtn, { marginRight: 6, backgroundColor: "#ccc" }]}
+                      >
+                        <Ionicons name="remove" size={18} color="#fff" />
+                      </TouchableOpacity>
+                      
+                      <Text style={{ marginHorizontal: 4 }}>{cartItem.qty}</Text>
+                      
+                      <TouchableOpacity 
+                        onPress={() => addToCart(shop, item)} 
+                        style={[styles.addBtn, { backgroundColor: themeColor }]}
+                      >
+                        <Ionicons name="add" size={18} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <TouchableOpacity 
+                        style={[styles.addBtn, { backgroundColor: themeColor }]} 
+                        onPress={() => addToCart(shop, item)}
+                    >
+                      <Ionicons name="add" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {item.inStock === false && <Text style={{ color: "red", fontSize: 12, marginTop: 4, fontFamily:'Sen_Medium' }}>Out of Stock</Text>}
+              </View>
+            </View>
+          );
+        }}
+        ListEmptyComponent={() => <View style={{ padding: 20 }}><Text style={{ color: "#666", textAlign: "center" }}>No items in this category.</Text></View>}
+      />
+
+      {/* CART BAR */}
+      {/* We check cartShopId === shopId to only show the bar if the active cart belongs to THIS shop, or you can allow it to show always if you want global cart visibility */}
+      {cartShop && cartItemCount > 0 && cartShopId === shopId && (
+        <View style={styles.cartBar}>
+          <View style={styles.cartInfo}>
+            <Image source={{ uri: cartShop.shopimage }} style={styles.cartShopImage} />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={styles.cartText}>You have {cartItemCount} {cartItemCount > 1 ? "items" : "item"}</Text>
+              <Text style={styles.cartSubText}>from {cartShop.shopname}</Text>
+            </View>
+            <View style={styles.cartActions}>
+              <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#ccc" }]} onPress={clearCart}>
+                <Text style={styles.cartBtnText}>Clear</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#28A745" }]} onPress={handleProceedCheckout}>
+                <Text style={[styles.cartBtnText, { color: "#fff" }]}>Checkout</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({

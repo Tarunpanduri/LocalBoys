@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Pressable, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db as database } from '../firebase';
-import { ref, onValue, remove, update, get } from 'firebase/database';
+import { ref, remove, update, get } from 'firebase/database';
+
+// --- IMPORT USER CONTEXT ---
+import { useUser } from '../context/UserContext';
 
 // --- ROBUST DISTANCE CALCULATION ---
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
@@ -21,23 +24,12 @@ const haversineDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 export default function AddressesScreen({ navigation }) {
-  const [loading, setLoading] = useState(true);
-  const [addresses, setAddresses] = useState({});
-  const [mainAddressId, setMainAddressId] = useState(null);
+  // 1. USE CONTEXT instead of local state/useEffect
+  const { userData, loading } = useUser();
 
-  useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) { setLoading(false); return; }
-    
-    const userRef = ref(database, `users/${uid}`);
-    const unsubscribe = onValue(userRef, snap => {
-      const val = snap.val() || {};
-      setAddresses(val.addresses || {});
-      setMainAddressId(val.mainAddressId || null);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+  // 2. DERIVE STATE from Context Data
+  const addresses = userData?.addresses || {};
+  const mainAddressId = userData?.mainAddressId || null;
 
   const onAdd = () => navigation.navigate('MapScreen', { mode: 'add' });
   const onEdit = (id, item) => navigation.navigate('MapScreen', { mode: 'edit', addressId: id, initial: { ...item } });
@@ -48,8 +40,12 @@ export default function AddressesScreen({ navigation }) {
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
           try {
-            const uid = auth.currentUser.uid;
+            const uid = auth.currentUser?.uid;
+            if (!uid) return;
+            
             await remove(ref(database, `users/${uid}/addresses/${id}`));
+            
+            // If deleting the main address, remove the reference from user profile
             if (mainAddressId === id) {
                await update(ref(database, `users/${uid}`), { mainAddressId: null });
             }
@@ -64,13 +60,16 @@ export default function AddressesScreen({ navigation }) {
 
   const onSetMain = async (id) => {
     try {
-      const uid = auth.currentUser.uid;
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+
       const selectedAddress = addresses[id];
       if (!selectedAddress) return;
 
       const updates = {};
       updates[`users/${uid}/mainAddressId`] = id;
 
+      // Logic to find nearest branch support contact based on new main address
       if (selectedAddress.lat && selectedAddress.lng) {
         const branchesSnap = await get(ref(database, 'branches'));
         const branches = branchesSnap.val();
@@ -99,12 +98,13 @@ export default function AddressesScreen({ navigation }) {
         }
       }
       await update(ref(database), updates);
+      navigation.navigate('HomeScreen'); 
     } catch (e) {
       console.error('Set main address error:', e);
     }
   };
 
-  // --- NEW: PROCEED HOME LOGIC ---
+  // --- PROCEED HOME LOGIC ---
   const onProceedHome = async () => {
     const entries = Object.entries(addresses);
     
@@ -167,7 +167,7 @@ export default function AddressesScreen({ navigation }) {
     </SafeAreaView>
   );
 
-  const entries = Object.entries(addresses || {});
+  const entries = Object.entries(addresses);
   const hasAddresses = entries.length > 0;
 
   return (
@@ -226,7 +226,7 @@ const styles = StyleSheet.create({
   backBtn: { marginRight: 8, padding: 6, borderRadius: 8 },
   headerTitle: { fontSize: Platform.OS === 'ios' ? 12 : 16, fontFamily: 'Sen_Bold', color: '#222' },
   headerAdd: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#009688', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  headerAddText: { color: '#fff', fontFamily: 'Sen_Bold', marginLeft: 6, fontSize: Platform.OS === 'ios' ? 10 : 16 },
+  headerAddText: { color: '#fff', fontFamily: 'Sen_Bold', marginLeft: 6, fontSize: Platform.OS === 'ios' ? 10 : 12 },
   disabledBtn: { backgroundColor: '#cccccc', opacity: 0.8 }, // Style for disabled state
   listContent: { padding: 14, paddingBottom: 120 },
   card: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, padding: 14, elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, alignItems: 'flex-start' },

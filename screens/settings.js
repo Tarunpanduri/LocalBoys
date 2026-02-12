@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Switch,
   ScrollView,
-  Platform,
   Modal,
   ActivityIndicator,
   Alert
@@ -15,18 +14,20 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { getAuth, deleteUser, signOut } from "firebase/auth";
-import { getDatabase, ref, remove, update, get } from "firebase/database";
+import { getDatabase, ref, remove, update } from "firebase/database";
 import { useFonts } from "expo-font";
 import { Sen_400Regular, Sen_500Medium, Sen_700Bold } from "@expo-google-fonts/sen";
+
+// --- IMPORT CONTEXT ---
+import { useUser } from "../context/UserContext";
 
 export default function Settings() {
   const navigation = useNavigation();
   const auth = getAuth();
   const db = getDatabase();
-  const user = auth.currentUser;
-
-  // Loading State for Settings
-  const [loadingSettings, setLoadingSettings] = useState(true);
+  
+  // 1. USE CONTEXT instead of local fetching
+  const { userData, loading: userLoading } = useUser();
 
   // Toggles State (Default true)
   const [smsEnabled, setSmsEnabled] = useState(true);
@@ -42,42 +43,22 @@ export default function Settings() {
     Sen_Bold: Sen_700Bold,
   });
 
-  // --- 1. FETCH SETTINGS ON LOAD ---
+  // --- 2. SYNC STATE WITH CONTEXT DATA ---
+  // Whenever userData updates in the background (via Context), update local state
   useEffect(() => {
-    if (!user) return;
+    if (userData) {
+      const prefs = userData.preferences || {};
+      
+      // If key exists in DB, use it. Otherwise default to true.
+      setSmsEnabled(prefs.smsEnabled !== undefined ? prefs.smsEnabled : true);
+      setWhatsappEnabled(prefs.whatsappEnabled !== undefined ? prefs.whatsappEnabled : true);
+    }
+  }, [userData]);
 
-    const fetchPreferences = async () => {
-      try {
-        const prefRef = ref(db, `users/${user.uid}/preferences`);
-        const snapshot = await get(prefRef);
-
-        if (snapshot.exists()) {
-          const data = snapshot.val();
-          // If data exists, use it. If a key is missing, default to true.
-          setSmsEnabled(data.smsEnabled !== undefined ? data.smsEnabled : true);
-          setWhatsappEnabled(data.whatsappEnabled !== undefined ? data.whatsappEnabled : true);
-        } else {
-          // If no data (First Time), set both to true in DB
-          await update(prefRef, {
-            smsEnabled: true,
-            whatsappEnabled: true
-          });
-          setSmsEnabled(true);
-          setWhatsappEnabled(true);
-        }
-      } catch (error) {
-        console.error("Error fetching settings:", error);
-      } finally {
-        setLoadingSettings(false);
-      }
-    };
-
-    fetchPreferences();
-  }, []);
-
-  // --- 2. HANDLE TOGGLES ---
+  // --- 3. HANDLE TOGGLES ---
   const handleSmsToggle = async (value) => {
     setSmsEnabled(value); // Optimistic Update (UI changes immediately)
+    const user = auth.currentUser;
     if (user) {
       try {
         await update(ref(db, `users/${user.uid}/preferences`), {
@@ -92,6 +73,7 @@ export default function Settings() {
 
   const handleWhatsappToggle = async (value) => {
     setWhatsappEnabled(value); // Optimistic Update
+    const user = auth.currentUser;
     if (user) {
       try {
         await update(ref(db, `users/${user.uid}/preferences`), {
@@ -104,29 +86,27 @@ export default function Settings() {
     }
   };
 
-  // --- 3. HANDLE DELETE ACCOUNT (SAFE VERSION) ---
+  // --- 4. HANDLE DELETE ACCOUNT (SAFE VERSION) ---
   const handleDeleteAccount = async () => {
+    const user = auth.currentUser;
     if (!user) return;
 
     // --- STEP A: SAFETY CHECK BEFORE DELETING DATA ---
-    // Calculate how long ago the user signed in
     const lastSignInTime = new Date(user.metadata.lastSignInTime).getTime();
     const currentTime = Date.now();
     const timeSinceLogin = currentTime - lastSignInTime;
-    const REAUTH_THRESHOLD = 5 * 60 * 1000; // 5 minutes in milliseconds
+    const REAUTH_THRESHOLD = 5 * 60 * 1000; // 5 minutes
 
-    // If login was more than 5 minutes ago, force re-login NOW.
-    // We do this BEFORE setIsDeleting(true) and BEFORE removing any data.
+    // If login was > 5 mins ago, force re-login
     if (timeSinceLogin > REAUTH_THRESHOLD) {
-      setShowDeleteModal(false); // Close the modal
+      setShowDeleteModal(false);
       Alert.alert(
         "Security Check Required", 
-        "For your security, you must have recently logged in to delete your account. Please log in again to verify your identity.",
+        "For your security, you must have recently logged in to delete your account. Please log in again.",
         [
           { 
             text: "Log In Now", 
             onPress: async () => {
-              // Log them out and send to login screen
               await signOut(auth);
               navigation.reset({ index: 0, routes: [{ name: "Login" }] });
             }
@@ -134,7 +114,7 @@ export default function Settings() {
           { text: "Cancel", style: "cancel" }
         ]
       );
-      return; // STOP HERE. Data is safe.
+      return;
     }
 
     // --- STEP B: PROCEED WITH DELETION ---
@@ -154,13 +134,11 @@ export default function Settings() {
       setShowDeleteModal(false);
       Alert.alert("Account Deleted", "Your data has been erased. We're sorry to see you go.");
       
-      // Navigate to Login (Reset Stack)
       navigation.reset({ index: 0, routes: [{ name: "Login" }] });
 
     } catch (error) {
       console.error("Delete Error", error);
       
-      // Double safety net: In case the time check passes but Firebase still rejects it
       if (error.code === 'auth/requires-recent-login') {
          Alert.alert(
           "Security Check", 
@@ -174,7 +152,7 @@ export default function Settings() {
     }
   };
 
-  if (!fontsLoaded || loadingSettings) {
+  if (!fontsLoaded || userLoading) {
     return <View style={styles.loadingContainer}><ActivityIndicator color="#FF6B00" /></View>;
   }
 

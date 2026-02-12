@@ -7,7 +7,14 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RootSiblingParent } from 'react-native-root-siblings';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import * as Device from 'expo-device'; 
+import * as Device from 'expo-device';
+
+// --- CONTEXT PROVIDERS  ---
+import { ShopProvider } from './context/ShopContext';
+import { CartProvider } from './context/CartContext';
+import { AdminProvider } from './context/AdminContext';
+import { UserProvider } from './context/UserContext';
+import { CouponProvider } from './context/CouponContext';
 
 // Screens
 import Login from './screens/login';
@@ -39,7 +46,7 @@ Notifications.setNotificationHandler({
     shouldShowBanner: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
-    shouldShowList: true, 
+    shouldShowList: true,
   })
 });
 
@@ -66,7 +73,6 @@ export default function App() {
 
     // 2. Setup Android Channel (UPDATED ID TO FORCE REFRESH)
     if (Platform.OS === 'android') {
-      // We added '_v2' to force Android to create a fresh channel with new settings
       await Notifications.setNotificationChannelAsync('localboys_high_priority_v2', {
         name: 'High Priority Updates',
         importance: Notifications.AndroidImportance.MAX,
@@ -81,12 +87,12 @@ export default function App() {
       // 3. Check Permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
-      
+
       if (existingStatus !== 'granted') {
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
-      
+
       if (finalStatus !== 'granted') {
         Alert.alert('Permission Denied', 'Enable notifications to receive updates.');
         return null;
@@ -94,7 +100,7 @@ export default function App() {
 
       // 4. Get Expo Push Token
       const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
-      
+
       if (!projectId) {
         console.log('Project ID not found in app config');
       }
@@ -102,14 +108,14 @@ export default function App() {
       const tokenData = await Notifications.getExpoPushTokenAsync({
         projectId: projectId,
       });
-      
+
       const expoToken = tokenData.data;
 
       // 5. Save to Firebase as expoPushToken
       if (userId && expoToken) {
         await update(ref(db, `users/${userId}`), { expoPushToken: expoToken });
       }
-      
+
       return expoToken;
     } catch (err) {
       console.log('❌ Push registration error:', err);
@@ -131,15 +137,15 @@ export default function App() {
         const content = response.notification.request.content;
         const data = content.data || {};
         const route = data.screen;
-        
+
         // Ensure we grab the image URL if provided in data
         const imageUrl = data.image || data.imageUrl;
-        
+
         if (route && allowedRoutes.includes(route) && navigationRef.isReady()) {
-          navigationRef.navigate(route, { 
-            ...data, 
-            notificationImage: imageUrl, 
-            fromNotification: true 
+          navigationRef.navigate(route, {
+            ...data,
+            notificationImage: imageUrl,
+            fromNotification: true
           });
         }
       } catch (e) {
@@ -158,26 +164,37 @@ export default function App() {
   return (
     <RootSiblingParent>
       <View style={styles.container} onLayout={onLayoutRootView}>
-        <NavigationContainer ref={navigationRef}>
-          <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
-            <Stack.Screen name="Login" component={Login}/>
-            <Stack.Screen name="SignUp" component={SignUp}/>
-            <Stack.Screen name="MapScreen" component={MapScreen}/>
-            <Stack.Screen name="HomeScreen" component={HomeScreen}/>
-            <Stack.Screen name="ShopDetails" component={ShopDetails}/>
-            <Stack.Screen name="Checkout" component={CheckoutScreen}/>
-            <Stack.Screen name="TrackOrder" component={TrackOrder}/>
-            <Stack.Screen name="Addresses" component={AddressesScreen}/>
-            <Stack.Screen name="Profile" component={Profile}/>
-            <Stack.Screen name="CheckoutScreentwo" component={CheckoutScreentwo}/>
-            <Stack.Screen name="EditProfile" component={EditProfile}/>
-            <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }}/>
-            <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen}/>
-            <Stack.Screen name="Terms" component={TermsAndConditionsScreen}/>
-            <Stack.Screen name="ContactUs" component={ContactUs}/>
-            <Stack.Screen name="Settings" component={Settings}/>
-          </Stack.Navigator>
-        </NavigationContainer>
+        {/* --- WRAP THE APP WITH CONTEXT PROVIDERS --- */}
+        <ShopProvider>
+          <CartProvider>
+            <AdminProvider>
+              <UserProvider>
+                <CouponProvider>
+                  <NavigationContainer ref={navigationRef}>
+                    <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
+                      <Stack.Screen name="Login" component={Login} />
+                      <Stack.Screen name="SignUp" component={SignUp} />
+                      <Stack.Screen name="MapScreen" component={MapScreen} />
+                      <Stack.Screen name="HomeScreen" component={HomeScreen} />
+                      <Stack.Screen name="ShopDetails" component={ShopDetails} />
+                      <Stack.Screen name="Checkout" component={CheckoutScreen} />
+                      <Stack.Screen name="TrackOrder" component={TrackOrder} />
+                      <Stack.Screen name="Addresses" component={AddressesScreen} />
+                      <Stack.Screen name="Profile" component={Profile} />
+                      <Stack.Screen name="CheckoutScreentwo" component={CheckoutScreentwo} />
+                      <Stack.Screen name="EditProfile" component={EditProfile} />
+                      <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }} />
+                      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+                      <Stack.Screen name="Terms" component={TermsAndConditionsScreen} />
+                      <Stack.Screen name="ContactUs" component={ContactUs} />
+                      <Stack.Screen name="Settings" component={Settings} />
+                    </Stack.Navigator>
+                  </NavigationContainer>
+                </CouponProvider>
+              </UserProvider>
+            </AdminProvider>
+          </CartProvider>
+        </ShopProvider>
       </View>
     </RootSiblingParent>
   );

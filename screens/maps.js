@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image, Platform, Dimensions, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image, Platform, Dimensions, ScrollView, Linking } from 'react-native';
 import MapView from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -10,7 +10,7 @@ import { ref, update, get, push, set } from 'firebase/database';
 const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
-// --- 1. ADDED DISTANCE CALCULATION FUNCTION ---
+// --- 1. DISTANCE CALCULATION FUNCTION ---
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
   const toRad = (v) => (v * Math.PI) / 180;
   const R = 6371; // Earth Radius in km
@@ -67,6 +67,8 @@ export default function MapScreen({ navigation, route }) {
       setName(initial.name || '');
       setPhone(initial.phone || '');
       setQuery(initial.formattedAddress || '');
+      // If editing, we assume they can proceed even if permission was initially vague, 
+      // but usually we still want the map to work.
     }
     
     return () => {
@@ -89,9 +91,24 @@ export default function MapScreen({ navigation, route }) {
 
   const requestLocationPermission = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') setHasPermission(true);
-      else Alert.alert('Permission Required', 'Location permission is required to continue.');
+      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status === 'granted') {
+        setHasPermission(true);
+      } else {
+        // If permission is denied and they can't be asked again (permanent denial),
+        // we show the alert with the Settings link as requested by Apple.
+        if (!canAskAgain) {
+           Alert.alert(
+            'Location Access',
+            'To detect your delivery address automatically, please enable location access in Settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() }
+            ]
+          );
+        }
+      }
     } catch (e) { 
       console.error('Request permission failed:', e); 
       Alert.alert('Error', 'Could not request location permission.'); 
@@ -189,7 +206,14 @@ export default function MapScreen({ navigation, route }) {
   const getCurrentLocation = async () => {
     try {
       setFetching(true);
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      // We check permission again here just in case
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+          Alert.alert('Permission denied', 'Please Allow location access to use this feature which helps us and you to navigate your order to easily.');
+          return;
+      }
+
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
       const lat = loc.coords.latitude; 
       const lng = loc.coords.longitude;
       mapRef.current?.animateToRegion({ latitude: lat, longitude: lng, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 800);
@@ -203,7 +227,7 @@ export default function MapScreen({ navigation, route }) {
     }
   };
 
-  // --- 2. UPDATED HANDLE CONFIRM LOCATION ---
+  // --- 2. HANDLE CONFIRM LOCATION ---
   const handleConfirmLocation = async () => {
     if (!selectedPlace) return Alert.alert('Error', 'Please pick a location first.');
     if (!name || name.trim().length < 2) return Alert.alert('Validation', 'Please enter a name for this address.');
@@ -346,12 +370,29 @@ export default function MapScreen({ navigation, route }) {
     }
   }
 
+  // --- UPDATED PERMISSION SCREEN FOR APPLE COMPLIANCE ---
   if (!hasPermission) return (
     <View style={styles.permissionContainer}>
       <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
-      <Text style={styles.permissionText}>LocalBoys needs your location to provide the best experience.</Text>
+      
+      {/* 1. Informational text (Why we need it) */}
+      <Text style={styles.permissionText}>
+        To help you select your delivery location accurately, LocalBoys uses your location to show where you are on the map.
+      </Text>
+      
+      {/* 2. Non-coercive button text "Continue" */}
       <TouchableOpacity style={styles.permissionButton} onPress={requestLocationPermission}>
-        <Text style={styles.permissionButtonText}>Grant Permission</Text>
+        <Text style={styles.permissionButtonText}>Continue</Text>
+      </TouchableOpacity>
+
+      {/* 3. Optional: Manual entry bypass (Apple likes having an option) */}
+      <TouchableOpacity 
+        style={{ marginTop: 20, padding: 10 }} 
+        onPress={() => setHasPermission(true)}
+      >
+        <Text style={{ fontFamily: "Sen_Regular", color: '#666', textDecorationLine: 'underline' }}>
+          Enter address manually
+        </Text>
       </TouchableOpacity>
     </View>
   );

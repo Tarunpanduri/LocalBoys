@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform, Dimensions, Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
@@ -6,6 +6,10 @@ import { db, auth } from "../firebase";
 import { ref, get, set, push, remove } from "firebase/database";
 import Toast from "react-native-root-toast";
 import { LinearGradient } from "expo-linear-gradient";
+
+// --- GORHOM BOTTOM SHEET IMPORTS ---
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 // --- IMPORT CONTEXTS ---
 import { useUser } from "../context/UserContext";
@@ -62,7 +66,7 @@ const CheckoutSkeleton = () => {
             <SkeletonItem width="60%" height={14} baseColor="#2a2a2f" highlightColor="#3a3a3f" />
           </View>
         </View>
-        <View style={[styles.bottomSheet, { height: height * 0.65, justifyContent: 'flex-start' }]}>
+        <View style={[styles.skeletonBottomSheet, { height: height * 0.65, justifyContent: 'flex-start' }]}>
           <View style={{ padding: 16 }}>
             <SkeletonItem width={100} height={16} baseColor={lightBase} highlightColor={lightHigh} style={{marginBottom: 15}}/>
             {[1, 2].map((i) => (
@@ -90,11 +94,15 @@ export default function CheckoutScreen() {
   const route = useRoute();
   const navigation = useNavigation();
   
-  // --- DESTRUCTURE PARAMS with explicit isBuyNow flag (default false) ---
+  // --- BOTTOM SHEET CONFIG ---
+  const bottomSheetRef = useRef(null);
+  const snapPoints = useMemo(() => ["72%", "92%"], []);
+  
+  // --- DESTRUCTURE PARAMS ---
   const { 
     shopId: paramShopId, 
     cart: paramCart, 
-    isBuyNow = false   // Pass isBuyNow=true for direct purchases.
+    isBuyNow = false 
   } = route.params || {};
 
   // --- CONTEXTS ---
@@ -102,7 +110,7 @@ export default function CheckoutScreen() {
   const { branchConfig, loading: adminLoading } = useAdmin();
   const { shops, loading: shopsLoading } = useShops();
   const { validateCoupon } = useCoupon();
-  const { cartData, clearCart, loading: contextCartLoading } = useCart(); // <--- Use Cart Context
+  const { cartData, clearCart, loading: contextCartLoading } = useCart(); 
 
   // --- STATE ---
   const [shopId] = useState(paramShopId);
@@ -132,20 +140,19 @@ export default function CheckoutScreen() {
 
   // --- 1. LOAD DATA ---
   useEffect(() => {
-    // Wait for core contexts
     if (userLoading || shopsLoading || contextCartLoading || !shopId) return;
 
-    // A. Set Shop Data (from Context)
+    // A. Set Shop Data
     const foundShop = shops.find(s => s.id === shopId);
     if (foundShop) {
       setShop(foundShop);
       setQrImage(foundShop.qr || "");
       setShopCommission(Number(foundShop.commission) || 15);
     } else {
-      // Fallback: Fetch specific shop if not in nearby list
       get(ref(db, `shops/${shopId}`)).then(snap => {
         if(snap.exists()) {
           const val = snap.val();
+          console.warn("Shop data loaded from DB for checkout:", val);
           setShop({ id: shopId, ...val });
           setQrImage(val.qr || "");
           setShopCommission(Number(val.commission) || 15);
@@ -153,8 +160,7 @@ export default function CheckoutScreen() {
       });
     }
 
-    // B. Load Cart (from Params or Context)
-    // Priority: Params (Buy Now) > Context (Cart)
+    // B. Load Cart
     if (paramCart) {
       const cleanCart = {};
       Object.keys(paramCart).forEach(k => {
@@ -163,7 +169,6 @@ export default function CheckoutScreen() {
       setCart(cleanCart);
       setLoadingCart(false);
     } else if (cartData && cartData[shopId]) {
-      // Use Data from CartContext
       const cleanCart = {};
       const val = cartData[shopId];
       Object.keys(val).forEach(k => {
@@ -172,7 +177,6 @@ export default function CheckoutScreen() {
       setCart(cleanCart);
       setLoadingCart(false);
     } else {
-        // No cart found in context or params
         setCart({});
         setLoadingCart(false);
     }
@@ -182,17 +186,14 @@ export default function CheckoutScreen() {
   useEffect(() => {
     if (!cart || !shop) return;
 
-    // Subtotal
     const calcSubtotal = Object.keys(cart)
       .filter(k => k.startsWith("productId"))
       .reduce((sum, pid) => sum + cart[pid].price * cart[pid].qty, 0);
     setSubtotal(calcSubtotal);
 
-    // Platform Fee
     const calcPlatFee = calcSubtotal > 10000 ? Math.ceil(calcSubtotal * 0.00001) : 10;
     setPlatformFee(calcPlatFee);
 
-    // Delivery Fee Logic (Shop Location -> User Main Address)
     let calcDeliveryFee = 0;
     if (mainAddress && shop.location) {
       const uLat = Number(mainAddress.lat);
@@ -201,19 +202,16 @@ export default function CheckoutScreen() {
       const sLng = Number(shop.location.lng);
 
       if (!isNaN(uLat) && !isNaN(uLng) && !isNaN(sLat) && !isNaN(sLng)) {
-        const distanceKm = getDistanceInKm(sLat, sLng, uLat, uLng) * 1.3; // 1.3x buffer
+        const distanceKm = getDistanceInKm(sLat, sLng, uLat, uLng) * 1.3;
         const baseFee = 20;
-        // Free delivery for premium, else calc
         const fee = (calcSubtotal > 10000) ? 0 : baseFee + distanceKm * deliveryChargePerKm;
         calcDeliveryFee = Math.ceil(fee);
       }
     }
     setDeliveryFee(calcDeliveryFee);
 
-    // Final Total
     setTotal(calcSubtotal - discount + calcDeliveryFee + calcPlatFee);
 
-    // Restaurant Payout Calculation
     const commissionAmount = calculateCommission(calcSubtotal, shopCommission, calcSubtotal > 10000);
     setRestaurantTotal(Math.ceil(calcSubtotal - commissionAmount));
 
@@ -263,34 +261,26 @@ export default function CheckoutScreen() {
         shopname: shop?.name || "Unknown Shop",
         shopimage: shop?.image || "",
         shopphone: shop?.phone || "",
-        
         items: cleanItems,
         subtotal: Math.ceil(subtotal),
         discount: Math.ceil(discount),
         deliveryFee: Math.ceil(deliveryFee),
         platformFee,
         total: Math.ceil(total),
-        
         paymentMode,
         transactionId: paymentMode === "Online" ? transactionId.trim() : null,
-        
-        // ADDRESS: In Standard Checkout, Drop = User Address
         address: mainAddress.formattedAddress,
-        userLocation: { // Store full object for history
+        userLocation: { 
             lat: mainAddress.lat,
             lng: mainAddress.lng,
             ...mainAddress
         },
-        
         customerName: userData?.firstName || "Customer",
         customerPhone: userData?.mobile || "",
         customerEmail: user.email,
-        
         status: "pending",
         createdAt: Date.now(),
-        orderType: "delivery", // Standard delivery
-
-        // Payouts
+        orderType: "delivery", 
         restaurantPayout: {
           restaurantTotal,
           platformCommission: Math.ceil(subtotal - restaurantTotal),
@@ -302,7 +292,6 @@ export default function CheckoutScreen() {
           }
         },
         driverPayout: Math.ceil(deliveryFee),
-        
         calculationMetadata: {
           deliveryChargePerKm,
           baseDeliveryFee: 20,
@@ -316,13 +305,9 @@ export default function CheckoutScreen() {
       const newOrderRef = push(ref(db, `orders/${user.uid}`));
       await set(newOrderRef, orderData);
       
-      // ✅ CLEAR CART ONLY IF THIS IS NOT A BUY NOW ORDER
       if (!isBuyNow) {
-        console.log("Clearing cart after successful order placement");
-        await clearCart();  // Now silent – no confirmation alert
-      } else {
-        console.log("Buy Now flow - skipping cart clear");
-      }
+        await clearCart();  
+      } 
 
       navigation.replace("OrderConfirmation", { 
         orderData: { 
@@ -353,145 +338,155 @@ export default function CheckoutScreen() {
   const products = Object.keys(cart).filter(k => k.startsWith("productId")).map(pid => cart[pid]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#0e0e12" />
-      <View style={styles.container}>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 180 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: "#0e0e12" }}>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
           
-          <View style={[styles.section, { marginTop: 40 }]}>
-            <View style={styles.headerRow}>
-              <Text style={styles.sectionTitle}>DELIVERY ADDRESS</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("Addresses")}>
-                <Text style={styles.editText}>CHANGE</Text>
-              </TouchableOpacity>
-            </View>
-            {mainAddress ? (
-              <View style={styles.addressBox}>
-                <Text style={styles.username}>{mainAddress.name || userData?.firstName}</Text>
-                <Text style={styles.addressText}>{mainAddress.formattedAddress}</Text>
-                <Text style={styles.addressSub}>
-                  {mainAddress.city}, {mainAddress.state} - {mainAddress.pincode}
-                </Text>
-              </View>
-            ) : (
-              <TouchableOpacity onPress={() => navigation.navigate("Addresses")} style={styles.noAddressBox}>
-                 <Text style={styles.emptyText}>+ Add Delivery Address</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          
-        </ScrollView>
-
-        <View style={styles.bottomSheet}>
-          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 480 }}>
-            {isPremiumOrder && (
-              <View style={styles.premiumBadge}>
-                <Text style={styles.premiumBadgeText}>🎉 PREMIUM ORDER - Free Delivery & Low Platform Fee</Text>
-              </View>
-            )}
-
-            <View style={styles.section}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 180 }}>
+            <View style={[styles.section, { marginTop: 40 }]}>
               <View style={styles.headerRow}>
-                <Text style={styles.sectionTitletwo}>YOUR ITEMS</Text>
-                <TouchableOpacity onPress={() => navigation.goBack()}>
-                  <Text style={styles.editText}>EDIT ITEMS</Text>
+                <Text style={styles.sectionTitle}>DELIVERY ADDRESS</Text>
+                <TouchableOpacity onPress={() => navigation.navigate("Addresses")}>
+                  <Text style={styles.editText}>CHANGE</Text>
                 </TouchableOpacity>
               </View>
-              {products.map((item, idx) => (
-                <View key={idx} style={styles.itemCard}>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemName}>{item.productname}</Text>
-                    <Text style={styles.itemQty}>Qty: {item.qty}</Text>
-                  </View>
-                  <Text style={styles.itemPrice}>₹{item.price * item.qty}</Text>
+              {mainAddress ? (
+                <View style={styles.addressBox}>
+                  <Text style={styles.username}>{mainAddress.name || userData?.firstName}</Text>
+                  <Text style={styles.addressText}>{mainAddress.formattedAddress}</Text>
+                  <Text style={styles.addressSub}>
+                    {mainAddress.city}, {mainAddress.state} - {mainAddress.pincode}
+                  </Text>
                 </View>
-              ))}
-            </View>
-
-            <View style={styles.sectiontwo}>
-              <Text style={styles.sectionTitletwo}>COUPON</Text>
-              <View style={styles.couponRow}>
-                <TextInput
-                  style={styles.couponInput}
-                  placeholder="Enter code"
-                  placeholderTextColor="#aaa"
-                  value={couponCode}
-                  onChangeText={setCouponCode}
-                />
-                <TouchableOpacity style={styles.applyBtn} onPress={applyCouponHandler}>
-                  <Text style={styles.applyText}>APPLY</Text>
+              ) : (
+                <TouchableOpacity onPress={() => navigation.navigate("Addresses")} style={styles.noAddressBox}>
+                   <Text style={styles.emptyText}>+ Add Delivery Address</Text>
                 </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.summaryCard}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Subtotal</Text>
-                <Text style={styles.summaryValue}>₹{Math.ceil(subtotal)}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Discount</Text>
-                <Text style={[styles.summaryValue, styles.discountText]}>-₹{Math.ceil(discount)}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Platform Fee</Text>
-                <View style={styles.feeContainer}>
-                  {isPremiumOrder && <Text style={styles.premiumFeeNote}>(0.001%)</Text>}
-                  <Text style={styles.summaryValue}>₹{platformFee}</Text>
-                </View>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Delivery Fee</Text>
-                <View style={styles.feeContainer}>
-                  {isPremiumOrder && <Text style={styles.freeDeliveryNote}>FREE</Text>}
-                  <Text style={styles.summaryValue}>{isPremiumOrder ? "₹0" : `₹${Math.ceil(deliveryFee)}`}</Text>
-                </View>
-              </View>
-              <View style={styles.divider} />
-              <View style={styles.summaryRow}>
-                <Text style={styles.totalText}>TOTAL</Text>
-                <Text style={styles.totalValue}>₹{Math.ceil(total)}</Text>
-              </View>
-            </View>
-
-            <View style={styles.sectiontwo}>
-              <Text style={styles.sectionTitletwo}>PAYMENT MODE</Text>
-              <View style={styles.paymentRow}>
-                <TouchableOpacity
-                  style={[styles.modeBtn, paymentMode === "COD" && styles.activeMode]}
-                  onPress={() => setPaymentMode("COD")}
-                >
-                  <Text style={[styles.modeText, paymentMode === "COD" && styles.activeModeText]}>CASH ON DELIVERY</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modeBtn, paymentMode === "Online" && styles.activeMode]}
-                  onPress={() => setPaymentMode("Online")}
-                >
-                  <Text style={[styles.modeText, paymentMode === "Online" && styles.activeModeText]}>PAY ONLINE</Text>
-                </TouchableOpacity>
-              </View>
-              {paymentMode === "Online" && (
-                <View style={styles.onlineBox}>
-                  {qrImage ? (
-                    <Image source={{ uri: qrImage }} style={styles.qrImage} />
-                  ) : (
-                    <View style={[styles.qrImage, { justifyContent: "center", alignItems: "center", backgroundColor: "#eee" }]}>
-                      <Text style={{ color: "#999" }}>No QR Available</Text>
-                    </View>
-                  )}
-                  <TextInput
-                    style={styles.transactionInput}
-                    placeholder="Enter Transaction ID"
-                    placeholderTextColor="#999"
-                    value={transactionId}
-                    onChangeText={setTransactionId}
-                  />
-                  <Text style={styles.qrNote}>Scan the QR to pay, then enter your transaction ID.</Text>
-                </View>
               )}
             </View>
           </ScrollView>
 
+          {/* GORHOM BOTTOM SHEET */}
+          <BottomSheet
+            ref={bottomSheetRef}
+            index={0}
+            snapPoints={snapPoints}
+            backgroundStyle={styles.bottomSheetBackground}
+            handleIndicatorStyle={styles.bottomSheetIndicator}
+          >
+            {/* Scrollable Content inside Bottom Sheet */}
+            {/* Notice the paddingBottom here is 120 so content clears the fixed bottom bar */}
+            <BottomSheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+              {isPremiumOrder && (
+                <View style={styles.premiumBadge}>
+                  <Text style={styles.premiumBadgeText}>🎉 PREMIUM ORDER - Free Delivery & Low Platform Fee</Text>
+                </View>
+              )}
+
+              <View style={styles.section}>
+                <View style={styles.headerRow}>
+                  <Text style={styles.sectionTitletwo}>YOUR ITEMS</Text>
+                  <TouchableOpacity onPress={() => navigation.goBack()}>
+                    <Text style={styles.editText}>EDIT ITEMS</Text>
+                  </TouchableOpacity>
+                </View>
+                {products.map((item, idx) => (
+                  <View key={idx} style={styles.itemCard}>
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemName}>{item.productname}</Text>
+                      <Text style={styles.itemQty}>Qty: {item.qty}</Text>
+                    </View>
+                    <Text style={styles.itemPrice}>₹{item.price * item.qty}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={styles.sectiontwo}>
+                <Text style={styles.sectionTitletwo}>COUPON</Text>
+                <View style={styles.couponRow}>
+                  <TextInput
+                    style={styles.couponInput}
+                    placeholder="Enter code"
+                    placeholderTextColor="#aaa"
+                    value={couponCode}
+                    onChangeText={setCouponCode}
+                  />
+                  <TouchableOpacity style={styles.applyBtn} onPress={applyCouponHandler}>
+                    <Text style={styles.applyText}>APPLY</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.summaryCard}>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Subtotal</Text>
+                  <Text style={styles.summaryValue}>₹{Math.ceil(subtotal)}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Discount</Text>
+                  <Text style={[styles.summaryValue, styles.discountText]}>-₹{Math.ceil(discount)}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Platform Fee</Text>
+                  <View style={styles.feeContainer}>
+                    {isPremiumOrder && <Text style={styles.premiumFeeNote}>(0.001%)</Text>}
+                    <Text style={styles.summaryValue}>₹{platformFee}</Text>
+                  </View>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Delivery Fee</Text>
+                  <View style={styles.feeContainer}>
+                    {isPremiumOrder && <Text style={styles.freeDeliveryNote}>FREE</Text>}
+                    <Text style={styles.summaryValue}>{isPremiumOrder ? "₹0" : `₹${Math.ceil(deliveryFee)}`}</Text>
+                  </View>
+                </View>
+                <View style={styles.divider} />
+                <View style={styles.summaryRow}>
+                  <Text style={styles.totalText}>TOTAL</Text>
+                  <Text style={styles.totalValue}>₹{Math.ceil(total)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.sectiontwo}>
+                <Text style={styles.sectionTitletwo}>PAYMENT MODE</Text>
+                <View style={styles.paymentRow}>
+                  <TouchableOpacity
+                    style={[styles.modeBtn, paymentMode === "COD" && styles.activeMode]}
+                    onPress={() => setPaymentMode("COD")}
+                  >
+                    <Text style={[styles.modeText, paymentMode === "COD" && styles.activeModeText]}>CASH ON DELIVERY</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modeBtn, paymentMode === "Online" && styles.activeMode]}
+                    onPress={() => setPaymentMode("Online")}
+                  >
+                    <Text style={[styles.modeText, paymentMode === "Online" && styles.activeModeText]}>PAY ONLINE</Text>
+                  </TouchableOpacity>
+                </View>
+                {paymentMode === "Online" && (
+                  <View style={styles.onlineBox}>
+                    {qrImage ? (
+                      <Image source={{ uri: qrImage }} style={styles.qrImage} />
+                    ) : (
+                      <View style={[styles.qrImage, { justifyContent: "center", alignItems: "center", backgroundColor: "#eee" }]}>
+                        <Text style={{ color: "#999" }}>No QR Available</Text>
+                      </View>
+                    )}
+                    <TextInput
+                      style={styles.transactionInput}
+                      placeholder="Enter Transaction ID"
+                      placeholderTextColor="#999"
+                      value={transactionId}
+                      onChangeText={setTransactionId}
+                    />
+                    <Text style={styles.qrNote}>Scan the QR to pay, then enter your transaction ID.</Text>
+                  </View>
+                )}
+              </View>
+            </BottomSheetScrollView>
+          </BottomSheet>
+
+          {/* Sticky Bottom Bar - FIXED ABSOLUTELY AT THE BOTTOM OF THE SCREEN */}
           <View style={styles.bottomBar}>
             <View>
               <Text style={styles.totalLabel}>TOTAL</Text>
@@ -512,16 +507,16 @@ export default function CheckoutScreen() {
               )}
             </TouchableOpacity>
           </View>
+
         </View>
-      </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
-// Keep your existing styles
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#0e0e12" },
-  container: { flex: 1, backgroundColor: "#0e0e12" },
+  container: { flex: 1, backgroundColor: "#0e0e12", position: "relative" },
   center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0e0e12" },
   emptyText: { color: "#aaa", fontSize: 15, fontFamily: "Sen_Regular" },
   section: { marginTop: 20, paddingHorizontal: 16 },
@@ -535,7 +530,12 @@ const styles = StyleSheet.create({
   username: { color: "#fff", fontSize: Platform.OS === 'ios' ? 12 : 16, fontFamily: "Sen_Bold", marginBottom: 4 },
   addressText: { color: "#fff", fontSize: Platform.OS === 'ios' ? 12 : 14, fontFamily: "Sen_Regular" },
   addressSub: { color: "#888", fontSize: Platform.OS === 'ios' ? 11 : 13, marginTop: 4, fontFamily: "Sen_Regular" },
-  bottomSheet: { position: "absolute", bottom: Platform.OS === "ios" ? -40 : -20, width: "100%", backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, shadowColor: "#000", shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 10, paddingBottom: Platform.OS === "ios" ? 34 : 26, overflow: "hidden" },
+  
+  // New Bottom Sheet Styles for Gorhom
+  bottomSheetBackground: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  bottomSheetIndicator: { backgroundColor: "#ccc", width: 40, height: 4 },
+  skeletonBottomSheet: { position: "absolute", bottom: 0, width: "100%", backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+
   premiumBadge: { backgroundColor: "#28a745", padding: 10, alignItems: "center", marginHorizontal: 16, marginTop: 10, borderRadius: 8 },
   premiumBadgeText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 12 },
   itemCard: { backgroundColor: "#f5f5f5", padding: 14, borderRadius: 12, marginBottom: 10, flexDirection: "row", justifyContent: "space-between" },
@@ -567,7 +567,23 @@ const styles = StyleSheet.create({
   qrImage: { width: 140, height: 140, marginBottom: 12, borderRadius: 8 },
   transactionInput: { backgroundColor: "#f0f0f0", color: "#0e0e12", borderRadius: 8, width: "90%", padding: 10, marginBottom: 8, fontFamily: "Sen_Regular", fontSize: Platform.OS === 'ios' ? 12 : 14 },
   qrNote: { fontSize: Platform.OS === 'ios' ? 10 : 12, color: "#555", textAlign: "center", fontFamily: "Sen_Regular" },
-  bottomBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff", padding: 16, borderTopWidth: 1, borderTopColor: "#ddd", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  
+  // FIXED BOTTOM BAR STYLES
+  bottomBar: { 
+    position: "absolute", 
+    bottom: 0, 
+    left: 0, 
+    right: 0, 
+    flexDirection: "row", 
+    justifyContent: "space-between", 
+    alignItems: "center", 
+    backgroundColor: "#fff", 
+    padding: 16, 
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16, // Extra padding for iOS home indicator
+    borderTopWidth: 1, 
+    borderTopColor: "#ddd",
+    zIndex: 100 // High zIndex ensures it overlays the bottom sheet
+  },
   totalLabel: { color: "#555", fontSize: 12, fontFamily: "Sen_Regular" },
   totalAmount: { color: "#0e0e12", fontSize: 18, fontFamily: "Sen_Bold" },
   premiumSavings: { color: "#28a745", fontSize: Platform.OS === 'ios' ? 8 : 10, fontFamily: "Sen_Regular", marginTop: 2 },

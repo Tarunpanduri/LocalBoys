@@ -1,15 +1,16 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, Dimensions, StatusBar, Alert, Animated, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, Dimensions, StatusBar, Modal, Animated, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { auth, db } from "../firebase";
-import { ref as dbRef, onValue } from "firebase/database"; // Removed set, remove, get for cart
+import { getAuth } from "firebase/auth"; // Added getAuth
+import { ref as dbRef, onValue } from "firebase/database"; 
 import Toast from "react-native-root-toast";
 import { useFonts } from "expo-font";
 
 // --- IMPORT CART CONTEXT ---
-import { useCart } from "../context/CartContext"; // Adjust path if necessary
+import { useCart } from "../context/CartContext"; 
 
 const { width } = Dimensions.get("window");
 const CARD_PADDING = 12, CARD_GUTTER = 12, CARD_WIDTH = Math.round((width - CARD_PADDING * 2 - CARD_GUTTER) / 2);
@@ -112,6 +113,9 @@ export default function ShopDetails({ route, navigation }) {
   const [adminCats, setAdminCats] = useState({});
   const [error, setError] = useState(null);
   
+  // --- NEW: State for Login Modal ---
+  const [loginModalVisible, setLoginModalVisible] = useState(false);
+  
   const user = auth.currentUser;
   
   // --- USE CART CONTEXT ---
@@ -130,6 +134,18 @@ export default function ShopDetails({ route, navigation }) {
     ...MaterialIcons.font,
   });
 
+  // --- NEW: GUEST CHECK FUNCTION ---
+  const handleAddToCart = (item) => {
+    const authInstance = getAuth();
+    if (!authInstance.currentUser) {
+      // Show custom polite modal instead of Alert
+      setLoginModalVisible(true);
+      return;
+    }
+    // Proceed if user is logged in
+    addToCart(shop, item);
+  };
+
   // --- CHECKOUT LOGIC ---
   const handleProceedCheckout = async () => {
     if (!cartShopId) return;
@@ -140,8 +156,6 @@ export default function ShopDetails({ route, navigation }) {
     const hasRideService = cartItems.some(item => item.serviceType === "ride");
     const hasDeliveryService = cartItems.some(item => item.serviceType === "delivery");
 
-    // Passing `cart: cartShop` because your checkout screens expect the object format { [itemId]: item }
-    // which corresponds exactly to what `cartShop` holds (minus shopname/image keys).
     if (hasRideService && !hasDeliveryService) {
       navigation.navigate("CheckoutScreentwo", { shopId: cartShopId, shop, cart: cartShop });
     } else if (hasDeliveryService && !hasRideService) {
@@ -255,7 +269,6 @@ export default function ShopDetails({ route, navigation }) {
         renderItem={({ item }) => {
           
           // Check if the current context cart matches this shop
-          // If so, see if this specific product is in the cart
           const isCurrentShopInCart = cartShopId === shopId;
           const cartItem = (isCurrentShopInCart && cartShop) ? cartShop[item.id] : null;
 
@@ -291,7 +304,8 @@ export default function ShopDetails({ route, navigation }) {
                   ) : (
                     <TouchableOpacity 
                         style={[styles.addBtn, { backgroundColor: themeColor }]} 
-                        onPress={() => addToCart(shop, item)}
+                        // --- CHANGED: Use protected handler instead of direct addToCart
+                        onPress={() => handleAddToCart(item)}
                     >
                       <Ionicons name="add" size={18} color="#fff" />
                     </TouchableOpacity>
@@ -305,8 +319,7 @@ export default function ShopDetails({ route, navigation }) {
         ListEmptyComponent={() => <View style={{ padding: 20 }}><Text style={{ color: "#666", textAlign: "center" }}>No items in this category.</Text></View>}
       />
 
-      {/* CART BAR */}
-      {/* We check cartShopId === shopId to only show the bar if the active cart belongs to THIS shop, or you can allow it to show always if you want global cart visibility */}
+      {/* --- CART BAR (Only for real cart activity) --- */}
       {cartShop && cartItemCount > 0 && cartShopId === shopId && (
         <View style={styles.cartBar}>
           <View style={styles.cartInfo}>
@@ -326,6 +339,44 @@ export default function ShopDetails({ route, navigation }) {
           </View>
         </View>
       )}
+
+      {/* --- POLITE LOGIN MODAL --- */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={loginModalVisible}
+        onRequestClose={() => setLoginModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconContainer}>
+                <Ionicons name="cart-outline" size={40} color="#28A745" />
+            </View>
+            <Text style={styles.modalTitle}>Ready to Order?</Text>
+            <Text style={styles.modalMessage}>
+              We'd love to deliver this to you! Please log in to add items to your cart and track your order easily.
+            </Text>
+            
+            <TouchableOpacity 
+                style={styles.modalLoginBtn} 
+                onPress={() => {
+                    setLoginModalVisible(false);
+                    navigation.navigate("Login");
+                }}
+            >
+                <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+                style={styles.modalCancelBtn} 
+                onPress={() => setLoginModalVisible(false)}
+            >
+                <Text style={styles.modalCancelText}>I'm just browsing</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -364,5 +415,16 @@ const styles = StyleSheet.create({
   cartSubText: { fontSize: 12, fontFamily: "Sen_Regular", color: "#666", marginTop: 2 },
   cartActions: { flexDirection: "row", alignItems: "center" },
   cartBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginLeft: 10 },
-  cartBtnText: { fontSize: Platform.OS === 'ios' ? 10 : 14, fontFamily: "Sen_Medium", color: "#333" }
+  cartBtnText: { fontSize: Platform.OS === 'ios' ? 10 : 14, fontFamily: "Sen_Medium", color: "#333" },
+  
+  // --- MODAL STYLES ---
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },
+  modalIconContainer: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#E8F5E9', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontFamily: 'Sen_Bold', fontSize: 20, color: '#111', marginBottom: 10 },
+  modalMessage: { fontFamily: 'Sen_Regular', fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+  modalLoginBtn: { backgroundColor: '#28A745', width: '100%', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 12 },
+  modalLoginText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 16 },
+  modalCancelBtn: { paddingVertical: 10 },
+  modalCancelText: { fontFamily: 'Sen_Medium', color: '#888', fontSize: 14 },
 });

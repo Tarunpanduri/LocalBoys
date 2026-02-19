@@ -234,6 +234,11 @@ export default function Login({ navigation }) {
         password
       );
 
+      // --- CRITICAL FIX: CLEAR GUEST DATA ---
+      // This ensures the app stops acting like a Guest and loads the Real User's data
+      await AsyncStorage.removeItem('guestAddress');
+      // --------------------------------------
+
       const userId = userCredential.user.uid;
 
       // Handle Remember Me
@@ -305,6 +310,19 @@ export default function Login({ navigation }) {
         backgroundColor="#B0E57E"
         translucent={false}
       />
+      
+      {/* --- SKIP BUTTON (TOP RIGHT) --- */}
+      <View style={styles.topRightContainer}>
+        <TouchableOpacity 
+          style={styles.skipButton}
+          onPress={() => navigation.replace("MapScreen", { mode: 'add', isGuest: true })}
+        >
+          <Text style={styles.skipText}>Skip</Text>
+          <Ionicons name="arrow-forward" size={16} color="#333" />
+        </TouchableOpacity>
+      </View>
+      {/* ------------------------------- */}
+
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : -70}
@@ -371,7 +389,7 @@ export default function Login({ navigation }) {
                       rememberMe && { backgroundColor: "#28A745", borderColor: "#28A745", justifyContent: 'center', alignItems: 'center' },
                     ]}
                   >
-                     {rememberMe && <Ionicons name="checkmark" size={12} color="white" />}
+                      {rememberMe && <Ionicons name="checkmark" size={12} color="white" />}
                   </View>
                   <Text style={styles.rememberText}>Remember me</Text>
                 </TouchableOpacity>
@@ -392,6 +410,11 @@ export default function Login({ navigation }) {
                   <Text style={styles.loginButtonText}>LOG IN</Text>
                 )}
               </TouchableOpacity>
+              {/* by clicking,i accept terms and conditions and privacy policy with terms navigation to terms page and privacy navigation to privacy page */}
+              
+              <View style={styles.termsContainer}>
+                <Text style={styles.termsText}>By clicking, I accept the <TouchableOpacity onPress={() => navigation.navigate("Terms")}><Text style={styles.termsLink}>Terms and Conditions</Text></TouchableOpacity> and <TouchableOpacity onPress={() => navigation.navigate("PrivacyPolicy")}><Text style={styles.termsLink}>Privacy Policy</Text></TouchableOpacity></Text>
+              </View>
               <View style={styles.signupContainer}>
                 <Text style={styles.signupText}>Don’t have an account?</Text>
                 <TouchableOpacity onPress={() => navigation.navigate("SignUp")}>
@@ -408,7 +431,10 @@ export default function Login({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#B0E57E", marginBottom: Platform.OS === "ios" ? -40 : -30 },
-  header: { alignItems: "center", marginBottom: 20 },
+  topRightContainer: { position: 'absolute', top: Platform.OS === 'ios' ? 50 : 60, right: 20, zIndex: 10 },
+  skipButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.6)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  skipText: { fontFamily: "Sen_Bold", fontSize: Platform.OS === "ios" ? 10 : 12, color: "#333", marginRight: 4 },
+  header: { alignItems: "center", marginBottom: 20, marginTop: 40 },
   logo: { width: 80, height: 80 },
   title: { fontSize: 28, color: "#000", fontFamily: "Sen_Bold" },
   subtitle: { fontSize: 14, color: "#555", fontFamily: "Sen_Regular" },
@@ -427,4 +453,7 @@ const styles = StyleSheet.create({
   signupContainer: { flexDirection: "row", justifyContent: "center", marginTop: 20 },
   signupText: { color: "#5C5C5C", fontFamily: "Sen_Regular" },
   signupLink: { color: "#28A745", fontFamily: "Sen_Medium" },
+  termsContainer: { marginTop: 5, alignItems: 'center', paddingHorizontal: 20 },
+  termsText: { color: "#5C5C5C", fontSize: 10, textAlign: 'center', fontFamily: "Sen_Regular" },
+  termsLink: { color: "#28A745", fontFamily: "Sen_Medium", fontSize: 10, textDecorationLine: 'underline',top: 2 },
 });

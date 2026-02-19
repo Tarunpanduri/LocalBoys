@@ -42,7 +42,8 @@
     "react-native-webview": "13.15.0"
   },
   "overrides": {
-    "expo-dev-menu": "7.0.14"
+    "expo-dev-menu": "7.0.14",
+    "minimatch": "^10.2.1"
   },
   "private": true
 }

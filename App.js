@@ -8,6 +8,8 @@ import { RootSiblingParent } from 'react-native-root-siblings';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
+// --- ADDED IMPORT ---
+import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
 // --- CONTEXT PROVIDERS  ---
 import { ShopProvider } from './context/ShopContext';
@@ -65,13 +67,11 @@ export default function App() {
   }, [fontsLoaded, checkingAuth]);
 
   const registerForPushNotificationsAsync = async (userId = null) => {
-    // 1. Check if physical device
     if (!Device.isDevice) {
       console.log('Must use physical device for Push Notifications');
       return null;
     }
 
-    // 2. Setup Android Channel (UPDATED ID TO FORCE REFRESH)
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('localboys_high_priority_v2', {
         name: 'High Priority Updates',
@@ -84,7 +84,6 @@ export default function App() {
     }
 
     try {
-      // 3. Check Permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
 
@@ -98,7 +97,6 @@ export default function App() {
         return null;
       }
 
-      // 4. Get Expo Push Token
       const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
 
       if (!projectId) {
@@ -111,7 +109,6 @@ export default function App() {
 
       const expoToken = tokenData.data;
 
-      // 5. Save to Firebase as expoPushToken
       if (userId && expoToken) {
         await update(ref(db, `users/${userId}`), { expoPushToken: expoToken });
       }
@@ -125,20 +122,37 @@ export default function App() {
 
   useEffect(() => {
     const auth = getAuth();
-    const unsubscribe = onAuthStateChanged(auth, user => {
-      setInitialRoute(user ? 'HomeScreen' : 'Login');
+    
+    // --- UPDATED AUTH CHECK LOGIC ---
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // 1. User is logged in (Firebase)
+        setInitialRoute('HomeScreen');
+        registerForPushNotificationsAsync(user.uid);
+      } else {
+        // 2. User is NOT logged in - Check if they are a returning GUEST
+        try {
+          const guestAddress = await AsyncStorage.getItem('guestAddress');
+          if (guestAddress) {
+            // Guest data found -> Go straight to Home
+            setInitialRoute('HomeScreen');
+          } else {
+            // No data -> Go to Login
+            setInitialRoute('Login');
+          }
+        } catch (e) {
+          setInitialRoute('Login');
+        }
+      }
       setCheckingAuth(false);
-      if (user) registerForPushNotificationsAsync(user.uid);
     });
 
-    // Handle Notification Response (User taps notification)
+    // Handle Notification Response
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
       try {
         const content = response.notification.request.content;
         const data = content.data || {};
         const route = data.screen;
-
-        // Ensure we grab the image URL if provided in data
         const imageUrl = data.image || data.imageUrl;
 
         if (route && allowedRoutes.includes(route) && navigationRef.isReady()) {
@@ -164,7 +178,6 @@ export default function App() {
   return (
     <RootSiblingParent>
       <View style={styles.container} onLayout={onLayoutRootView}>
-        {/* --- WRAP THE APP WITH CONTEXT PROVIDERS --- */}
         <ShopProvider>
           <CartProvider>
             <AdminProvider>

@@ -1,9 +1,24 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Image, RefreshControl, Dimensions, StatusBar, Animated, Platform } from "react-native";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  TextInput, 
+  FlatList, 
+  Image, 
+  RefreshControl, 
+  Dimensions, 
+  StatusBar, 
+  Animated, 
+  Platform, 
+  Modal 
+} from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
+import { getAuth } from "firebase/auth";
 
 // 1. IMPORT CONTEXTS
 import { useShops } from "../context/ShopContext";
@@ -87,18 +102,21 @@ const SkeletonLoadingScreen = () => {
 };
 
 export default function HomeScreen({ navigation }) {
-  // 2. CONSUME CONTEXTS
   const { shops, loading: shopsLoading, fetchNearbyShops } = useShops();
   const { categoryMeta, eventUrl, loading: adminLoading, determineBranch, branchConfig, activeBranchId } = useAdmin();
   const { userLocation, mainAddress, loading: userLoading } = useUser(); 
 
   // UI State
-  const [filteredShops, setFilteredShops] = useState([]);
-  const [categories, setCategories] = useState([{ id: "all", label: "All" }]);
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("products");
+  
+  // Initialize lock to prevent flash of empty content
+  const [hasFetchedShops, setHasFetchedShops] = useState(false);
+  
+  const [loginModalVisible, setLoginModalVisible] = useState(false);
+  const [modalFeatureText, setModalFeatureText] = useState("");
 
   const [fontsLoaded] = useFonts({
     ...Ionicons.font,
@@ -106,26 +124,64 @@ export default function HomeScreen({ navigation }) {
     ...MaterialIcons.font,
   });
 
-  // 3. COORDINATION EFFECT
-  
-  // Step A: Determine Branch based on User Location
+  // --- NAVIGATION HANDLERS ---
+  const handleLocationPress = () => {
+    const auth = getAuth();
+    if (auth.currentUser) {
+      navigation.navigate("Addresses");
+    } else {
+      navigation.navigate("MapScreen", { isGuest: true, mode: 'edit', initial: userLocation });
+    }
+  };
+
+  const handleProfilePress = () => {
+    const auth = getAuth();
+    if (auth.currentUser) {
+      navigation.navigate("Profile");
+    } else {
+      setModalFeatureText("access your profile and settings");
+      setLoginModalVisible(true);
+    }
+  };
+
+  const handleTrackOrderPress = () => {
+    const auth = getAuth();
+    if (auth.currentUser) {
+      navigation.navigate("TrackOrder");
+    } else {
+      setModalFeatureText("track your active orders");
+      setLoginModalVisible(true);
+    }
+  };
+
+  // --- 1. COORDINATION EFFECT (BRANCH) ---
   useEffect(() => {
     if (userLocation?.lat && userLocation?.lng) {
       determineBranch(userLocation.lat, userLocation.lng);
     }
   }, [userLocation, determineBranch]);
 
-  // Step B: Fetch Shops (Context will ignore if parameters haven't changed)
+  // --- 2. COORDINATION EFFECT (FETCH SHOPS WITH GLITCH PREVENTION) ---
   useEffect(() => {
+    if (userLoading || adminLoading) return; // Wait for base data
+
     if (userLocation?.lat && userLocation?.lng && branchConfig?.shopVisibilityRadiusKm) {
-      // We do NOT pass forceRefresh here. The Context handles caching.
       fetchNearbyShops(userLocation.lat, userLocation.lng, branchConfig.shopVisibilityRadiusKm, false);
     }
-  }, [userLocation, branchConfig, fetchNearbyShops]);
+    
+    // We delay unmounting the skeleton by just 50ms so ShopContext's `shopsLoading` 
+    // has time to flip to true. This eliminates the empty screen flash.
+    const timer = setTimeout(() => {
+      setHasFetchedShops(true);
+    }, 50);
 
-  // 4. FILTER LOGIC
-  useEffect(() => {
-    if (!shops) return;
+    return () => clearTimeout(timer);
+  }, [userLocation, branchConfig, fetchNearbyShops, userLoading, adminLoading]);
+
+
+  // --- 3. SYNCHRONOUS FILTERING (REPLACES USEEFFECT TO STOP GLITCH) ---
+  const { filteredShops, dynamicCategories } = useMemo(() => {
+    if (!shops) return { filteredShops: [], dynamicCategories: [{ id: "all", label: "All" }] };
 
     let result = shops.filter((s) => s.isActive !== false);
 
@@ -136,7 +192,6 @@ export default function HomeScreen({ navigation }) {
         : s.category?.toLowerCase() === "services"
     );
 
-    // Filter Logic for SHOP LIST ONLY
     let shopsForDisplay = [...result];
 
     // Category Filter
@@ -155,39 +210,39 @@ export default function HomeScreen({ navigation }) {
       );
     }
 
-    setFilteredShops(shopsForDisplay);
-
-    // Dynamic Categories
     const shopTypes = Array.from(new Set(result.map((s) => s.type?.trim()))).filter(Boolean).map((t) => ({ id: t.toLowerCase(), label: t }));
-    setCategories([{ id: "all", label: "All" }, ...shopTypes]);
+    const finalCats = [{ id: "all", label: "All" }, ...shopTypes];
 
+    return { filteredShops: shopsForDisplay, dynamicCategories: finalCats };
   }, [shops, activeCategory, searchText, activeTab]);
 
-  // 5. FILTERED CATEGORIES LOGIC
-  const filteredCategories = categories.filter((c) => {
-    if (c.id === "all") {
-      return shops.some(s => s.isActive !== false && s.category?.toLowerCase() === activeTab);
-    }
-    return shops.some((s) => 
-      s.isActive !== false && 
-      s.category?.toLowerCase() === activeTab &&
-      s.type?.toLowerCase() === c.label.toLowerCase()
-    );
-  });
+  const filteredCategories = useMemo(() => {
+    return dynamicCategories.filter((c) => {
+      if (c.id === "all") {
+        return shops?.some(s => s.isActive !== false && s.category?.toLowerCase() === activeTab);
+      }
+      return shops?.some((s) => 
+        s.isActive !== false && 
+        s.category?.toLowerCase() === activeTab &&
+        s.type?.toLowerCase() === c.label.toLowerCase()
+      );
+    });
+  }, [dynamicCategories, shops, activeTab]);
 
+
+  // --- REFRESH HANDLER ---
   const onRefresh = useCallback(async () => {
     if (userLocation && branchConfig?.shopVisibilityRadiusKm) {
       setRefreshing(true);
-      // Determine branch again in case of location shift
       determineBranch(userLocation.lat, userLocation.lng); 
-      // Force Refresh = true
       await fetchNearbyShops(userLocation.lat, userLocation.lng, branchConfig.shopVisibilityRadiusKm, true);
       setRefreshing(false);
     }
   }, [userLocation, branchConfig, fetchNearbyShops, determineBranch]);
 
-  // Styling Helpers
-  const activeCategoryColor = categoryMeta[categories.find((c) => c.id === activeCategory)?.label]?.Theme || "#66BB6A";
+
+  // --- STYLING HELPERS ---
+  const activeCategoryColor = categoryMeta[dynamicCategories.find((c) => c.id === activeCategory)?.label]?.Theme || "#66BB6A";
   
   const darkenColor = (hex, percent) => {
     if (!hex) return "#66BB6A";
@@ -230,8 +285,8 @@ export default function HomeScreen({ navigation }) {
     </TouchableOpacity>
   );
 
-  // 6. LOADING STATES (Check Admin, User, and Shops Loading)
-  if (shopsLoading || adminLoading || userLoading || !fontsLoaded) {
+  // --- UPDATED LOADING STATE: Includes hasFetchedShops lock ---
+  if (shopsLoading || adminLoading || userLoading || !fontsLoaded || !hasFetchedShops) {
     return <SkeletonLoadingScreen />;
   }
 
@@ -275,14 +330,25 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.headerRow}>
           <View style={styles.deliveryCol}>
             <Text style={[styles.deliverLabel, { color: darkenColor(activeCategoryColor, 40) }]}>Deliver To</Text>
-            <TouchableOpacity style={styles.locationRow} onPress={() => navigation.navigate("Addresses")}>
-              <Text style={styles.locationText}>{mainAddress ? mainAddress.name || mainAddress.city || mainAddress.formattedAddress || "Unnamed address" : userLocation?.city ? `${userLocation.city}, ${userLocation.state}` : "Fetching..."}</Text>
+            
+            <TouchableOpacity style={styles.locationRow} onPress={handleLocationPress}>
+              <Text style={styles.locationText}>
+                {mainAddress ? mainAddress.name || mainAddress.city || mainAddress.formattedAddress || "Unnamed address" : userLocation?.city ? `${userLocation.city}, ${userLocation.state}` : "Select Location"}
+              </Text>
               <Ionicons name="chevron-down" size={12} color="#000" />
             </TouchableOpacity>
+
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate("TrackOrder")}><Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} /></TouchableOpacity>  
-            <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate("Profile")}><Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} /></TouchableOpacity>
+            
+            <TouchableOpacity style={styles.notifBtn} onPress={handleTrackOrderPress}>
+                <Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} />
+            </TouchableOpacity>  
+            
+            <TouchableOpacity style={styles.notifBtn} onPress={handleProfilePress}>
+                <Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} />
+            </TouchableOpacity>
+
           </View>
         </View>
         <View style={styles.mediumcontent}>
@@ -298,11 +364,48 @@ export default function HomeScreen({ navigation }) {
           <TouchableOpacity style={[styles.navButton, activeTab === "services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("services"); setActiveCategory("all"); }}><Text style={styles.navText}>Services</Text></TouchableOpacity>
         </View>
       </View>
+
+      {/* --- POLITE LOGIN MODAL --- */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={loginModalVisible}
+        onRequestClose={() => setLoginModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconContainer}>
+                <Ionicons name="person-add-outline" size={36} color="#009688" />
+            </View>
+            <Text style={styles.modalTitle}>Hello There!</Text>
+            <Text style={styles.modalMessage}>
+              You're currently browsing as a guest. To {modalFeatureText}, please log in or create a free account with us to have hassle-free access.
+            </Text>
+            
+            <TouchableOpacity 
+                style={styles.modalLoginBtn} 
+                onPress={() => {
+                    setLoginModalVisible(false);
+                    navigation.navigate("Login");
+                }}
+            >
+                <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+                style={styles.modalCancelBtn} 
+                onPress={() => setLoginModalVisible(false)}
+            >
+                <Text style={styles.modalCancelText}>Maybe Later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
 
-// --- KEEPING EXACT STYLES ---
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#19212a" },
   containerCentered: { flex: 1, justifyContent: "center", alignItems: "center" },
@@ -332,9 +435,18 @@ const styles = StyleSheet.create({
   emptytext: { fontSize: Platform.OS === 'ios' ? 12 : 15, color: "#555", textAlign: "center", paddingHorizontal: 20, fontFamily: "Sen_Regular" },
   bottomNav: { position: "absolute", bottom: 20, left: 20, right: 20, flexDirection: "row", borderRadius: 30, overflow: "hidden", zIndex: 999, elevation: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, height: 50 },
   navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
-  navText: { fontSize: Platform.OS === 'ios' ? 14 : 16, fontFamily: "Sen_Bold", color: "#fff" }
-});
+  navText: { fontSize: Platform.OS === 'ios' ? 14 : 16, fontFamily: "Sen_Bold", color: "#fff" },
 
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },
+  modalIconContainer: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#E0F2F1', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontFamily: 'Sen_Bold', fontSize: 20, color: '#111', marginBottom: 10 },
+  modalMessage: { fontFamily: 'Sen_Regular', fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+  modalLoginBtn: { backgroundColor: '#009688', width: '100%', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 12 },
+  modalLoginText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 16 },
+  modalCancelBtn: { paddingVertical: 10 },
+  modalCancelText: { fontFamily: 'Sen_Medium', color: '#888', fontSize: 14 },
+});
 
 
 // https://i.ibb.co/FPsCSW3/hpy-sankranti.gif

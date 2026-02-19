@@ -1,5 +1,19 @@
-import React, { useState,useRef,useEffect } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform, ScrollView, StatusBar, Image,Animated,Dimensions } from "react-native";
+import React, { useState, useRef, useEffect } from "react";
+import { 
+  View, 
+  Text, 
+  TextInput, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Alert, 
+  KeyboardAvoidingView, 
+  Platform, 
+  ScrollView, 
+  StatusBar, 
+  Image,
+  Animated,
+  Dimensions 
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { ref, set } from "firebase/database";
@@ -8,7 +22,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font";
 
-const { width,height } = Dimensions.get("window");
+// --- IMPORT ASYNC STORAGE ---
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const { width, height } = Dimensions.get("window");
 
 const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   const translateX = useRef(new Animated.Value(-width)).current;
@@ -62,11 +79,8 @@ const SignUpSkeleton = () => {
         
         {/* Header Skeleton */}
         <View style={styles.header}>
-           {/* Logo Placeholder */}
            <SkeletonItem width={80} height={80} borderRadius={10} style={{ marginBottom: 10 }} /> 
-           {/* Title Placeholder */}
            <SkeletonItem width={120} height={30} style={{ marginBottom: 5 }} /> 
-           {/* Subtitle Placeholder */}
            <SkeletonItem width={180} height={14} />
         </View>
 
@@ -118,48 +132,99 @@ export default function SignUp({ navigation }) {
   const [mobile, setMobile] = useState("");
   const [secureText, setSecureText] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [pageLoading, setPageLoading] = useState(true);
 
+  const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+  });
 
-      const [fontsLoaded] = useFonts({
-      ...Ionicons.font,
-    });
-  
-  
-      if ( !fontsLoaded) {
-      return <SkeletonLoadingScreen />;
-    }
+  if (!fontsLoaded) {
+    return <SignUpSkeleton />;
+  }
 
   const handleSignUp = async () => {
     if (!firstName || !lastName || !email || !password || !mobile) return;
     setLoading(true);
     try {
       const { user: { uid } } = await createUserWithEmailAndPassword(getAuth(), email.trim(), password);
+      
+      // --- CRITICAL FIX: CLEAR GUEST DATA UPON SIGN UP ---
+      await AsyncStorage.removeItem('guestAddress');
+      // ---------------------------------------------------
+
       await set(ref(db, `users/${uid}`), { uid, firstName, lastName, email, mobile, createdAt: new Date().toISOString() });
       navigation.navigate("Login");
-    } catch (e) { Alert.alert("Sign Up Failed", e.message); }
-    finally { setLoading(false); }
+    } catch (e) { 
+      Alert.alert("Sign Up Failed", e.message); 
+    }
+    finally { 
+      setLoading(false); 
+    }
   };
 
   return (
     <SafeAreaView style={[styles.container, { paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0 }]}>
       <StatusBar barStyle="dark-content" backgroundColor="#B0E57E" translucent={false} />
+      
+      {/* --- SKIP BUTTON (TOP RIGHT) --- */}
+      <View style={styles.topRightContainer}>
+        <TouchableOpacity 
+          style={styles.skipButton}
+          onPress={() => navigation.replace("MapScreen", { mode: 'add', isGuest: true })}
+        >
+          <Text style={styles.skipText}>Skip</Text>
+          <Ionicons name="arrow-forward" size={16} color="#333" />
+        </TouchableOpacity>
+      </View>
+      {/* ------------------------------- */}
+
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 0 : -70} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end" }} keyboardShouldPersistTaps="handled">
-          <View style={styles.header}><Image source={require("../assets/logo.png")} style={styles.logo} resizeMode="contain" /><Text style={styles.title}>Sign Up</Text><Text style={styles.subtitle}>Create a new account</Text></View>
+          <View style={styles.header}>
+            <Image source={require("../assets/logo.png")} style={styles.logo} resizeMode="contain" />
+            <Text style={styles.title}>Sign Up</Text>
+            <Text style={styles.subtitle}>Create a new account</Text>
+          </View>
           <View style={styles.form}>
             <View style={styles.row}>
-              <View style={{ flex: 1, marginRight: 10 }}><Text style={styles.label}>First Name</Text><TextInput style={styles.input} placeholder="John" placeholderTextColor="#A0A0A0" value={firstName} onChangeText={setFirstName} /></View>
-              <View style={{ flex: 1, marginLeft: 10 }}><Text style={styles.label}>Last Name</Text><TextInput style={styles.input} placeholder="Doe" placeholderTextColor="#A0A0A0" value={lastName} onChangeText={setLastName} /></View>
+              <View style={{ flex: 1, marginRight: 10 }}>
+                <Text style={styles.label}>First Name</Text>
+                <TextInput style={styles.input} placeholder="John" placeholderTextColor="#A0A0A0" value={firstName} onChangeText={setFirstName} />
+              </View>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={styles.label}>Last Name</Text>
+                <TextInput style={styles.input} placeholder="Doe" placeholderTextColor="#A0A0A0" value={lastName} onChangeText={setLastName} />
+              </View>
             </View>
             <Text style={styles.label}>Email</Text>
             <TextInput style={styles.input} placeholder="example@gmail.com" placeholderTextColor="#A0A0A0" keyboardType="email-address" value={email} onChangeText={setEmail} autoCapitalize="none" />
             <Text style={styles.label}>Password</Text>
-            <View style={styles.passwordContainer}><TextInput style={[styles.input, { flex: 1 }]} placeholder="********" placeholderTextColor="#A0A0A0" secureTextEntry={secureText} value={password} onChangeText={setPassword} autoCapitalize="none" /><TouchableOpacity style={styles.eyeIcon} onPress={() => setSecureText(!secureText)}><Ionicons name={secureText ? "eye-off-outline" : "eye-outline"} size={22} color="#A0A0A0" /></TouchableOpacity></View>
+            <View style={styles.passwordContainer}>
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="********" placeholderTextColor="#A0A0A0" secureTextEntry={secureText} value={password} onChangeText={setPassword} autoCapitalize="none" />
+              <TouchableOpacity style={styles.eyeIcon} onPress={() => setSecureText(!secureText)}>
+                <Ionicons name={secureText ? "eye-off-outline" : "eye-outline"} size={22} color="#A0A0A0" />
+              </TouchableOpacity>
+            </View>
             <Text style={styles.label}>Mobile Number</Text>
             <TextInput style={styles.input} placeholder="+91 985*******" placeholderTextColor="#A0A0A0" keyboardType="phone-pad" value={mobile} onChangeText={setMobile} />
-            <TouchableOpacity style={styles.signupButton} onPress={handleSignUp} disabled={loading}><Text style={styles.signupButtonText}>{loading ? "Creating Account..." : "SIGN UP"}</Text></TouchableOpacity>
-            <View style={styles.signupContainer}><Text style={styles.signupText}>Already have an account?</Text><TouchableOpacity onPress={() => navigation.navigate("Login")}><Text style={styles.signupLink}> LOG IN</Text></TouchableOpacity></View>
+            
+            <TouchableOpacity style={styles.signupButton} onPress={handleSignUp} disabled={loading}>
+              <Text style={styles.signupButtonText}>{loading ? "Creating Account..." : "SIGN UP"}</Text>
+            </TouchableOpacity>
+
+            {/* --- TERMS AND PRIVACY POLICY --- */}
+            <View style={styles.termsContainer}>
+              <Text style={styles.termsText}>
+                By clicking, I accept the <Text style={styles.termsLink} onPress={() => navigation.navigate("Terms")}>Terms and Conditions</Text> and <Text style={styles.termsLink} onPress={() => navigation.navigate("PrivacyPolicy")}>Privacy Policy</Text>
+              </Text>
+            </View>
+            {/* -------------------------------- */}
+
+            <View style={styles.signupContainer}>
+              <Text style={styles.signupText}>Already have an account?</Text>
+              <TouchableOpacity onPress={() => navigation.navigate("Login")}>
+                <Text style={styles.signupLink}> LOG IN</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -169,6 +234,9 @@ export default function SignUp({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#B0E57E", marginBottom: Platform.OS === "ios" ? -40 : -30 },
+  topRightContainer: { position: 'absolute', top: Platform.OS === 'ios' ? 50 : 60, right: 20, zIndex: 10 },
+  skipButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.6)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  skipText: { fontFamily: "Sen_Bold", fontSize: Platform.OS === "ios" ? 10 : 12, color: "#333", marginRight: 4 },
   header: { alignItems: "center", marginBottom: 20 },
   logo: { width: 80, height: 80 },
   title: { fontSize: 28, color: "#000", fontFamily: "Sen_Bold" },
@@ -181,6 +249,9 @@ const styles = StyleSheet.create({
   eyeIcon: { position: "absolute", right: 15 },
   signupButton: { backgroundColor: "#28A745", borderRadius: 10, alignItems: "center", paddingVertical: 14, marginTop: 25 },
   signupButtonText: { color: "#fff", fontSize: 15, fontFamily: "Sen_Medium" },
+  termsContainer: { marginTop: 5, alignItems: 'center', paddingHorizontal: 10 },
+  termsText: { color: "#5C5C5C", fontSize: 10, textAlign: 'center', fontFamily: "Sen_Regular", lineHeight: 14 },
+  termsLink: { color: "#28A745", fontFamily: "Sen_Medium", fontSize: 10, textDecorationLine: 'underline' },
   signupContainer: { flexDirection: "row", justifyContent: "center", marginTop: 20 },
   signupText: { color: "#5C5C5C", fontFamily: "Sen_Regular" },
   signupLink: { color: "#28A745", fontFamily: "Sen_Medium" },

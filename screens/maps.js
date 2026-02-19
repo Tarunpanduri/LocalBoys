@@ -6,6 +6,12 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { auth, db as database } from '../firebase';
 import { ref, update, get, push, set } from 'firebase/database';
+// --- ICONS IMPORT ---
+import { MaterialIcons, Ionicons } from '@expo/vector-icons'; 
+
+// --- NEW IMPORTS FOR GUEST MODE ---
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useUser } from '../context/UserContext';
 
 const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -29,6 +35,11 @@ export default function MapScreen({ navigation, route }) {
   const mode = route?.params?.mode || 'add';
   const editingId = route?.params?.addressId || null;
   const initial = route?.params?.initial || null;
+  
+  // --- CHECK IF GUEST ---
+  const isGuest = route?.params?.isGuest || false;
+  // Get Context Setters to update Home Screen immediately
+  const { setMainAddress, setUserLocation } = useUser(); 
 
   const [hasPermission, setHasPermission] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -51,7 +62,10 @@ export default function MapScreen({ navigation, route }) {
 
   useEffect(() => {
     checkLocationPermission();
-    registerForPushNotificationsAsync();
+    // Only register push notifications if NOT a guest
+    if (!isGuest) {
+        registerForPushNotificationsAsync();
+    }
     
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
@@ -67,8 +81,6 @@ export default function MapScreen({ navigation, route }) {
       setName(initial.name || '');
       setPhone(initial.phone || '');
       setQuery(initial.formattedAddress || '');
-      // If editing, we assume they can proceed even if permission was initially vague, 
-      // but usually we still want the map to work.
     }
     
     return () => {
@@ -96,8 +108,6 @@ export default function MapScreen({ navigation, route }) {
       if (status === 'granted') {
         setHasPermission(true);
       } else {
-        // If permission is denied and they can't be asked again (permanent denial),
-        // we show the alert with the Settings link as requested by Apple.
         if (!canAskAgain) {
            Alert.alert(
             'Location Access',
@@ -206,10 +216,9 @@ export default function MapScreen({ navigation, route }) {
   const getCurrentLocation = async () => {
     try {
       setFetching(true);
-      // We check permission again here just in case
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-          Alert.alert('Permission denied', 'Please Allow location access to use this feature which helps us and you to navigate your order to easily.');
+          Alert.alert('Permission denied', 'Please Allow location access to use this feature.');
           return;
       }
 
@@ -230,7 +239,53 @@ export default function MapScreen({ navigation, route }) {
   // --- 2. HANDLE CONFIRM LOCATION ---
   const handleConfirmLocation = async () => {
     if (!selectedPlace) return Alert.alert('Error', 'Please pick a location first.');
+    
+    // Basic validation
     if (!name || name.trim().length < 2) return Alert.alert('Validation', 'Please enter a name for this address.');
+    
+    // --- GUEST MODE LOGIC START ---
+    if (isGuest) {
+        try {
+            setSaving(true);
+            const guestAddressObj = {
+                lat: selectedPlace.lat,
+                lng: selectedPlace.lng,
+                area: selectedPlace.area || '',
+                city: selectedPlace.city || '',
+                state: selectedPlace.state || '',
+                pincode: selectedPlace.pincode || '',
+                formattedAddress: selectedPlace.formattedAddress || '',
+                name: name.trim(),
+                phone: phone.trim() || 'Not Provided',
+                id: 'guest_loc',
+                isGuest: true
+            };
+
+            // 1. Save to Local Storage (sandboxed)
+            await AsyncStorage.setItem('guestAddress', JSON.stringify(guestAddressObj));
+
+            // 2. Update Context manually so HomeScreen sees it instantly
+            if(setMainAddress) setMainAddress(guestAddressObj);
+            if(setUserLocation) setUserLocation(guestAddressObj);
+
+            // 3. Reset Navigation to Home
+            navigation.reset({
+                index: 0,
+                routes: [{ name: 'HomeScreen' }],
+            });
+
+        } catch (e) {
+            Alert.alert("Error", "Could not save guest location");
+            console.error(e);
+        } finally {
+            setSaving(false);
+        }
+        return; // STOP HERE FOR GUESTS
+    }
+    // --- GUEST MODE LOGIC END ---
+
+
+    // --- EXISTING USER LOGIC (FIREBASE) ---
     if (!phone || phone.trim().length < 6) return Alert.alert('Validation', 'Please enter a valid phone number.');
     if (!auth.currentUser) return Alert.alert('Error', 'User not logged in.');
 
@@ -260,7 +315,6 @@ export default function MapScreen({ navigation, route }) {
 
       let keyToSet = editingId;
 
-      // Save or Edit Address
       if (mode === 'edit' && editingId) {
         await update(ref(database, `users/${uid}/addresses/${editingId}`), addressObj);
       } else {
@@ -269,23 +323,19 @@ export default function MapScreen({ navigation, route }) {
         keyToSet = newRef.key;
       }
 
-      // Prepare updates for user profile (Main Address, Support Contact, Push Token)
       const userUpdates = {};
 
-      // Handle Expo Push Token
       if (!existingData.expoPushToken && expoPushToken) {
         userUpdates['expoPushToken'] = expoPushToken;
       } else if (existingData.expoPushToken !== expoPushToken && expoPushToken) {
         userUpdates['expoPushToken'] = expoPushToken;
       }
 
-      // --- 3. LOGIC TO SET MAIN AND CALCULATE SUPPORT CONTACT ---
       const shouldSetAsMain = setAsMain || !hasExistingAddresses;
 
       if (shouldSetAsMain && keyToSet) {
         userUpdates['mainAddressId'] = keyToSet;
 
-        // Calculate nearest branch only if setting as main
         if (selectedPlace.lat && selectedPlace.lng) {
           try {
             const branchesSnap = await get(ref(database, 'branches'));
@@ -317,17 +367,14 @@ export default function MapScreen({ navigation, route }) {
             }
           } catch (branchError) {
             console.error("Error fetching branches for support contact:", branchError);
-            // We proceed even if branch calculation fails
           }
         }
       }
 
-      // Apply all user updates in one go
       if (Object.keys(userUpdates).length > 0) {
         await update(userRef, userUpdates);
       }
 
-      // Finish
       navigation.navigate('Addresses', { refresh: true });
       await Notifications.scheduleNotificationAsync({
         content: { title: 'Address saved', body: 'Your address was saved successfully.' },
@@ -344,10 +391,7 @@ export default function MapScreen({ navigation, route }) {
 
   async function registerForPushNotificationsAsync() {
     try {
-      if (!Constants.isDevice) { 
-        console.warn('Must use physical device for Push Notifications'); 
-        return; 
-      }
+      if (!Constants.isDevice) return; 
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
       if (existingStatus !== 'granted') { 
@@ -370,22 +414,15 @@ export default function MapScreen({ navigation, route }) {
     }
   }
 
-  // --- UPDATED PERMISSION SCREEN FOR APPLE COMPLIANCE ---
   if (!hasPermission) return (
     <View style={styles.permissionContainer}>
       <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
-      
-      {/* 1. Informational text (Why we need it) */}
       <Text style={styles.permissionText}>
         To help you select your delivery location accurately, LocalBoys uses your location to show where you are on the map.
       </Text>
-      
-      {/* 2. Non-coercive button text "Continue" */}
       <TouchableOpacity style={styles.permissionButton} onPress={requestLocationPermission}>
         <Text style={styles.permissionButtonText}>Continue</Text>
       </TouchableOpacity>
-
-      {/* 3. Optional: Manual entry bypass (Apple likes having an option) */}
       <TouchableOpacity 
         style={{ marginTop: 20, padding: 10 }} 
         onPress={() => setHasPermission(true)}
@@ -410,10 +447,14 @@ export default function MapScreen({ navigation, route }) {
         showsMyLocationButton={false} 
         onRegionChangeComplete={onRegionChangeComplete} 
       />
+      
+      {/* --- UPDATED CENTER PIN MARKER --- */}
       <View pointerEvents="none" style={styles.centerMarkerContainer}>
-        <View style={styles.pickLabel}><Text style={styles.pickLabelText}>PICK</Text></View>
-        <View style={styles.pin}><View style={styles.pinDot} /></View>
+        <MaterialIcons name="location-pin" size={40} color="#e53935" style={{ marginBottom: -12, zIndex: 2 }} />
+        <View style={styles.markerShadow} />
       </View>
+      {/* --------------------------------- */}
+
       <View style={styles.searchContainer}>
         <TextInput 
           style={styles.input} 
@@ -434,8 +475,9 @@ export default function MapScreen({ navigation, route }) {
           </View>
         )}
       </View>
+      
       <TouchableOpacity style={styles.currentLocationButton} onPress={getCurrentLocation}>
-        <Text style={styles.currentLocationText}>Use Current Location</Text>
+        <MaterialIcons name="my-location" size={22} color="#444" />
       </TouchableOpacity>
 
       {selectedPlace && (
@@ -493,12 +535,16 @@ export default function MapScreen({ navigation, route }) {
                 <View style={styles.underline} />
               </View>
             </View>
-            <View style={styles.checkboxContainer}>
-              <TouchableOpacity onPress={() => setSetAsMain(v => !v)} style={styles.checkbox}>
-                <View style={[styles.checkboxInner, setAsMain && styles.checkboxInnerChecked]} />
-              </TouchableOpacity>
-              <Text style={styles.checkboxText}>Set as main address</Text>
-            </View>
+            
+            {!isGuest && (
+                <View style={styles.checkboxContainer}>
+                <TouchableOpacity onPress={() => setSetAsMain(v => !v)} style={styles.checkbox}>
+                    <View style={[styles.checkboxInner, setAsMain && styles.checkboxInnerChecked]} />
+                </TouchableOpacity>
+                <Text style={styles.checkboxText}>Set as main address</Text>
+                </View>
+            )}
+
             <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmLocation} disabled={saving}>
               {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmButtonText}>{mode === 'edit' ? 'Save Address' : 'Add Address'}</Text>}
             </TouchableOpacity>
@@ -509,8 +555,6 @@ export default function MapScreen({ navigation, route }) {
   );
 }
 
-const PIN_SIZE = 28;
-const PICK_LABEL_HEIGHT = 26;
 const styles = StyleSheet.create({
   permissionContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#fff' },
   logo: { width: 80, height: 80, marginBottom: 10 },
@@ -523,13 +567,49 @@ const styles = StyleSheet.create({
   suggestionsList: { marginTop: 6, backgroundColor: '#fff', borderRadius: 8, maxHeight: SCREEN_H * 0.28, borderColor: '#e6e6e6', borderWidth: 1 },
   suggestion: { paddingVertical: 12, paddingHorizontal: 12, borderBottomColor: '#f0f0f0', borderBottomWidth: 1 },
   suggestionText: { fontSize:Platform.OS === 'ios' ? 8 : 12, color: '#222', fontFamily: "Sen_Regular" },
-  currentLocationButton: { position: 'absolute', top: Platform.OS === 'android' ? 120 : 138, right: 16, backgroundColor: '#009688', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, zIndex: 1001 },
-  currentLocationText: { color: '#fff', fontSize:Platform.OS === 'ios' ? 10 : 13, fontFamily: "Sen_Bold" },
-  centerMarkerContainer: { position: 'absolute', top: '50%', left: '50%', marginLeft: -(PIN_SIZE / 2), marginTop: -(PIN_SIZE + PICK_LABEL_HEIGHT + 6), alignItems: 'center', justifyContent: 'center', zIndex: 1000, pointerEvents: 'none' },
-  pickLabel: { backgroundColor: '#fff', paddingHorizontal: 8, height: PICK_LABEL_HEIGHT, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginBottom: 6, elevation: 2 },
-  pickLabelText: { fontSize: 12, fontFamily: "Sen_Regular", color: '#222' },
-  pin: { width: PIN_SIZE, height: PIN_SIZE, borderRadius: PIN_SIZE / 2, backgroundColor: '#e53935', justifyContent: 'center', alignItems: 'center', transform: [{ scale: 1.0 }], elevation: 3 },
-  pinDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fff' },
+  
+  currentLocationButton: { 
+    position: 'absolute', 
+    top: Platform.OS === 'android' ? 120 : 138, 
+    right: 16, 
+    backgroundColor: '#fff', 
+    width: 44,
+    height: 44,
+    borderRadius: 22, 
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1001,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
+  },
+
+  // --- UPDATED MARKER STYLES ---
+  centerMarkerContainer: { 
+    position: 'absolute', 
+    top: '50%', 
+    left: '50%', 
+    marginLeft: -24, // Half of icon width (48)
+    marginTop: -48, // Full icon height so point lands exactly center
+    alignItems: 'center', 
+    justifyContent: 'flex-end', 
+    zIndex: 1000, 
+    pointerEvents: 'none',
+    width: 48,
+    height: 48
+  },
+  markerShadow: {
+    width: 12,
+    height: 10,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 6,
+    transform: [{ scaleX: 2 }], 
+    zIndex: 1
+  },
+  // -----------------------------
+
   detailsContainer: { position: 'absolute', left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, elevation: 6, maxHeight: SCREEN_H * 0.5,zIndex: 1000},
   scrollView: { padding: 18 },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },

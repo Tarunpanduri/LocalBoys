@@ -1,16 +1,30 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, Dimensions, StatusBar, Modal, Animated, Platform } from "react-native";
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  Image, 
+  FlatList, 
+  Dimensions, 
+  StatusBar, 
+  Modal, 
+  Animated, 
+  Platform,
+  Alert // Added missing import for Checkout alerts
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { auth, db } from "../firebase";
-import { getAuth } from "firebase/auth"; // Added getAuth
+import { getAuth } from "firebase/auth";
 import { ref as dbRef, onValue } from "firebase/database"; 
 import Toast from "react-native-root-toast";
 import { useFonts } from "expo-font";
 
-// --- IMPORT CART CONTEXT ---
+// --- IMPORT CONTEXTS ---
 import { useCart } from "../context/CartContext"; 
+import { useAdmin } from "../context/AdminContext"; // Added Admin Context
 
 const { width } = Dimensions.get("window");
 const CARD_PADDING = 12, CARD_GUTTER = 12, CARD_WIDTH = Math.round((width - CARD_PADDING * 2 - CARD_GUTTER) / 2);
@@ -110,14 +124,15 @@ export default function ShopDetails({ route, navigation }) {
   const [productsObj, setProductsObj] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState(null);
-  const [adminCats, setAdminCats] = useState({});
   const [error, setError] = useState(null);
   
-  // --- NEW: State for Login Modal ---
   const [loginModalVisible, setLoginModalVisible] = useState(false);
   
   const user = auth.currentUser;
   
+  // --- PULL CATEGORY DATA FROM ADMIN CONTEXT ---
+  const { categoryMeta } = useAdmin();
+
   // --- USE CART CONTEXT ---
   const { 
     cartShopId, 
@@ -134,23 +149,18 @@ export default function ShopDetails({ route, navigation }) {
     ...MaterialIcons.font,
   });
 
-  // --- NEW: GUEST CHECK FUNCTION ---
   const handleAddToCart = (item) => {
     const authInstance = getAuth();
     if (!authInstance.currentUser) {
-      // Show custom polite modal instead of Alert
       setLoginModalVisible(true);
       return;
     }
-    // Proceed if user is logged in
     addToCart(shop, item);
   };
 
-  // --- CHECKOUT LOGIC ---
   const handleProceedCheckout = async () => {
     if (!cartShopId) return;
 
-    // Use cartItems from context directly
     if (!cartItems || !cartItems.length) return Toast.show("Cart is empty.", { duration: Toast.durations.SHORT });
 
     const hasRideService = cartItems.some(item => item.serviceType === "ride");
@@ -169,13 +179,12 @@ export default function ShopDetails({ route, navigation }) {
     }
   };
 
-  // --- FETCH PRODUCTS (Local Shop Data) ---
+  // --- FETCH PRODUCTS (Local Shop Data ONLY) ---
   useEffect(() => {
     if (!shopId) { setError("No shopId provided"); setLoading(false); return; }
     setLoading(true);
     
     const productsRef = dbRef(db, `products/${shopId}`);
-    const adminCatsRef = dbRef(db, `admin_data/categories`);
     
     const unsubProducts = onValue(productsRef, (snap) => { 
         setProductsObj(snap.val() || {}); 
@@ -185,10 +194,9 @@ export default function ShopDetails({ route, navigation }) {
         setError("Failed to load products"); 
         setLoading(false); 
     });
-
-    const unsubAdminCats = onValue(adminCatsRef, (snap) => setAdminCats(snap.val() || {}));
     
-    return () => { unsubProducts(); unsubAdminCats(); };
+    // Removed the secondary call to admin_cats to save database reads
+    return () => { unsubProducts(); };
   }, [shopId]);
 
   // --- DERIVED DATA ---
@@ -199,7 +207,8 @@ export default function ShopDetails({ route, navigation }) {
   
   const productsByActiveCategory = useMemo(() => (!activeCategory || activeCategory === "All") ? productsArray : productsArray.filter((p) => (p.category || "Other") === activeCategory), [productsArray, activeCategory]);
   
-  const getCategoryTheme = useCallback((catLabel) => (catLabel === "All" ? "#28A745" : adminCats[catLabel]?.Theme || "#28A745"), [adminCats]);
+  // Now fetching colors safely from the Admin Context
+  const getCategoryTheme = useCallback((catLabel) => (catLabel === "All" ? "#28A745" : categoryMeta?.[catLabel]?.Theme || "#28A745"), [categoryMeta]);
   const themeColor = getCategoryTheme(activeCategory);
 
   if (loading || !fontsLoaded) return <ShopDetailsSkeleton />;
@@ -268,7 +277,6 @@ export default function ShopDetails({ route, navigation }) {
         ListHeaderComponent={renderHeader}
         renderItem={({ item }) => {
           
-          // Check if the current context cart matches this shop
           const isCurrentShopInCart = cartShopId === shopId;
           const cartItem = (isCurrentShopInCart && cartShop) ? cartShop[item.id] : null;
 
@@ -304,7 +312,6 @@ export default function ShopDetails({ route, navigation }) {
                   ) : (
                     <TouchableOpacity 
                         style={[styles.addBtn, { backgroundColor: themeColor }]} 
-                        // --- CHANGED: Use protected handler instead of direct addToCart
                         onPress={() => handleAddToCart(item)}
                     >
                       <Ionicons name="add" size={18} color="#fff" />

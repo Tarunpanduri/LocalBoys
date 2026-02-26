@@ -9,7 +9,7 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 // --- ADDED IMPORT ---
-import AsyncStorage from '@react-native-async-storage/async-storage'; 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // --- CONTEXT PROVIDERS  ---
 import { ShopProvider } from './context/ShopContext';
@@ -17,6 +17,7 @@ import { CartProvider } from './context/CartContext';
 import { AdminProvider } from './context/AdminContext';
 import { UserProvider } from './context/UserContext';
 import { CouponProvider } from './context/CouponContext';
+import { OrderProvider } from './context/OrderContext';
 
 // Screens
 import Login from './screens/login';
@@ -122,7 +123,7 @@ export default function App() {
 
   useEffect(() => {
     const auth = getAuth();
-    
+
     // --- UPDATED AUTH CHECK LOGIC ---
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -183,26 +184,28 @@ export default function App() {
             <AdminProvider>
               <UserProvider>
                 <CouponProvider>
-                  <NavigationContainer ref={navigationRef}>
-                    <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
-                      <Stack.Screen name="Login" component={Login} />
-                      <Stack.Screen name="SignUp" component={SignUp} />
-                      <Stack.Screen name="MapScreen" component={MapScreen} />
-                      <Stack.Screen name="HomeScreen" component={HomeScreen} />
-                      <Stack.Screen name="ShopDetails" component={ShopDetails} />
-                      <Stack.Screen name="Checkout" component={CheckoutScreen} />
-                      <Stack.Screen name="TrackOrder" component={TrackOrder} />
-                      <Stack.Screen name="Addresses" component={AddressesScreen} />
-                      <Stack.Screen name="Profile" component={Profile} />
-                      <Stack.Screen name="CheckoutScreentwo" component={CheckoutScreentwo} />
-                      <Stack.Screen name="EditProfile" component={EditProfile} />
-                      <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }} />
-                      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
-                      <Stack.Screen name="Terms" component={TermsAndConditionsScreen} />
-                      <Stack.Screen name="ContactUs" component={ContactUs} />
-                      <Stack.Screen name="Settings" component={Settings} />
-                    </Stack.Navigator>
-                  </NavigationContainer>
+                  <OrderProvider>
+                    <NavigationContainer ref={navigationRef}>
+                      <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
+                        <Stack.Screen name="Login" component={Login} />
+                        <Stack.Screen name="SignUp" component={SignUp} />
+                        <Stack.Screen name="MapScreen" component={MapScreen} />
+                        <Stack.Screen name="HomeScreen" component={HomeScreen} />
+                        <Stack.Screen name="ShopDetails" component={ShopDetails} />
+                        <Stack.Screen name="Checkout" component={CheckoutScreen} />
+                        <Stack.Screen name="TrackOrder" component={TrackOrder} />
+                        <Stack.Screen name="Addresses" component={AddressesScreen} />
+                        <Stack.Screen name="Profile" component={Profile} />
+                        <Stack.Screen name="CheckoutScreentwo" component={CheckoutScreentwo} />
+                        <Stack.Screen name="EditProfile" component={EditProfile} />
+                        <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }} />
+                        <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+                        <Stack.Screen name="Terms" component={TermsAndConditionsScreen} />
+                        <Stack.Screen name="ContactUs" component={ContactUs} />
+                        <Stack.Screen name="Settings" component={Settings} />
+                      </Stack.Navigator>
+                    </NavigationContainer>
+                  </OrderProvider>
                 </CouponProvider>
               </UserProvider>
             </AdminProvider>

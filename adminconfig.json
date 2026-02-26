@@ -30,62 +30,22 @@
     "Sports": { "Icon": "football-outline", "Theme": "#60A5FA" },
     "Toys": { "Icon": "game-controller-outline", "Theme": "#FDBA74" }
   },
-  "branches": [
+  "branchIndex": [
     {
       "id": "Cbb52eZki4TDFkPLTh4ZLpuhWXB2",
       "name": "LB-Kakinada",
       "lat": 16.9892483,
       "lng": 82.2476526,
-      "config": {
-        "deliveryChargePerKm": 5,
-        "maintenanceMode": false,
-        "minOrderValue": 100,
-        "shopVisibilityRadiusKm": 8
-      },
-      "coupons": {
-        "5LIzVcINc8cMp51mmA1DucbLUjd2": {
-          "code": "WELCOMEKKD",
-          "discount": 50,
-          "type": "flat"
-        }
-      },
-      "cityAnimationUrl": "" 
+      "radius": 8,
+      "configUrl": "https://firebasestorage.googleapis.com/v0/b/localboys-new.firebasestorage.app/o/kkdconfig.json?alt=media&token=97912cb9-eb68-47dc-9e45-3925ff65b19d"
     },
     {
       "id": "VeTvTX18SQMRzFXFM70WFm8MqWv1",
       "name": "LB-Rajahmundry",
       "lat": 17.0005,
       "lng": 81.804,
-      "config": {
-        "deliveryChargePerKm": 5,
-        "maintenanceMode": false,
-        "minOrderValue": 100,
-        "shopVisibilityRadiusKm": 8
-      }
-    },
-    {
-      "id": "branch_1770966777815_482",
-      "name": "LB-Vizag",
-      "lat": 17.7296,
-      "lng": 83.3073,
-      "config": {
-        "deliveryChargePerKm": 5,
-        "maintenanceMode": false,
-        "minOrderValue": 100,
-        "shopVisibilityRadiusKm": 8
-      }
-    },
-    {
-      "id": "branch_1770966778166_23",
-      "name": "LB-Vijayawada",
-      "lat": 16.5062,
-      "lng": 80.648,
-      "config": {
-        "deliveryChargePerKm": 5,
-        "maintenanceMode": false,
-        "minOrderValue": 100,
-        "shopVisibilityRadiusKm": 8
-      }
+      "radius": 8,
+      "configUrl": "https://firebasestorage.googleapis.com/v0/b/localboys-new.firebasestorage.app/o/rajahmundry_config.json?alt=media"
     }
   ]
 }

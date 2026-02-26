@@ -77,6 +77,7 @@ export default {
       measurementId: process.env.MEASUREMENT_ID,
       databaseURL: process.env.DATABASE_URL,
       googleMapsApiKey: process.env.googleMapsApiKey,
+      configUrl: process.env.CONFIG_URL,
       eas: {
         projectId: "fcf95556-c415-4a5f-8f64-31a42bbeaa98"
       }

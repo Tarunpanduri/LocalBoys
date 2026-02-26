@@ -19,6 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import { getAuth } from "firebase/auth";
+import LottieView from 'lottie-react-native';
 
 // 1. IMPORT CONTEXTS
 import { useShops } from "../context/ShopContext";
@@ -103,7 +104,7 @@ const SkeletonLoadingScreen = () => {
 
 export default function HomeScreen({ navigation }) {
   const { shops, loading: shopsLoading, fetchNearbyShops } = useShops();
-  const { categoryMeta, eventUrl, loading: adminLoading, determineBranch, branchConfig, activeBranchId } = useAdmin();
+  const { categoryMeta, eventUrl, headerAnimationUrl, loading: adminLoading, determineBranch, branchConfig, activeBranchId } = useAdmin();
   const { userLocation, mainAddress, loading: userLoading } = useUser(); 
 
   // UI State
@@ -112,7 +113,6 @@ export default function HomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("products");
   
-  // Initialize lock to prevent flash of empty content
   const [hasFetchedShops, setHasFetchedShops] = useState(false);
   
   const [loginModalVisible, setLoginModalVisible] = useState(false);
@@ -124,7 +124,6 @@ export default function HomeScreen({ navigation }) {
     ...MaterialIcons.font,
   });
 
-  // --- NAVIGATION HANDLERS ---
   const handleLocationPress = () => {
     const auth = getAuth();
     if (auth.currentUser) {
@@ -155,37 +154,36 @@ export default function HomeScreen({ navigation }) {
   };
 
   // --- 1. COORDINATION EFFECT (BRANCH) ---
+  // DEPENDENCY FIX: Only primitive values allowed here to stop infinite loops.
   useEffect(() => {
     if (userLocation?.lat && userLocation?.lng) {
       determineBranch(userLocation.lat, userLocation.lng);
     }
-  }, [userLocation, determineBranch]);
+  }, [userLocation?.lat, userLocation?.lng, determineBranch]);
 
-  // --- 2. COORDINATION EFFECT (FETCH SHOPS WITH GLITCH PREVENTION) ---
+  // --- 2. COORDINATION EFFECT (FETCH SHOPS) ---
+  // DEPENDENCY FIX: Using specific radius number, not the whole config object.
   useEffect(() => {
-    if (userLoading || adminLoading) return; // Wait for base data
+    if (userLoading || adminLoading) return; 
 
-    if (userLocation?.lat && userLocation?.lng && branchConfig?.shopVisibilityRadiusKm) {
-      fetchNearbyShops(userLocation.lat, userLocation.lng, branchConfig.shopVisibilityRadiusKm, false);
+    const radius = branchConfig?.shopVisibilityRadiusKm;
+    if (userLocation?.lat && userLocation?.lng && radius) {
+      fetchNearbyShops(userLocation.lat, userLocation.lng, radius, false);
     }
     
-    // We delay unmounting the skeleton by just 50ms so ShopContext's `shopsLoading` 
-    // has time to flip to true. This eliminates the empty screen flash.
     const timer = setTimeout(() => {
       setHasFetchedShops(true);
     }, 50);
 
     return () => clearTimeout(timer);
-  }, [userLocation, branchConfig, fetchNearbyShops, userLoading, adminLoading]);
+  }, [userLocation?.lat, userLocation?.lng, branchConfig?.shopVisibilityRadiusKm, userLoading, adminLoading, fetchNearbyShops]);
 
-
-  // --- 3. SYNCHRONOUS FILTERING (REPLACES USEEFFECT TO STOP GLITCH) ---
+  // --- 3. SYNCHRONOUS FILTERING ---
   const { filteredShops, dynamicCategories } = useMemo(() => {
     if (!shops) return { filteredShops: [], dynamicCategories: [{ id: "all", label: "All" }] };
 
     let result = shops.filter((s) => s.isActive !== false);
 
-    // Tab Filter
     result = result.filter((s) =>
       activeTab === "products"
         ? s.category?.toLowerCase() === "products"
@@ -194,14 +192,12 @@ export default function HomeScreen({ navigation }) {
 
     let shopsForDisplay = [...result];
 
-    // Category Filter
     if (activeCategory !== "all") {
       shopsForDisplay = shopsForDisplay.filter((s) =>
         s.type?.toLowerCase().includes(activeCategory.toLowerCase())
       );
     }
 
-    // Search Filter
     if (searchText) {
       const lowerSearch = searchText.toLowerCase();
       shopsForDisplay = shopsForDisplay.filter((s) =>
@@ -230,18 +226,17 @@ export default function HomeScreen({ navigation }) {
   }, [dynamicCategories, shops, activeTab]);
 
 
-  // --- REFRESH HANDLER ---
   const onRefresh = useCallback(async () => {
-    if (userLocation && branchConfig?.shopVisibilityRadiusKm) {
+    const radius = branchConfig?.shopVisibilityRadiusKm;
+    if (userLocation?.lat && userLocation?.lng && radius) {
       setRefreshing(true);
       determineBranch(userLocation.lat, userLocation.lng); 
-      await fetchNearbyShops(userLocation.lat, userLocation.lng, branchConfig.shopVisibilityRadiusKm, true);
+      await fetchNearbyShops(userLocation.lat, userLocation.lng, radius, true);
       setRefreshing(false);
     }
-  }, [userLocation, branchConfig, fetchNearbyShops, determineBranch]);
+  }, [userLocation?.lat, userLocation?.lng, branchConfig?.shopVisibilityRadiusKm, fetchNearbyShops, determineBranch]);
 
 
-  // --- STYLING HELPERS ---
   const activeCategoryColor = categoryMeta[dynamicCategories.find((c) => c.id === activeCategory)?.label]?.Theme || "#66BB6A";
   
   const darkenColor = (hex, percent) => {
@@ -275,7 +270,6 @@ export default function HomeScreen({ navigation }) {
       <Image source={{ uri: shop.image }} style={styles.shopImage} resizeMode="cover" />
       <View style={styles.shopInfo}>
         <Text style={styles.shopName}>{shop.name}</Text>
-        <Text style={styles.shopSubtitle}>{shop.type} {shop.avgPrepTime ? ` · ${shop.avgPrepTime} min` : ""}</Text>
         <View style={styles.shopMetaRow}>
           <View style={styles.metaItem}><FontAwesome5 name="star" size={14} /><Text style={styles.metaText}> {shop.rating ?? "—"}</Text></View>
           <View style={[styles.metaItem, { marginLeft: 12 }]}><MaterialIcons name="local-shipping" size={16} /><Text style={styles.metaText}> Free</Text></View>
@@ -285,7 +279,6 @@ export default function HomeScreen({ navigation }) {
     </TouchableOpacity>
   );
 
-  // --- UPDATED LOADING STATE: Includes hasFetchedShops lock ---
   if (shopsLoading || adminLoading || userLoading || !fontsLoaded || !hasFetchedShops) {
     return <SkeletonLoadingScreen />;
   }
@@ -337,35 +330,52 @@ export default function HomeScreen({ navigation }) {
               </Text>
               <Ionicons name="chevron-down" size={12} color="#000" />
             </TouchableOpacity>
-
           </View>
+
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            
             <TouchableOpacity style={styles.notifBtn} onPress={handleTrackOrderPress}>
                 <Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} />
             </TouchableOpacity>  
-            
             <TouchableOpacity style={styles.notifBtn} onPress={handleProfilePress}>
                 <Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} />
             </TouchableOpacity>
-
           </View>
         </View>
+
         <View style={styles.mediumcontent}>
           <View style={styles.searchBox}>
             <Ionicons name="search" size={18} style={{ marginRight: 8 }} />
             <TextInput placeholder="Search products or services" placeholderTextColor="#666" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
           </View>
-          {eventUrl ? <Image source={{ uri: eventUrl }} style={[styles.banner, { width: width - 36, height: (width - 100) * 0.5, marginTop: 20 }]} resizeMode="stretch" /> : null}
+
+          {/* --- NEW SDUI ANIMATION / BANNER BLOCK ---
+          <View style={{ alignItems: 'center', width: '100%' }}>
+            {headerAnimationUrl ? (
+              <LottieView
+                source={{ uri: headerAnimationUrl }}
+                autoPlay
+                loop
+                style={{ width: width - 36, maxHeight: 130 }}
+                resizeMode="contain"
+              />
+            ) : eventUrl ? (
+              <Image 
+                source={{ uri: eventUrl }} 
+                style={[styles.banner, { width: width - 36, height: (width - 100) * 0.5 }]} 
+                resizeMode="stretch" 
+              />
+            ) : null}
+          </View> */}
+
           {renderContent()}
         </View>
+
         <View style={[styles.bottomNav, { backgroundColor: activeCategoryColor }]}>
           <TouchableOpacity style={[styles.navButton, activeTab === "products" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("products"); setActiveCategory("all"); }}><Text style={styles.navText}>Products</Text></TouchableOpacity>
           <TouchableOpacity style={[styles.navButton, activeTab === "services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("services"); setActiveCategory("all"); }}><Text style={styles.navText}>Services</Text></TouchableOpacity>
         </View>
       </View>
 
-      {/* --- POLITE LOGIN MODAL --- */}
       <Modal
         animationType="fade"
         transparent={true}
@@ -381,7 +391,6 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.modalMessage}>
               You're currently browsing as a guest. To {modalFeatureText}, please log in or create a free account with us to have hassle-free access.
             </Text>
-            
             <TouchableOpacity 
                 style={styles.modalLoginBtn} 
                 onPress={() => {
@@ -391,17 +400,12 @@ export default function HomeScreen({ navigation }) {
             >
                 <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity 
-                style={styles.modalCancelBtn} 
-                onPress={() => setLoginModalVisible(false)}
-            >
+            <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLoginModalVisible(false)}>
                 <Text style={styles.modalCancelText}>Maybe Later</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 }
@@ -419,6 +423,7 @@ const styles = StyleSheet.create({
   mediumcontent: { flex: 1, paddingHorizontal: 18, paddingTop: 12 },
   searchBox: { height: 50, backgroundColor: "#fff", borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: "#ddd" },
   searchInput: { flex: 1, fontSize: Platform.OS === 'ios' ? 12 : 15, fontFamily: "Sen_Regular" },
+  banner: { borderRadius: 12 },
   sectionHeader: { marginTop: 18, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sectionTitle: { fontSize: Platform.OS === 'ios' ? 16 : 18, fontFamily: "Sen_Bold", color: "#111", marginBottom: 5 },
   categoryChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: "#fff", marginRight: 10, borderWidth: 1, borderColor: "#ddd" },
@@ -436,7 +441,6 @@ const styles = StyleSheet.create({
   bottomNav: { position: "absolute", bottom: 20, left: 20, right: 20, flexDirection: "row", borderRadius: 30, overflow: "hidden", zIndex: 999, elevation: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, height: 50 },
   navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
   navText: { fontSize: Platform.OS === 'ios' ? 14 : 16, fontFamily: "Sen_Bold", color: "#fff" },
-
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },
   modalIconContainer: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#E0F2F1', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
@@ -447,6 +451,5 @@ const styles = StyleSheet.create({
   modalCancelBtn: { paddingVertical: 10 },
   modalCancelText: { fontFamily: 'Sen_Medium', color: '#888', fontSize: 14 },
 });
-
 
 // https://i.ibb.co/FPsCSW3/hpy-sankranti.gif

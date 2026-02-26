@@ -1,0 +1,91 @@
+{
+  "appVersion": {
+    "android": "1.0.0",
+    "ios": "1.0.0",
+    "maintenanceMode": false
+  },
+  "eventUrl": "",
+  "headerAnimationUrl": "",
+  "categories": {
+    "AC Repair": { "Icon": "snow-outline", "Theme": "#60A5FA" },
+    "Appliance Repair": { "Icon": "construct-outline", "Theme": "#FCD34D" },
+    "Beauty": { "Icon": "color-palette-outline", "Theme": "#F472B6" },
+    "Books": { "Icon": "book-outline", "Theme": "#C4B5FD" },
+    "Carpentry": { "Icon": "hammer-outline", "Theme": "#F59E0B" },
+    "Cleaning": { "Icon": "broom-outline", "Theme": "#34D399" },
+    "Clothing": { "Icon": "shirt-outline", "Theme": "#6EE7B7" },
+    "Electrical": { "Icon": "flash-outline", "Theme": "#F87171" },
+    "Electronics": { "Icon": "tv-outline", "Theme": "#FFB6C1" },
+    "Food": { "Icon": "fast-food-outline", "Theme": "#FCD34D" },
+    "Furniture": { "Icon": "bed-outline", "Theme": "#FBBF24" },
+    "Gardening": { "Icon": "flower-outline", "Theme": "#10B981" },
+    "Health": { "Icon": "heart-outline", "Theme": "#FCA5A5" },
+    "Laundry": { "Icon": "water-outline", "Theme": "#60A5FA" },
+    "Meat": { "Icon": "restaurant-outline", "Theme": "#F87171" },
+    "Moving": { "Icon": "truck-outline", "Theme": "#8B5CF6" },
+    "Office Shift": { "Icon": "briefcase-outline", "Theme": "#FBBF24" },
+    "Painting": { "Icon": "color-palette-outline", "Theme": "#F472B6" },
+    "Pest Control": { "Icon": "bug-outline", "Theme": "#EF4444" },
+    "Plumbing": { "Icon": "water-outline", "Theme": "#3B82F6" },
+    "Sports": { "Icon": "football-outline", "Theme": "#60A5FA" },
+    "Toys": { "Icon": "game-controller-outline", "Theme": "#FDBA74" }
+  },
+  "branches": [
+    {
+      "id": "Cbb52eZki4TDFkPLTh4ZLpuhWXB2",
+      "name": "LB-Kakinada",
+      "lat": 16.9892483,
+      "lng": 82.2476526,
+      "config": {
+        "deliveryChargePerKm": 5,
+        "maintenanceMode": false,
+        "minOrderValue": 100,
+        "shopVisibilityRadiusKm": 8
+      },
+      "coupons": {
+        "5LIzVcINc8cMp51mmA1DucbLUjd2": {
+          "code": "WELCOMEKKD",
+          "discount": 50,
+          "type": "flat"
+        }
+      },
+      "cityAnimationUrl": "" 
+    },
+    {
+      "id": "VeTvTX18SQMRzFXFM70WFm8MqWv1",
+      "name": "LB-Rajahmundry",
+      "lat": 17.0005,
+      "lng": 81.804,
+      "config": {
+        "deliveryChargePerKm": 5,
+        "maintenanceMode": false,
+        "minOrderValue": 100,
+        "shopVisibilityRadiusKm": 8
+      }
+    },
+    {
+      "id": "branch_1770966777815_482",
+      "name": "LB-Vizag",
+      "lat": 17.7296,
+      "lng": 83.3073,
+      "config": {
+        "deliveryChargePerKm": 5,
+        "maintenanceMode": false,
+        "minOrderValue": 100,
+        "shopVisibilityRadiusKm": 8
+      }
+    },
+    {
+      "id": "branch_1770966778166_23",
+      "name": "LB-Vijayawada",
+      "lat": 16.5062,
+      "lng": 80.648,
+      "config": {
+        "deliveryChargePerKm": 5,
+        "maintenanceMode": false,
+        "minOrderValue": 100,
+        "shopVisibilityRadiusKm": 8
+      }
+    }
+  ]
+}

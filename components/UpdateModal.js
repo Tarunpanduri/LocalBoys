@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
-import { useAdmin } from '../context/AdminContext'; // Assuming you have this context
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAdmin } from '../context/AdminContext'; 
 
 // Helper function to compare semantic versions (e.g. "1.0.5" > "1.0.2")
 const isVersionGreater = (newVer, currentVer) => {
+  if (!newVer || !currentVer) return false;
   const v1 = newVer.split('.').map(Number);
   const v2 = currentVer.split('.').map(Number);
   for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
@@ -18,44 +20,70 @@ const isVersionGreater = (newVer, currentVer) => {
 };
 
 export default function UpdateModal() {
-  const { appVersion } = useAdmin();
-  const [updateType, setUpdateType] = useState('none'); 
+  const { appVersion, loading: adminLoading } = useAdmin(); // Added loading check
+  const [updateType, setUpdateType] = useState('none'); // 'none', 'soft', 'hard'
   const [showSoftModal, setShowSoftModal] = useState(false);
 
   // Get current app version from Expo config
-  const currentAppVersion = Constants.expoConfig.version || "0.0.0";
+  const currentAppVersion = Constants.expoConfig?.version || "1.0.0";
 
   useEffect(() => {
-    if (!appVersion) return;
+    // DO NOT run the check until the AdminContext has finished fetching from the CDN
+    if (adminLoading || !appVersion) return;
 
-    const platformConfig = Platform.OS === 'ios' ? appVersion.ios : appVersion.android;
-    if (!platformConfig) return;
+    const checkUpdateStatus = async () => {
+      const platformConfig = Platform.OS === 'ios' ? appVersion.ios : appVersion.android;
+      if (!platformConfig) return;
 
-    const needsHardUpdate = isVersionGreater(platformConfig.minSupported, currentAppVersion);
-    const needsSoftUpdate = isVersionGreater(platformConfig.latest, currentAppVersion);
+      const needsHardUpdate = isVersionGreater(platformConfig.minSupported, currentAppVersion);
+      const needsSoftUpdate = isVersionGreater(platformConfig.latest, currentAppVersion);
 
-    if (needsHardUpdate) {
-      setUpdateType('hard');
-    } else if (needsSoftUpdate) {
-      setUpdateType('soft');
-      setShowSoftModal(true);
-    }
-  }, [appVersion, currentAppVersion]);
+      if (needsHardUpdate) {
+        setUpdateType('hard');
+      } else if (needsSoftUpdate) {
+        try {
+          const today = new Date().toISOString().split('T')[0]; 
+          const storedTracker = await AsyncStorage.getItem('localboys_soft_update_tracker');
+          let tracker = storedTracker ? JSON.parse(storedTracker) : { date: '', count: 0 };
+
+          if (tracker.date !== today) {
+            await AsyncStorage.setItem('localboys_soft_update_tracker', JSON.stringify({ date: today, count: 1 }));
+            setUpdateType('soft');
+            setShowSoftModal(true);
+          } else if (tracker.count < 2) {
+            tracker.count += 1;
+            await AsyncStorage.setItem('localboys_soft_update_tracker', JSON.stringify(tracker));
+            setUpdateType('soft');
+            setShowSoftModal(true);
+          } else {
+            setUpdateType('none');
+          }
+        } catch (error) {
+          console.error("Error reading update tracker", error);
+          setUpdateType('soft');
+          setShowSoftModal(true);
+        }
+      }
+    };
+
+    checkUpdateStatus();
+  }, [appVersion, currentAppVersion, adminLoading]); // Added adminLoading to dependencies
 
   const handleUpdatePress = () => {
-    const platformConfig = Platform.OS === 'ios' ? appVersion.ios : appVersion.android;
+    const platformConfig = Platform.OS === 'ios' ? appVersion?.ios : appVersion?.android;
     if (platformConfig?.storeUrl) {
       Linking.openURL(platformConfig.storeUrl).catch(err => console.error("Couldn't open store", err));
     }
   };
 
-  if (updateType === 'none') return null;
+  // If there's no update, render absolutely nothing
+  if (updateType === 'none' || adminLoading) return null;
 
   const isHard = updateType === 'hard';
   const isVisible = isHard ? true : showSoftModal;
 
   return (
-    <Modal visible={isVisible} transparent={true} animationType="fade">
+    <Modal visible={isVisible} transparent={true} animationType="fade" statusBarTranslucent={true}>
       <View style={styles.overlay}>
         <View style={styles.modalBox}>
           <View style={[styles.iconWrap, isHard ? {backgroundColor: '#ffebee'} : {backgroundColor: '#e3f2fd'}]}>
@@ -71,14 +99,13 @@ export default function UpdateModal() {
           </Text>
           
           <Text style={styles.message}>
-            {Platform.OS === 'ios' ? appVersion.ios.updateMessage : appVersion.android.updateMessage}
+            {Platform.OS === 'ios' ? appVersion?.ios?.updateMessage : appVersion?.android?.updateMessage}
           </Text>
 
           <TouchableOpacity style={styles.updateBtn} onPress={handleUpdatePress}>
             <Text style={styles.updateText}>Update Now</Text>
           </TouchableOpacity>
 
-          {/* Only show the "Later" button if it's a Soft Update */}
           {!isHard && (
             <TouchableOpacity style={styles.laterBtn} onPress={() => setShowSoftModal(false)}>
               <Text style={styles.laterText}>Maybe Later</Text>

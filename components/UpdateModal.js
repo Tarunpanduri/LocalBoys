@@ -132,4 +132,4 @@ const styles = StyleSheet.create({
   updateText: { color: '#fff', fontFamily: 'Sen_Bold', fontSize: 16 },
   laterBtn: { paddingVertical: 10, width: '100%', alignItems: 'center' },
   laterText: { color: '#777', fontFamily: 'Sen_Medium', fontSize: 15 }
-}); 
+});  

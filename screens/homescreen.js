@@ -20,6 +20,7 @@ import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import { getAuth } from "firebase/auth";
 import LottieView from 'lottie-react-native';
+import UpdateModal from "../components/UpdateModal";
 
 // 1. IMPORT CONTEXTS
 import { useShops } from "../context/ShopContext";
@@ -319,6 +320,7 @@ export default function HomeScreen({ navigation }) {
     <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
       <StatusBar barStyle="dark-content" backgroundColor="#19212a" translucent={false} />
       <LinearGradient colors={[activeCategoryColor || "#66BB6A", "#ffffff"]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 180 }} />
+      <UpdateModal />
       <View style={styles.screen}>
         <View style={styles.headerRow}>
           <View style={styles.deliveryCol}>

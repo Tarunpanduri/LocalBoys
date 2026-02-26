@@ -37,6 +37,8 @@ import TermsAndConditionsScreen from './screens/Terms';
 import ContactUs from './screens/contact';
 import Settings from './screens/settings';
 
+// import updatemodal from './components/UpdateModal';
+
 // Firebase
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebase';

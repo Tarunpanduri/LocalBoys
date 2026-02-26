@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Linking, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
-import { useAdmin } from '../context/AdminContext'; // Assuming you have this context
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAdmin } from '../context/AdminContext'; 
 
 // Helper function to compare semantic versions (e.g. "1.0.5" > "1.0.2")
 const isVersionGreater = (newVer, currentVer) => {
+  if (!newVer || !currentVer) return false;
   const v1 = newVer.split('.').map(Number);
   const v2 = currentVer.split('.').map(Number);
   for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
@@ -19,31 +21,61 @@ const isVersionGreater = (newVer, currentVer) => {
 
 export default function UpdateModal() {
   const { appVersion } = useAdmin();
-  const [updateType, setUpdateType] = useState('none'); 
+  const [updateType, setUpdateType] = useState('none'); // 'none', 'soft', 'hard'
   const [showSoftModal, setShowSoftModal] = useState(false);
 
   // Get current app version from Expo config
-  const currentAppVersion = Constants.expoConfig.version || "0.0.0";
+  const currentAppVersion = Constants.expoConfig?.version || "1.0.0";
 
   useEffect(() => {
-    if (!appVersion) return;
+    const checkUpdateStatus = async () => {
+      if (!appVersion) return;
 
-    const platformConfig = Platform.OS === 'ios' ? appVersion.ios : appVersion.android;
-    if (!platformConfig) return;
+      const platformConfig = Platform.OS === 'ios' ? appVersion.ios : appVersion.android;
+      if (!platformConfig) return;
 
-    const needsHardUpdate = isVersionGreater(platformConfig.minSupported, currentAppVersion);
-    const needsSoftUpdate = isVersionGreater(platformConfig.latest, currentAppVersion);
+      const needsHardUpdate = isVersionGreater(platformConfig.minSupported, currentAppVersion);
+      const needsSoftUpdate = isVersionGreater(platformConfig.latest, currentAppVersion);
 
-    if (needsHardUpdate) {
-      setUpdateType('hard');
-    } else if (needsSoftUpdate) {
-      setUpdateType('soft');
-      setShowSoftModal(true);
-    }
+      if (needsHardUpdate) {
+        // ALWAYS show hard updates, ignore limits
+        setUpdateType('hard');
+      } else if (needsSoftUpdate) {
+        // RATE LIMITER: Only show soft updates max 2 times per day
+        try {
+          const today = new Date().toISOString().split('T')[0]; // Gets YYYY-MM-DD
+          const storedTracker = await AsyncStorage.getItem('localboys_soft_update_tracker');
+          let tracker = storedTracker ? JSON.parse(storedTracker) : { date: '', count: 0 };
+
+          if (tracker.date !== today) {
+            // It's a new day! Reset the counter to 1 and show modal
+            await AsyncStorage.setItem('localboys_soft_update_tracker', JSON.stringify({ date: today, count: 1 }));
+            setUpdateType('soft');
+            setShowSoftModal(true);
+          } else if (tracker.count < 2) {
+            // It's the same day, but they haven't seen it 2 times yet. Increment and show.
+            tracker.count += 1;
+            await AsyncStorage.setItem('localboys_soft_update_tracker', JSON.stringify(tracker));
+            setUpdateType('soft');
+            setShowSoftModal(true);
+          } else {
+            // They have seen it 2 times today. Do not bother them.
+            setUpdateType('none');
+          }
+        } catch (error) {
+          console.error("Error reading update tracker", error);
+          // Fallback just in case AsyncStorage fails
+          setUpdateType('soft');
+          setShowSoftModal(true);
+        }
+      }
+    };
+
+    checkUpdateStatus();
   }, [appVersion, currentAppVersion]);
 
   const handleUpdatePress = () => {
-    const platformConfig = Platform.OS === 'ios' ? appVersion.ios : appVersion.android;
+    const platformConfig = Platform.OS === 'ios' ? appVersion?.ios : appVersion?.android;
     if (platformConfig?.storeUrl) {
       Linking.openURL(platformConfig.storeUrl).catch(err => console.error("Couldn't open store", err));
     }
@@ -71,7 +103,7 @@ export default function UpdateModal() {
           </Text>
           
           <Text style={styles.message}>
-            {Platform.OS === 'ios' ? appVersion.ios.updateMessage : appVersion.android.updateMessage}
+            {Platform.OS === 'ios' ? appVersion?.ios?.updateMessage : appVersion?.android?.updateMessage}
           </Text>
 
           <TouchableOpacity style={styles.updateBtn} onPress={handleUpdatePress}>

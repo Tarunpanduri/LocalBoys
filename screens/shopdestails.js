@@ -11,20 +11,21 @@ import {
   Modal, 
   Animated, 
   Platform,
-  Alert // Added missing import for Checkout alerts
+  Alert 
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { auth, db } from "../firebase";
 import { getAuth } from "firebase/auth";
-import { ref as dbRef, onValue } from "firebase/database"; 
+// CHANGED: Imported 'get' instead of 'onValue'
+import { ref as dbRef, get } from "firebase/database"; 
 import Toast from "react-native-root-toast";
 import { useFonts } from "expo-font";
 
 // --- IMPORT CONTEXTS ---
 import { useCart } from "../context/CartContext"; 
-import { useAdmin } from "../context/AdminContext"; // Added Admin Context
+import { useAdmin } from "../context/AdminContext"; 
 
 const { width } = Dimensions.get("window");
 const CARD_PADDING = 12, CARD_GUTTER = 12, CARD_WIDTH = Math.round((width - CARD_PADDING * 2 - CARD_GUTTER) / 2);
@@ -181,22 +182,25 @@ export default function ShopDetails({ route, navigation }) {
 
   // --- FETCH PRODUCTS (Local Shop Data ONLY) ---
   useEffect(() => {
-    if (!shopId) { setError("No shopId provided"); setLoading(false); return; }
-    setLoading(true);
+    if (!shopId) { 
+      setError("No shopId provided"); 
+      setLoading(false); 
+      return; 
+    }
     
+    setLoading(true);
     const productsRef = dbRef(db, `products/${shopId}`);
     
-    const unsubProducts = onValue(productsRef, (snap) => { 
-        setProductsObj(snap.val() || {}); 
-        setLoading(false); 
-    }, (err) => { 
-        console.warn("products read error", err); 
-        setError("Failed to load products"); 
-        setLoading(false); 
+    // CHANGED: Used get() instead of onValue()
+    get(productsRef).then((snap) => {
+      setProductsObj(snap.val() || {}); 
+      setLoading(false); 
+    }).catch((err) => {
+      console.warn("products read error", err); 
+      setError("Failed to load products"); 
+      setLoading(false); 
     });
     
-    // Removed the secondary call to admin_cats to save database reads
-    return () => { unsubProducts(); };
   }, [shopId]);
 
   // --- DERIVED DATA ---

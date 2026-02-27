@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Alert, Image, Platform, Dimensions, ScrollView, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator, TextInput, Keyboard, Image, Platform, Dimensions, ScrollView, Linking, Modal } from 'react-native';
 import MapView from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -50,8 +50,15 @@ export default function MapScreen({ navigation, route }) {
   const [expoPushToken, setExpoPushToken] = useState(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [setAsMain, setSetAsMain] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // --- CUSTOM ALERT MODAL STATE ---
+  const [alertConfig, setAlertConfig] = useState({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'error', // 'error', 'validation', 'settings'
+  });
 
   const mapRef = useRef(null);
   const regionChangeTimeout = useRef(null);
@@ -91,6 +98,20 @@ export default function MapScreen({ navigation, route }) {
     };
   }, []);
 
+  // --- ALERT HELPERS ---
+  const showAlert = (title, message, type = 'error') => {
+    setAlertConfig({ visible: true, title, message, type });
+  };
+
+  const closeAlert = () => {
+    setAlertConfig({ ...alertConfig, visible: false });
+  };
+
+  const handleOpenSettings = () => {
+    closeAlert();
+    Linking.openSettings();
+  };
+
   const checkLocationPermission = async () => {
     try { 
       const { status } = await Location.getForegroundPermissionsAsync(); 
@@ -109,19 +130,16 @@ export default function MapScreen({ navigation, route }) {
         setHasPermission(true);
       } else {
         if (!canAskAgain) {
-           Alert.alert(
+           showAlert(
             'Location Access',
             'To detect your delivery address automatically, please enable location access in Settings.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Open Settings', onPress: () => Linking.openSettings() }
-            ]
+            'settings'
           );
         }
       }
     } catch (e) { 
       console.error('Request permission failed:', e); 
-      Alert.alert('Error', 'Could not request location permission.'); 
+      showAlert('Error', 'Could not request location permission.'); 
     }
   };
 
@@ -186,7 +204,7 @@ export default function MapScreen({ navigation, route }) {
       }
     } catch (err) { 
       console.error('Coordinate fetch error:', err); 
-      Alert.alert('Error', 'Could not fetch place coordinates.'); 
+      showAlert('Error', 'Could not fetch place coordinates.'); 
     } finally { 
       setFetching(false); 
       setSuggestions([]); 
@@ -218,7 +236,7 @@ export default function MapScreen({ navigation, route }) {
       setFetching(true);
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-          Alert.alert('Permission denied', 'Please Allow location access to use this feature.');
+          showAlert('Permission Denied', 'Please allow location access to use this feature.', 'validation');
           return;
       }
 
@@ -230,7 +248,7 @@ export default function MapScreen({ navigation, route }) {
       setSelectedPlace({ lat, lng, ...place });
     } catch (err) { 
       console.error('getCurrentLocation error:', err); 
-      Alert.alert('Error', 'Unable to fetch current location. Please select manually.'); 
+      showAlert('Error', 'Unable to fetch current location. Please select manually.'); 
     } finally { 
       setFetching(false); 
     }
@@ -238,10 +256,10 @@ export default function MapScreen({ navigation, route }) {
 
   // --- 2. HANDLE CONFIRM LOCATION ---
   const handleConfirmLocation = async () => {
-    if (!selectedPlace) return Alert.alert('Error', 'Please pick a location first.');
+    if (!selectedPlace) return showAlert('Error', 'Please pick a location first.');
     
     // Basic validation
-    if (!name || name.trim().length < 2) return Alert.alert('Validation', 'Please enter a name for this address.');
+    if (!name || name.trim().length < 2) return showAlert('Validation', 'Please enter a name for this address.', 'validation');
     
     // --- GUEST MODE LOGIC START ---
     if (isGuest) {
@@ -275,7 +293,7 @@ export default function MapScreen({ navigation, route }) {
             });
 
         } catch (e) {
-            Alert.alert("Error", "Could not save guest location");
+            showAlert("Error", "Could not save guest location");
             console.error(e);
         } finally {
             setSaving(false);
@@ -286,8 +304,8 @@ export default function MapScreen({ navigation, route }) {
 
 
     // --- EXISTING USER LOGIC (FIREBASE) ---
-    if (!phone || phone.trim().length < 6) return Alert.alert('Validation', 'Please enter a valid phone number.');
-    if (!auth.currentUser) return Alert.alert('Error', 'User not logged in.');
+    if (!phone || phone.trim().length < 6) return showAlert('Validation', 'Please enter a valid phone number.', 'validation');
+    if (!auth.currentUser) return showAlert('Error', 'User not logged in.');
 
     try {
       setSaving(true);
@@ -297,8 +315,6 @@ export default function MapScreen({ navigation, route }) {
       const existingData = snapshot.val() || {};
       
       const addressRef = ref(database, `users/${uid}/addresses`);
-      const addressSnap = await get(addressRef);
-      const hasExistingAddresses = addressSnap.exists();
 
       const addressObj = {
         lat: selectedPlace.lat || null,
@@ -331,7 +347,8 @@ export default function MapScreen({ navigation, route }) {
         userUpdates['expoPushToken'] = expoPushToken;
       }
 
-      const shouldSetAsMain = setAsMain || !hasExistingAddresses;
+      // UX IMPROVEMENT: Every newly added or edited address automatically becomes the Main Address
+      const shouldSetAsMain = true; 
 
       if (shouldSetAsMain && keyToSet) {
         userUpdates['mainAddressId'] = keyToSet;
@@ -375,15 +392,15 @@ export default function MapScreen({ navigation, route }) {
         await update(userRef, userUpdates);
       }
 
-      navigation.navigate('Addresses', { refresh: true });
+      navigation.navigate('HomeScreen', { refresh: true });
       await Notifications.scheduleNotificationAsync({
-        content: { title: 'Address saved', body: 'Your address was saved successfully.' },
+        content: { title: 'Address saved', body: 'Your address was saved successfully and set as active.' },
         trigger: null,
       });
 
     } catch (err) {
       console.error('Save address error:', err);
-      Alert.alert('Error', err.message || 'Failed to save address.');
+      showAlert('Error', err.message || 'Failed to save address.');
     } finally {
       setSaving(false);
     }
@@ -431,6 +448,27 @@ export default function MapScreen({ navigation, route }) {
           Enter address manually
         </Text>
       </TouchableOpacity>
+      
+      {/* Settings Modal (Rendered here in case user denies initially) */}
+      <Modal animationType="fade" transparent={true} visible={alertConfig.visible} onRequestClose={closeAlert}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.modalIconContainer, { backgroundColor: '#e3f2fd' }]}>
+              <Ionicons name="settings-outline" size={36} color="#0288d1" />
+            </View>
+            <Text style={styles.modalTitle}>{alertConfig.title}</Text>
+            <Text style={styles.modalMessage}>{alertConfig.message}</Text>
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={closeAlert}>
+                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalActionBtn} onPress={handleOpenSettings}>
+                <Text style={styles.modalActionBtnText}>Open Settings</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 
@@ -536,21 +574,45 @@ export default function MapScreen({ navigation, route }) {
               </View>
             </View>
             
-            {!isGuest && (
-                <View style={styles.checkboxContainer}>
-                <TouchableOpacity onPress={() => setSetAsMain(v => !v)} style={styles.checkbox}>
-                    <View style={[styles.checkboxInner, setAsMain && styles.checkboxInnerChecked]} />
-                </TouchableOpacity>
-                <Text style={styles.checkboxText}>Set as main address</Text>
-                </View>
-            )}
-
             <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmLocation} disabled={saving}>
-              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmButtonText}>{mode === 'edit' ? 'Save Address' : 'Add Address'}</Text>}
+              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmButtonText}>{mode === 'edit' ? 'Save & Use Address' : 'Add & Use Address'}</Text>}
             </TouchableOpacity>
           </ScrollView>
         </View>
       )}
+
+      {/* GLOBAL MODAL FOR ERRORS & VALIDATIONS */}
+      <Modal animationType="fade" transparent={true} visible={alertConfig.visible} onRequestClose={closeAlert}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.modalIconContainer, { backgroundColor: alertConfig.type === 'validation' ? '#fff3e0' : alertConfig.type === 'settings' ? '#e3f2fd' : '#ffebee' }]}>
+              <Ionicons 
+                name={alertConfig.type === 'validation' ? 'alert-circle-outline' : alertConfig.type === 'settings' ? 'settings-outline' : 'warning-outline'} 
+                size={36} 
+                color={alertConfig.type === 'validation' ? '#ff9800' : alertConfig.type === 'settings' ? '#0288d1' : '#e53935'} 
+              />
+            </View>
+            <Text style={styles.modalTitle}>{alertConfig.title}</Text>
+            <Text style={styles.modalMessage}>{alertConfig.message}</Text>
+            
+            {alertConfig.type === 'settings' ? (
+              <View style={styles.modalBtnRow}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={closeAlert}>
+                  <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalActionBtn} onPress={handleOpenSettings}>
+                  <Text style={styles.modalActionBtnText}>Open Settings</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.modalPrimaryBtn} onPress={closeAlert}>
+                <Text style={styles.modalPrimaryBtnText}>Okay</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -618,11 +680,20 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: '#888', marginBottom: 6, fontFamily: "Sen_Regular" },
   value: { fontSize: Platform.OS === 'ios' ? 12 : 16, color: '#000', fontFamily: "Sen_Medium" },
   underline: { height: 1, backgroundColor: '#E0E0E0', marginTop: 6 },
-  checkboxContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 8 },
-  checkbox: { width: 22, height: 22, borderRadius: 4, borderWidth: 1, borderColor: '#ccc', alignItems: 'center', justifyContent: 'center' },
-  checkboxInner: { width: 12, height: 12 },
-  checkboxInnerChecked: { backgroundColor: '#28A745' },
-  checkboxText: { marginLeft: 8, fontSize: 14, color: '#333', fontFamily: "Sen_Regular" },
   confirmButton: { backgroundColor: '#28A745', paddingVertical: 14, borderRadius: 10, alignItems: 'center', marginTop: 12, marginBottom: Platform.OS === 'ios' ? 20 : 10 },
   confirmButtonText: { color: '#fff', fontSize: 15, fontFamily: "Sen_Bold" },
+
+  // --- MODAL STYLES ---
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },
+  modalIconContainer: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontFamily: 'Sen_Bold', fontSize: 18, color: '#111', marginBottom: 10, textAlign: 'center' },
+  modalMessage: { fontFamily: 'Sen_Regular', fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+  modalPrimaryBtn: { backgroundColor: '#009688', width: '100%', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  modalPrimaryBtnText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 15 },
+  modalBtnRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 12 },
+  modalCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#f0f0f0' },
+  modalCancelBtnText: { fontFamily: 'Sen_Medium', color: '#444', fontSize: 15 },
+  modalActionBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#0288d1' },
+  modalActionBtnText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 15 },
 });

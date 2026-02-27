@@ -1,9 +1,9 @@
-import React from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Pressable, StatusBar } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Pressable, StatusBar, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db as database } from '../firebase';
-import { ref, remove, update, get } from 'firebase/database';
+import { ref, update, get } from 'firebase/database';
 
 // --- IMPORT USER CONTEXT ---
 import { useUser } from '../context/UserContext';
@@ -24,38 +24,97 @@ const haversineDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 export default function AddressesScreen({ navigation }) {
-  // 1. USE CONTEXT instead of local state/useEffect
   const { userData, loading } = useUser();
 
-  // 2. DERIVE STATE from Context Data
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [warningModalVisible, setWarningModalVisible] = useState(false);
+  const [addressToDelete, setAddressToDelete] = useState(null);
+
   const addresses = userData?.addresses || {};
   const mainAddressId = userData?.mainAddressId || null;
 
   const onAdd = () => navigation.navigate('MapScreen', { mode: 'add' });
   const onEdit = (id, item) => navigation.navigate('MapScreen', { mode: 'edit', addressId: id, initial: { ...item } });
 
+  // 1. TRIGGER DELETE FLOW
   const onDelete = (id) => {
-    Alert.alert('Delete address', 'Are you sure you want to delete this address?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive', onPress: async () => {
-          try {
-            const uid = auth.currentUser?.uid;
-            if (!uid) return;
+    setAddressToDelete(id);
+    const entries = Object.entries(addresses);
+    
+    // Prevent deleting the very last address with a polite warning modal
+    if (entries.length <= 1) {
+      setWarningModalVisible(true);
+    } else {
+      setDeleteModalVisible(true);
+    }
+  };
+
+  // 2. CONFIRM DELETE LOGIC
+  const confirmDelete = async () => {
+    setDeleteModalVisible(false);
+    if (!addressToDelete) return;
+
+    try {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+
+      const id = addressToDelete;
+      const currentEntries = Object.entries(addresses);
+      const updates = {};
+      
+      // Nullify to remove the address
+      updates[`users/${uid}/addresses/${id}`] = null; 
+
+      // If the user deletes their main address, automatically set the next one
+      if (mainAddressId === id) {
+        const nextAddressEntry = currentEntries.find(e => e[0] !== id);
+        
+        if (nextAddressEntry) {
+          const nextId = nextAddressEntry[0];
+          const nextAddress = nextAddressEntry[1];
+          
+          updates[`users/${uid}/mainAddressId`] = nextId;
+
+          // Recalculate nearest branch support contact for the new main address
+          if (nextAddress.lat && nextAddress.lng) {
+            const branchesSnap = await get(ref(database, 'branches'));
+            const branches = branchesSnap.val();
             
-            await remove(ref(database, `users/${uid}/addresses/${id}`));
-            
-            // If deleting the main address, remove the reference from user profile
-            if (mainAddressId === id) {
-               await update(ref(database, `users/${uid}`), { mainAddressId: null });
+            if (branches) {
+              let minDist = Infinity;
+              let nearestContact = null;
+              
+              Object.values(branches).forEach(branch => {
+                if (branch.lat && branch.lng && branch.contactNumber) {
+                  const dist = haversineDistance(
+                    parseFloat(nextAddress.lat), 
+                    parseFloat(nextAddress.lng), 
+                    parseFloat(branch.lat), 
+                    parseFloat(branch.lng)
+                  );
+                  if (dist < minDist) {
+                    minDist = dist;
+                    nearestContact = branch.contactNumber;
+                  }
+                }
+              });
+              
+              if (nearestContact) {
+                updates[`users/${uid}/supportcontact`] = nearestContact;
+              }
             }
-          } catch (e) { 
-            console.error('Delete address error:', e); 
-            Alert.alert('Error', 'Could not delete address.'); 
           }
         }
       }
-    ]);
+
+      // Execute all updates to Firebase simultaneously
+      await update(ref(database), updates);
+
+    } catch (e) {
+      console.error('Delete address error:', e);
+    } finally {
+      setAddressToDelete(null);
+    }
   };
 
   const onSetMain = async (id) => {
@@ -69,7 +128,6 @@ export default function AddressesScreen({ navigation }) {
       const updates = {};
       updates[`users/${uid}/mainAddressId`] = id;
 
-      // Logic to find nearest branch support contact based on new main address
       if (selectedAddress.lat && selectedAddress.lng) {
         const branchesSnap = await get(ref(database, 'branches'));
         const branches = branchesSnap.val();
@@ -104,17 +162,14 @@ export default function AddressesScreen({ navigation }) {
     }
   };
 
-  // --- PROCEED HOME LOGIC ---
   const onProceedHome = async () => {
     const entries = Object.entries(addresses);
     
-    // 1. Check if at least one address exists
     if (entries.length === 0) {
       Alert.alert('No Address Found', 'Please add at least one address to continue.');
       return;
     }
 
-    // 2. If no main address is selected, pick the first one automatically
     if (!mainAddressId) {
       const firstAddressId = entries[0][0];
       await onSetMain(firstAddressId);
@@ -181,7 +236,6 @@ export default function AddressesScreen({ navigation }) {
           <Text style={styles.headerTitle}>My Addresses</Text>
         </View>
         
-        {/* Updated Proceed Button with Conditional Styling */}
         <TouchableOpacity 
           onPress={onProceedHome} 
           style={[styles.headerAdd, !hasAddresses && styles.disabledBtn]}
@@ -214,6 +268,58 @@ export default function AddressesScreen({ navigation }) {
       <TouchableOpacity onPress={onAdd} style={styles.fab} activeOpacity={0.9}>
         <Ionicons name="add" size={26} color="#fff" />
       </TouchableOpacity>
+
+      {/* --- WARNING MODAL: Cannot delete only address --- */}
+      <Modal 
+        animationType="fade" 
+        transparent={true} 
+        visible={warningModalVisible} 
+        onRequestClose={() => setWarningModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.modalIconContainer, { backgroundColor: '#e0f7fa' }]}>
+              <Ionicons name="information-circle-outline" size={36} color="#009688" />
+            </View>
+            <Text style={styles.modalTitle}>Keep one address</Text>
+            <Text style={styles.modalMessage}>
+              To ensure a seamless delivery experience, please add a new address before removing your only saved location.
+            </Text>
+            <TouchableOpacity style={styles.modalPrimaryBtn} onPress={() => setWarningModalVisible(false)}>
+              <Text style={styles.modalPrimaryBtnText}>Okay, got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* --- DELETE CONFIRMATION MODAL --- */}
+      <Modal 
+        animationType="fade" 
+        transparent={true} 
+        visible={deleteModalVisible} 
+        onRequestClose={() => setDeleteModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.modalIconContainer, { backgroundColor: '#ffebee' }]}>
+              <Ionicons name="trash-outline" size={36} color="#e53935" />
+            </View>
+            <Text style={styles.modalTitle}>Remove Address</Text>
+            <Text style={styles.modalMessage}>
+              Are you sure you want to remove this address from your saved locations?
+            </Text>
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setDeleteModalVisible(false)}>
+                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalDeleteBtn} onPress={confirmDelete}>
+                <Text style={styles.modalDeleteBtnText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -227,7 +333,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: Platform.OS === 'ios' ? 12 : 16, fontFamily: 'Sen_Bold', color: '#222' },
   headerAdd: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#009688', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
   headerAddText: { color: '#fff', fontFamily: 'Sen_Bold', marginLeft: 6, fontSize: Platform.OS === 'ios' ? 10 : 12 },
-  disabledBtn: { backgroundColor: '#cccccc', opacity: 0.8 }, // Style for disabled state
+  disabledBtn: { backgroundColor: '#cccccc', opacity: 0.8 }, 
   listContent: { padding: 14, paddingBottom: 120 },
   card: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, padding: 14, elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, alignItems: 'flex-start' },
   cardLeft: { width: 44, alignItems: 'center', justifyContent: 'center' },
@@ -251,4 +357,18 @@ const styles = StyleSheet.create({
   addPrimary: { backgroundColor: '#009688', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 },
   addPrimaryText: { color: '#fff', fontFamily: 'Sen_Bold', fontSize: 15 },
   fab: { position: 'absolute', right: 20, bottom: 28, backgroundColor: '#009688', width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.12, shadowOffset: { width: 0, height: 4 }, shadowRadius: 8 },
+  
+  // --- MODAL STYLES ---
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },
+  modalIconContainer: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontFamily: 'Sen_Bold', fontSize: 18, color: '#111', marginBottom: 10, textAlign: 'center' },
+  modalMessage: { fontFamily: 'Sen_Regular', fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+  modalPrimaryBtn: { backgroundColor: '#009688', width: '100%', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  modalPrimaryBtnText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 15 },
+  modalBtnRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 12 },
+  modalCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#f0f0f0' },
+  modalCancelBtnText: { fontFamily: 'Sen_Medium', color: '#444', fontSize: 15 },
+  modalDeleteBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#e53935' },
+  modalDeleteBtnText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 15 },
 });

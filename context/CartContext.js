@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useEffect, useState, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from "react";
 import { Alert } from "react-native";
-import { ref, onValue, set, remove, get } from "firebase/database";
-import { auth, db } from "../firebase"; // Adjust path to your firebase config
+import { ref, set, remove, get } from "firebase/database";
+import { auth, db } from "../firebase";
 import Toast from "react-native-root-toast";
 
 const CartContext = createContext();
@@ -13,8 +13,12 @@ export const CartProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   
   const user = auth.currentUser;
+  
+  // Trackers for debounce and initial load
+  const isInitialLoad = useRef(true);
+  const syncTimeoutRef = useRef(null);
 
-  // 1. Sync Cart with Firebase
+  // 1. Fetch Cart ONCE when context mounts (Replaces onValue)
   useEffect(() => {
     if (!user) {
       setCartData({});
@@ -22,29 +26,61 @@ export const CartProvider = ({ children }) => {
       return;
     }
 
-    const cartRef = ref(db, `carts/${user.uid}`);
-    const unsubscribe = onValue(cartRef, (snapshot) => {
-      setCartData(snapshot.val() || {});
-      setLoading(false);
-    });
+    const fetchCart = async () => {
+      try {
+        const cartRef = ref(db, `carts/${user.uid}`);
+        const snapshot = await get(cartRef);
+        setCartData(snapshot.val() || {});
+      } catch (error) {
+        console.error("Failed to fetch cart:", error);
+      } finally {
+        setLoading(false);
+        // Add a slight delay to ensure state updates before enabling sync
+        setTimeout(() => { isInitialLoad.current = false; }, 500);
+      }
+    };
 
-    return () => unsubscribe();
+    fetchCart();
   }, [user]);
+
+  // 2. Debounced Background Sync to Firebase
+  useEffect(() => {
+    // Prevent wiping the DB before initial data is loaded
+    if (loading || isInitialLoad.current || !user) return;
+
+    // Clear previous timeout if user taps again quickly
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+    }
+
+    // Wait 1.5 seconds after the last cart change to write to Firebase
+    syncTimeoutRef.current = setTimeout(async () => {
+      try {
+        const cartRef = ref(db, `carts/${user.uid}`);
+        if (Object.keys(cartData).length === 0) {
+          await remove(cartRef);
+        } else {
+          await set(cartRef, cartData);
+        }
+      } catch (error) {
+        console.error("Firebase Cart Sync Error:", error);
+      }
+    }, 1500);
+
+    return () => clearTimeout(syncTimeoutRef.current);
+  }, [cartData, user, loading]);
 
   // --- DERIVED STATE ---
   
-  // Get the active Shop ID (since we only allow one shop at a time)
   const cartShopId = useMemo(() => {
     const keys = Object.keys(cartData).filter(k => k !== "updatedAt");
     return keys.length > 0 ? keys[0] : null;
   }, [cartData]);
 
-  // Get the active Shop Details (name, image)
   const cartShop = useMemo(() => {
     return cartShopId ? cartData[cartShopId] : null;
   }, [cartShopId, cartData]);
 
-  // Get Array of Products
   const cartItems = useMemo(() => {
     if (!cartShop) return [];
     return Object.keys(cartShop)
@@ -52,7 +88,6 @@ export const CartProvider = ({ children }) => {
       .map(key => ({ id: key, ...cartShop[key] }));
   }, [cartShop]);
 
-  // Calculate Totals
   const cartTotal = useMemo(() => {
     return cartItems.reduce((total, item) => total + (item.price * item.qty), 0);
   }, [cartItems]);
@@ -62,7 +97,7 @@ export const CartProvider = ({ children }) => {
   }, [cartItems]);
 
 
-  // --- ACTIONS ---
+  // --- LOCAL ACTIONS (No direct Firebase calls) ---
 
   const addToCart = async (shop, product, quantity = 1) => {
     if (!user) {
@@ -75,8 +110,7 @@ export const CartProvider = ({ children }) => {
       return;
     }
 
-    const userCartRef = ref(db, `carts/${user.uid}`);
-    const currentShopId = shop.id || shopId; // Ensure you pass shop.id
+    const currentShopId = shop.id || shopId;
 
     // Check for Shop Conflict
     if (cartShopId && cartShopId !== currentShopId) {
@@ -87,9 +121,9 @@ export const CartProvider = ({ children }) => {
           { text: "Cancel", style: "cancel" },
           { 
             text: "Yes, Start New", 
-            onPress: async () => {
-              // Overwrite entire cart node with new shop
-              await set(userCartRef, {
+            onPress: () => {
+              // Replace entire local cart
+              setCartData({
                 [currentShopId]: {
                   shopname: shop.name,
                   shopimage: shop.image,
@@ -111,15 +145,16 @@ export const CartProvider = ({ children }) => {
       return;
     }
 
-    // Add/Update Item in current shop
-    try {
-      const existingItem = cartShop ? cartShop[product.id] : null;
+    // Add/Update Item in current shop locally
+    setCartData(prev => {
+      const existingShop = prev[currentShopId] || {};
+      const existingItem = existingShop[product.id];
       const newQty = existingItem ? existingItem.qty + quantity : quantity;
 
-      const updatePayload = {
-        ...cartData,
+      return {
+        ...prev,
         [currentShopId]: {
-          ...cartShop, // Preserve other items
+          ...existingShop,
           shopname: shop.name,
           shopimage: shop.image,
           [product.id]: {
@@ -132,63 +167,89 @@ export const CartProvider = ({ children }) => {
         },
         updatedAt: Date.now()
       };
-
-      await set(userCartRef, updatePayload);
-      Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT });
-    } catch (error) {
-      console.error(error);
-      Toast.show("Failed to update cart.", { duration: Toast.durations.SHORT });
-    }
+    });
+    Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT });
   };
 
-  const decreaseQty = async (shopId, product) => {
+  const decreaseQty = (shopId, product) => {
     if (!user) return;
-    
-    const currentShopCart = cartData[shopId];
-    if (!currentShopCart || !currentShopCart[product.id]) return;
 
-    const currentQty = currentShopCart[product.id].qty;
+    setCartData(prev => {
+      const shopCart = prev[shopId];
+      if (!shopCart || !shopCart[product.id]) return prev;
 
-    if (currentQty <= 1) {
-      // Remove item if qty becomes 0
-      await removeFromCart(shopId, product.id);
-    } else {
-      // Decrease Qty
-      const itemRef = ref(db, `carts/${user.uid}/${shopId}/${product.id}/qty`);
-      await set(itemRef, currentQty - 1);
-    }
+      const currentQty = shopCart[product.id].qty;
+
+      if (currentQty <= 1) {
+        // Handle local removal
+        const newShopCart = { ...shopCart };
+        delete newShopCart[product.id];
+
+        // If no products left, remove the shop node
+        const remainingKeys = Object.keys(newShopCart).filter(k => !["shopname", "shopimage", "shopphone"].includes(k));
+        if (remainingKeys.length === 0) {
+          const newData = { ...prev };
+          delete newData[shopId];
+          return newData;
+        }
+
+        return { ...prev, [shopId]: newShopCart, updatedAt: Date.now() };
+      }
+
+      // Handle normal decrease
+      return {
+        ...prev,
+        [shopId]: {
+          ...shopCart,
+          [product.id]: {
+            ...shopCart[product.id],
+            qty: currentQty - 1
+          }
+        },
+        updatedAt: Date.now()
+      };
+    });
   };
 
-  const removeFromCart = async (shopId, productId) => {
+  const removeFromCart = (shopId, productId) => {
     if (!user) return;
-    try {
-      await remove(ref(db, `carts/${user.uid}/${shopId}/${productId}`));
-      
-      // Optional: If shop becomes empty, remove the shop node?
-      // Firebase often leaves empty nodes, but our logic handles empty objects.
+
+    setCartData(prev => {
+      const shopCart = prev[shopId];
+      if (!shopCart) return prev;
+
+      const newShopCart = { ...shopCart };
+      delete newShopCart[productId];
+
+      // If no products left, remove the shop node
+      const remainingKeys = Object.keys(newShopCart).filter(k => !["shopname", "shopimage", "shopphone"].includes(k));
+      if (remainingKeys.length === 0) {
+        const newData = { ...prev };
+        delete newData[shopId];
+        Toast.show("Item removed.", { duration: Toast.durations.SHORT });
+        return newData;
+      }
+
       Toast.show("Item removed.", { duration: Toast.durations.SHORT });
-    } catch (error) {
-      console.error(error);
-      Toast.show("Failed to remove item.", { duration: Toast.durations.SHORT });
-    }
+      return { ...prev, [shopId]: newShopCart, updatedAt: Date.now() };
+    });
   };
 
-  // ✅ UPDATED: Silent cart clear – NO confirmation alert
+  // Explicitly push clear request immediately for safety
   const clearCart = async () => {
     if (!user) return;
     try {
+      setCartData({});
       await remove(ref(db, `carts/${user.uid}`));
       Toast.show("Cart cleared.", { duration: Toast.durations.SHORT });
     } catch (err) {
       console.error("Clear cart error:", err);
-      Toast.show("Failed to clear cart.", { duration: Toast.durations.SHORT });
     }
   };
 
   return (
     <CartContext.Provider
       value={{
-        // State
         cartData,
         cartShopId,
         cartShop,
@@ -196,8 +257,6 @@ export const CartProvider = ({ children }) => {
         cartTotal,
         cartItemCount,
         loading,
-        
-        // Actions
         addToCart,
         decreaseQty,
         removeFromCart,

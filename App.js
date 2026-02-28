@@ -8,7 +8,6 @@ import { RootSiblingParent } from 'react-native-root-siblings';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
-// --- ADDED IMPORT ---
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // --- CONTEXT PROVIDERS  ---
@@ -16,9 +15,7 @@ import { CartProvider } from './context/CartContext';
 import { AdminProvider } from './context/AdminContext';
 import { UserProvider } from './context/UserContext';
 import { CouponProvider } from './context/CouponContext';
-import { OrderProvider } from './context/OrderContext';
-
-// import zustand stores
+// Note: OrderProvider removed. TrackOrder now uses Zustand `orderStore`.
 
 // Screens
 import Login from './screens/login';
@@ -38,11 +35,11 @@ import TermsAndConditionsScreen from './screens/Terms';
 import ContactUs from './screens/contact';
 import Settings from './screens/settings';
 
-
-// Firebase
+// --- FIREBASE IMPORTS ---
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebase';
-import { ref, update } from 'firebase/database';
+// NEW: Firestore imports replace RTDB
+import { doc, updateDoc } from 'firebase/firestore'; 
 
 SplashScreen.preventAutoHideAsync();
 
@@ -112,8 +109,12 @@ export default function App() {
 
       const expoToken = tokenData.data;
 
+      // --- FIRESTORE UPDATE ---
       if (userId && expoToken) {
-        await update(ref(db, `users/${userId}`), { expoPushToken: expoToken });
+        // Save the token securely to the user's Firestore document
+        await updateDoc(doc(db, "users", userId), { 
+          expoPushToken: expoToken 
+        });
       }
 
       return expoToken;
@@ -185,7 +186,6 @@ export default function App() {
             <AdminProvider>
               <UserProvider>
                 <CouponProvider>
-                  <OrderProvider>
                     <NavigationContainer ref={navigationRef}>
                       <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
                         <Stack.Screen name="Login" component={Login} />
@@ -206,7 +206,6 @@ export default function App() {
                         <Stack.Screen name="Settings" component={Settings} />
                       </Stack.Navigator>
                     </NavigationContainer>
-                  </OrderProvider>
                 </CouponProvider>
               </UserProvider>
             </AdminProvider>

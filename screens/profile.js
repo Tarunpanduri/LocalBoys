@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -16,9 +16,10 @@ import { Ionicons, MaterialIcons, FontAwesome5 } from "@expo/vector-icons";
 import { getAuth, signOut } from "firebase/auth";
 import { useFonts } from "expo-font";
 import { Sen_400Regular, Sen_500Medium, Sen_700Bold, Sen_800ExtraBold } from "@expo-google-fonts/sen";
-import { fetchUserData } from "../utils/profile_util";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect } from "@react-navigation/native";
+
+// 🔥 IMPORT OUR FIRESTORE-POWERED USER CONTEXT 🔥
+import { useUser } from "../context/UserContext";
 
 const { width, height } = Dimensions.get('window');
 
@@ -112,8 +113,10 @@ const ProfileSkeleton = () => {
 export default function Profile({ navigation, route }) {
   const { greetingName = "User" } = route.params || {};
   const auth = getAuth();
-  const [userData, setUserData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  
+  // 🔥 GRAB FIRESTORE DATA DIRECTLY FROM CONTEXT 🔥
+  // This automatically syncs in real-time and uses offline cache!
+  const { userData, loading } = useUser();
 
   const MY_PROFILE_URL = "https://tarunpanduri.github.io/Portfolio/";
 
@@ -126,23 +129,6 @@ export default function Profile({ navigation, route }) {
     ...FontAwesome5.font,
     ...MaterialIcons.font,
   });
-
-  useFocusEffect(
-    useCallback(() => {
-      loadUser();
-    }, [])
-  );
-
-  const loadUser = async () => {
-    try {
-      const data = await fetchUserData();
-      setUserData(data);
-    } catch (e) {
-      Alert.alert("Error", "Failed to load user data");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleLogout = async () => {
     try {
@@ -205,7 +191,7 @@ export default function Profile({ navigation, route }) {
           </Text>
         </View>
 
-        {/* Menu Items Container (Wraps items naturally) */}
+        {/* Menu Items Container */}
         <View style={styles.menuContainer}>
           {menuItems.map((item, index) => (
             <TouchableOpacity 
@@ -233,7 +219,7 @@ export default function Profile({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
-        {/* Footer (Pushed automatically to bottom) */}
+        {/* Footer */}
         <TouchableOpacity style={styles.footerContainer} onPress={handleCraftedByPress} activeOpacity={0.7}>
           <Text style={[styles.footerText, { fontFamily: "Sen_Medium" }]}>
             Rooted with <Text style={styles.heart}>❤️</Text> in India by
@@ -248,23 +234,19 @@ export default function Profile({ navigation, route }) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#F9FAFB" },
-  // Changed from scrollContainer to mainContainer with flex: 1
   mainContainer: { flex: 1, paddingHorizontal: 20, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 20 : 30 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   headerTitle: { fontSize: 18, color: "#000" },
-  // Adjusted margins to space things evenly based on screen height
   profileSection: { alignItems: "center", marginTop: height * 0.02, marginBottom: height * 0.03 },
   logo: { width: 80, height: 80, marginBottom: 10, marginTop: Platform.OS === 'ios' ? 0 : 10 },
   username: { fontSize: Platform.OS === 'ios' ? 18 : 20, marginTop: 10, color: "#1A1A1A" },
   userInfo: { color: "#666", marginTop: 2, fontSize: Platform.OS === 'ios' ? 12 : 14 },
   menuContainer: { backgroundColor: "#fff", borderRadius: 20, paddingVertical: 10, borderWidth: 1, borderColor: "#E5E7EB" },
-  // Reduced padding slightly so it doesn't overflow small screens
   menuItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: height * 0.015, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: "#F0F0F0" },
   logoutItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: height * 0.015, paddingHorizontal: 15 },
   menuLeft: { flexDirection: "row", alignItems: "center" },
   iconBox: { backgroundColor: "#F3F4F6", borderRadius: 10, padding: 8, marginRight: 15 },
   menuTitle: { fontSize: Platform.OS === 'ios' ? 14 : 16, color: "#1A1A1A" },
-  // marginTop: "auto" is the magic property that sticks this to the bottom
   footerContainer: { marginTop: "auto", alignItems: "center", justifyContent: "center", padding: Platform.OS === 'ios' ? 0 : 10, opacity: 0.8 },
   footerText: { fontSize: Platform.OS === 'ios' ? 10 : 12, color: "#888", marginBottom: 2 },
   footerSubText: { fontSize: Platform.OS === 'ios' ? 11 : 13, color: "#04a60a", textDecorationLine: 'underline' },

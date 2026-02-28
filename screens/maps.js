@@ -4,12 +4,12 @@ import MapView from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import { auth, db as database } from '../firebase';
-import { ref, update, get, push, set } from 'firebase/database';
-// --- ICONS IMPORT ---
+import { auth, db } from '../firebase';
+// --- FIRESTORE IMPORTS ---
+import { doc, getDoc, updateDoc, collection, getDocs, GeoPoint } from 'firebase/firestore';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons'; 
 
-// --- NEW IMPORTS FOR GUEST MODE ---
+// --- IMPORTS FOR GUEST MODE ---
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUser } from '../context/UserContext';
 
@@ -69,7 +69,6 @@ export default function MapScreen({ navigation, route }) {
 
   useEffect(() => {
     checkLocationPermission();
-    // Only register push notifications if NOT a guest
     if (!isGuest) {
         registerForPushNotificationsAsync();
     }
@@ -98,7 +97,6 @@ export default function MapScreen({ navigation, route }) {
     };
   }, []);
 
-  // --- ALERT HELPERS ---
   const showAlert = (title, message, type = 'error') => {
     setAlertConfig({ visible: true, title, message, type });
   };
@@ -254,14 +252,12 @@ export default function MapScreen({ navigation, route }) {
     }
   };
 
-  // --- 2. HANDLE CONFIRM LOCATION ---
+  // --- 2. HANDLE CONFIRM LOCATION (FIRESTORE) ---
   const handleConfirmLocation = async () => {
     if (!selectedPlace) return showAlert('Error', 'Please pick a location first.');
-    
-    // Basic validation
     if (!name || name.trim().length < 2) return showAlert('Validation', 'Please enter a name for this address.', 'validation');
     
-    // --- GUEST MODE LOGIC START ---
+    // --- GUEST LOGIC ---
     if (isGuest) {
         try {
             setSaving(true);
@@ -279,14 +275,10 @@ export default function MapScreen({ navigation, route }) {
                 isGuest: true
             };
 
-            // 1. Save to Local Storage (sandboxed)
             await AsyncStorage.setItem('guestAddress', JSON.stringify(guestAddressObj));
-
-            // 2. Update Context manually so HomeScreen sees it instantly
             if(setMainAddress) setMainAddress(guestAddressObj);
             if(setUserLocation) setUserLocation(guestAddressObj);
 
-            // 3. Reset Navigation to Home
             navigation.reset({
                 index: 0,
                 routes: [{ name: 'HomeScreen' }],
@@ -298,27 +290,26 @@ export default function MapScreen({ navigation, route }) {
         } finally {
             setSaving(false);
         }
-        return; // STOP HERE FOR GUESTS
+        return; 
     }
-    // --- GUEST MODE LOGIC END ---
 
-
-    // --- EXISTING USER LOGIC (FIREBASE) ---
+    // --- FIRESTORE USER LOGIC ---
     if (!phone || phone.trim().length < 6) return showAlert('Validation', 'Please enter a valid phone number.', 'validation');
     if (!auth.currentUser) return showAlert('Error', 'User not logged in.');
 
     try {
       setSaving(true);
       const uid = auth.currentUser.uid;
-      const userRef = ref(database, `users/${uid}`);
-      const snapshot = await get(userRef);
-      const existingData = snapshot.val() || {};
+      const userRef = doc(db, "users", uid);
+      const userSnap = await getDoc(userRef);
+      const existingData = userSnap.data() || {};
       
-      const addressRef = ref(database, `users/${uid}/addresses`);
+      // We generate a custom ID for the address map or use the existing editing ID
+      let keyToSet = editingId || doc(collection(db, 'dummy')).id;
 
+      // Ensure location is converted to a native Firestore GeoPoint
       const addressObj = {
-        lat: selectedPlace.lat || null,
-        lng: selectedPlace.lng || null,
+        location: new GeoPoint(selectedPlace.lat, selectedPlace.lng),
         area: selectedPlace.area || '',
         city: selectedPlace.city || '',
         state: selectedPlace.state || '',
@@ -329,17 +320,10 @@ export default function MapScreen({ navigation, route }) {
         updatedAt: new Date().toISOString(),
       };
 
-      let keyToSet = editingId;
-
-      if (mode === 'edit' && editingId) {
-        await update(ref(database, `users/${uid}/addresses/${editingId}`), addressObj);
-      } else {
-        const newRef = push(addressRef);
-        await set(newRef, addressObj);
-        keyToSet = newRef.key;
-      }
-
       const userUpdates = {};
+      
+      // Update specific map node dynamically
+      userUpdates[`addresses.${keyToSet}`] = addressObj;
 
       if (!existingData.expoPushToken && expoPushToken) {
         userUpdates['expoPushToken'] = expoPushToken;
@@ -347,7 +331,6 @@ export default function MapScreen({ navigation, route }) {
         userUpdates['expoPushToken'] = expoPushToken;
       }
 
-      // UX IMPROVEMENT: Every newly added or edited address automatically becomes the Main Address
       const shouldSetAsMain = true; 
 
       if (shouldSetAsMain && keyToSet) {
@@ -355,20 +338,20 @@ export default function MapScreen({ navigation, route }) {
 
         if (selectedPlace.lat && selectedPlace.lng) {
           try {
-            const branchesSnap = await get(ref(database, 'branches'));
-            const branches = branchesSnap.val();
+            const branchesSnap = await getDocs(collection(db, 'branches'));
 
-            if (branches) {
+            if (!branchesSnap.empty) {
               let minDist = Infinity;
               let nearestContact = null;
 
-              Object.values(branches).forEach(branch => {
-                if (branch.lat && branch.lng && branch.contactNumber) {
+              branchesSnap.forEach(docSnap => {
+                const branch = docSnap.data();
+                if (branch.location && branch.contactNumber) {
                   const dist = haversineDistance(
                     parseFloat(selectedPlace.lat), 
                     parseFloat(selectedPlace.lng), 
-                    parseFloat(branch.lat), 
-                    parseFloat(branch.lng)
+                    branch.location.latitude, 
+                    branch.location.longitude
                   );
 
                   if (dist < minDist) {
@@ -389,7 +372,7 @@ export default function MapScreen({ navigation, route }) {
       }
 
       if (Object.keys(userUpdates).length > 0) {
-        await update(userRef, userUpdates);
+        await updateDoc(userRef, userUpdates);
       }
 
       navigation.navigate('HomeScreen', { refresh: true });
@@ -440,16 +423,12 @@ export default function MapScreen({ navigation, route }) {
       <TouchableOpacity style={styles.permissionButton} onPress={requestLocationPermission}>
         <Text style={styles.permissionButtonText}>Continue</Text>
       </TouchableOpacity>
-      <TouchableOpacity 
-        style={{ marginTop: 20, padding: 10 }} 
-        onPress={() => setHasPermission(true)}
-      >
+      <TouchableOpacity style={{ marginTop: 20, padding: 10 }} onPress={() => setHasPermission(true)}>
         <Text style={{ fontFamily: "Sen_Regular", color: '#666', textDecorationLine: 'underline' }}>
           Enter address manually
         </Text>
       </TouchableOpacity>
       
-      {/* Settings Modal (Rendered here in case user denies initially) */}
       <Modal animationType="fade" transparent={true} visible={alertConfig.visible} onRequestClose={closeAlert}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -486,12 +465,10 @@ export default function MapScreen({ navigation, route }) {
         onRegionChangeComplete={onRegionChangeComplete} 
       />
       
-      {/* --- UPDATED CENTER PIN MARKER --- */}
       <View pointerEvents="none" style={styles.centerMarkerContainer}>
         <MaterialIcons name="location-pin" size={40} color="#e53935" style={{ marginBottom: -12, zIndex: 2 }} />
         <View style={styles.markerShadow} />
       </View>
-      {/* --------------------------------- */}
 
       <View style={styles.searchContainer}>
         <TextInput 
@@ -581,7 +558,6 @@ export default function MapScreen({ navigation, route }) {
         </View>
       )}
 
-      {/* GLOBAL MODAL FOR ERRORS & VALIDATIONS */}
       <Modal animationType="fade" transparent={true} visible={alertConfig.visible} onRequestClose={closeAlert}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -648,13 +624,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
   },
 
-  // --- UPDATED MARKER STYLES ---
   centerMarkerContainer: { 
     position: 'absolute', 
     top: '50%', 
     left: '50%', 
-    marginLeft: -24, // Half of icon width (48)
-    marginTop: -48, // Full icon height so point lands exactly center
+    marginLeft: -24, 
+    marginTop: -48, 
     alignItems: 'center', 
     justifyContent: 'flex-end', 
     zIndex: 1000, 
@@ -670,7 +645,6 @@ const styles = StyleSheet.create({
     transform: [{ scaleX: 2 }], 
     zIndex: 1
   },
-  // -----------------------------
 
   detailsContainer: { position: 'absolute', left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, elevation: 6, maxHeight: SCREEN_H * 0.5,zIndex: 1000},
   scrollView: { padding: 18 },
@@ -683,7 +657,6 @@ const styles = StyleSheet.create({
   confirmButton: { backgroundColor: '#28A745', paddingVertical: 14, borderRadius: 10, alignItems: 'center', marginTop: 12, marginBottom: Platform.OS === 'ios' ? 20 : 10 },
   confirmButtonText: { color: '#fff', fontSize: 15, fontFamily: "Sen_Bold" },
 
-  // --- MODAL STYLES ---
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },
   modalIconContainer: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },

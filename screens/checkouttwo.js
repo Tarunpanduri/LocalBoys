@@ -2,8 +2,9 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform, Modal, FlatList, Animated, Dimensions, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
+// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
 import { db, auth } from "../firebase";
-import { ref, get, set, push } from "firebase/database";
+import { collection, doc, getDoc, addDoc, GeoPoint } from "firebase/firestore";
 import Toast from "react-native-root-toast";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -15,8 +16,8 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useUser } from "../context/UserContext";
 import { useAdmin } from "../context/AdminContext";
 import { useCoupon } from "../context/CouponContext";
-import { useShopStore } from "../store/ShopStore"; // <-- ZUSTAND
-import { useCartStore } from "../store/cartstore"; // <-- ZUSTAND
+import { useShopStore } from "../store/ShopStore"; 
+import { useCartStore } from "../store/cartstore"; 
 
 const { width, height } = Dimensions.get("window");
 
@@ -155,14 +156,15 @@ export default function CheckoutTwoScreen() {
       setQrImage(foundShop.qr || "");
       setShopCommission(Number(foundShop.commission) || 15);
     } else {
-      get(ref(db, `shops/${shopId}`)).then(snap => {
+      // 🔥 FIRESTORE FALLBACK FETCH 🔥
+      getDoc(doc(db, "shops", shopId)).then(snap => {
         if(snap.exists()) {
-          const val = snap.val();
+          const val = snap.data();
           setShop({ id: shopId, ...val });
           setQrImage(val.qr || "");
           setShopCommission(Number(val.commission) || 15);
         }
-      });
+      }).catch(err => console.error("Error fetching shop fallback:", err));
     }
 
     if (userData?.addresses) {
@@ -215,8 +217,11 @@ export default function CheckoutTwoScreen() {
 
     let calcDeliveryFee = 0;
     if (pickupAddress && dropAddress) {
-      const pLat = Number(pickupAddress.lat), pLng = Number(pickupAddress.lng);
-      const dLat = Number(dropAddress.lat), dLng = Number(dropAddress.lng);
+      // 🔥 Extract GeoPoints securely 🔥
+      const pLat = Number(pickupAddress.lat ?? pickupAddress.location?.latitude);
+      const pLng = Number(pickupAddress.lng ?? pickupAddress.location?.longitude);
+      const dLat = Number(dropAddress.lat ?? dropAddress.location?.latitude);
+      const dLng = Number(dropAddress.lng ?? dropAddress.location?.longitude);
       
       if (!isNaN(pLat) && !isNaN(pLng) && !isNaN(dLat) && !isNaN(dLng)) {
         const distanceKm = getDistanceInKm(pLat, pLng, dLat, dLng) * 1.3;
@@ -277,7 +282,15 @@ export default function CheckoutTwoScreen() {
          cleanItems[pid] = { ...cart[pid] };
       });
 
+      // 🔥 Safely generate GeoPoints for the DB 🔥
+      const pLat = Number(pickupAddress.lat ?? pickupAddress.location?.latitude ?? 0);
+      const pLng = Number(pickupAddress.lng ?? pickupAddress.location?.longitude ?? 0);
+      const dLat = Number(dropAddress.lat ?? dropAddress.location?.latitude ?? 0);
+      const dLng = Number(dropAddress.lng ?? dropAddress.location?.longitude ?? 0);
+
+      // 🔥 FIRESTORE FLATTENED ORDER SCHEMA 🔥
       const orderData = {
+        userId: user.uid, // Required for secure read rules
         shopId,
         shopname: shop?.name || "Unknown",
         shopimage: shop?.image || "",
@@ -293,9 +306,13 @@ export default function CheckoutTwoScreen() {
         pickupAddress: { 
           ...pickupAddress, 
           customerName: userData?.name || userData?.firstName, 
-          customerPhone: userData?.mobile 
+          customerPhone: userData?.mobile,
+          location: new GeoPoint(pLat, pLng)
         },
-        dropAddress: { ...dropAddress },
+        dropAddress: { 
+          ...dropAddress,
+          location: new GeoPoint(dLat, dLng)
+        },
         
         customerName: userData?.name || userData?.firstName,
         customerPhone: userData?.mobile,
@@ -321,13 +338,21 @@ export default function CheckoutTwoScreen() {
           platformFee,
           isPremiumOrder,
           shopCommission,
-          pickupLocation: pickupAddress,
-          dropLocation: dropAddress
+          pickupLocation: {
+            lat: pLat,
+            lng: pLng,
+            location: new GeoPoint(pLat, pLng)
+          },
+          dropLocation: {
+            lat: dLat,
+            lng: dLng,
+            location: new GeoPoint(dLat, dLng)
+          }
         }
       };
 
-      const newOrderRef = push(ref(db, `orders/${user.uid}`));
-      await set(newOrderRef, orderData);
+      // 🔥 WRITE TO FIRESTORE 🔥
+      const newOrderRef = await addDoc(collection(db, "orders"), orderData);
       
       // Clear Cart unless it's a Buy Now flow
       if (!isBuyNow) {
@@ -336,7 +361,7 @@ export default function CheckoutTwoScreen() {
 
       navigation.replace("OrderConfirmation", { 
         orderData: { 
-          order: { id: newOrderRef.key, ...orderData }, 
+          order: { id: newOrderRef.id, ...orderData }, 
           message: "Parcel order placed successfully" 
         } 
       });

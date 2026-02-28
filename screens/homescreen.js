@@ -22,7 +22,7 @@ import { getAuth } from "firebase/auth";
 import UpdateModal from "../components/UpdateModal";
 
 // IMPORT ZUSTAND STORE & CONTEXTS
-import { useShopStore } from "../store/ShopStore"; 
+import { useShopStore } from "../store/shopStore"; 
 import { useAdmin } from "../context/AdminContext"; 
 import { useUser } from "../context/UserContext"; 
 

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform, ActivityIn
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
-import { useUser } from "../context/UserContext"; // <--- IMPORT CONTEXT
+import { useUser } from "../context/UserContext"; 
 
 const { width } = Dimensions.get("window");
 

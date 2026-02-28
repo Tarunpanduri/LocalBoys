@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ref, get } from 'firebase/database';
+// 🔥 STRICT FIRESTORE IMPORTS 🔥
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export const useProductStore = create(
   persist(
     (set, getStore) => ({
-      menus: {}, // Stores products: { shopId_1: { ...products }, shopId_2: { ...products } }
+      menus: {}, 
       loadingStates: {}, 
 
       fetchProducts: async (shopId) => {
@@ -15,14 +16,19 @@ export const useProductStore = create(
 
         const currentMenu = getStore().menus[shopId];
         
-        // Only show loading spinner if we have NEVER cached this shop's menu
         if (!currentMenu) {
           set((state) => ({ loadingStates: { ...state.loadingStates, [shopId]: true } }));
         }
 
         try {
-          const snap = await get(ref(db, `products/${shopId}`));
-          const data = snap.val() || {};
+          // 🔥 CRITICAL FIX: Products are now a subcollection inside the shop! 🔥
+          const productsRef = collection(db, 'shops', shopId, 'products');
+          const snap = await getDocs(productsRef);
+          
+          const data = {};
+          snap.forEach(doc => {
+            data[doc.id] = { id: doc.id, ...doc.data() };
+          });
 
           set((state) => ({
             menus: { ...state.menus, [shopId]: data },

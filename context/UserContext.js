@@ -1,8 +1,8 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { ref, onValue } from 'firebase/database';
-// 1. Import Async Storage
+// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
+import { doc, onSnapshot } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const UserContext = createContext();
@@ -16,14 +16,12 @@ export const UserProvider = ({ children }) => {
   const [mainAddress, setMainAddress] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // --- NEW: Helper to load guest data from Local Storage ---
   const loadGuestLocation = async () => {
     try {
       const savedAddress = await AsyncStorage.getItem('guestAddress');
       if (savedAddress) {
         const parsedAddress = JSON.parse(savedAddress);
         
-        // Mimic the structure the app expects so HomeScreen works
         setUserData({ isGuest: true }); 
         setMainAddress(parsedAddress);
         setUserLocation({
@@ -46,33 +44,48 @@ export const UserProvider = ({ children }) => {
       setUser(currentUser);
       
       if (currentUser) {
-        // --- EXISTING LOGIC: User is logged in (Firebase) ---
-        const userRef = ref(db, `users/${currentUser.uid}`);
-        const unsubDb = onValue(userRef, (snapshot) => {
-          const val = snapshot.val();
-          setUserData(val);
+        // 🔥 FIRESTORE SYNC LOGIC 🔥
+        const userRef = doc(db, 'users', currentUser.uid);
+        
+        const unsubDb = onSnapshot(userRef, (snapshot) => {
+          if (snapshot.exists()) {
+            const val = snapshot.data();
+            
+            // Map Firestore GeoPoints for UI
+            if (val.addresses) {
+              Object.keys(val.addresses).forEach(key => {
+                const addr = val.addresses[key];
+                if (addr.location) {
+                  addr.lat = addr.location.latitude ?? addr.location.lat;
+                  addr.lng = addr.location.longitude ?? addr.location.lng;
+                }
+              });
+            }
 
-          if (val) {
+            setUserData(val);
+
             let loc = null;
             if (val.mainAddressId && val.addresses && val.addresses[val.mainAddressId]) {
               loc = val.addresses[val.mainAddressId];
               setMainAddress(loc);
-            } 
-            else if (val.location) {
-              loc = val.location;
+            } else if (val.location || val.lat) {
+              loc = val;
               setMainAddress(null);
             } else {
               setMainAddress(null);
             }
 
-            if (loc && loc.lat && loc.lng) {
+            const finalLat = loc?.lat ?? loc?.location?.latitude;
+            const finalLng = loc?.lng ?? loc?.location?.longitude;
+
+            if (finalLat && finalLng) {
               setUserLocation({
-                lat: parseFloat(loc.lat),
-                lng: parseFloat(loc.lng),
-                formattedAddress: loc.formattedAddress,
-                city: loc.city,
-                state: loc.state,
-                pincode: loc.pincode
+                lat: parseFloat(finalLat),
+                lng: parseFloat(finalLng),
+                formattedAddress: loc.formattedAddress || '',
+                city: loc.city || '',
+                state: loc.state || '',
+                pincode: loc.pincode || ''
               });
             } else {
               setUserLocation(null);
@@ -82,12 +95,13 @@ export const UserProvider = ({ children }) => {
             setUserLocation(null);
           }
           setLoading(false);
+        }, (error) => {
+           console.error("Firestore user sync error:", error);
+           setLoading(false);
         });
 
         return () => unsubDb();
       } else {
-        // --- GUEST LOGIC: User is NOT logged in ---
-        // Reset user data but try to load guest location
         setUserData(null);
         setMainAddress(null);
         setUserLocation(null);
@@ -99,7 +113,6 @@ export const UserProvider = ({ children }) => {
   }, []);
 
   return (
-    // Expose setters so MapScreen can update context instantly
     <UserContext.Provider value={{ 
         user, 
         userData, 

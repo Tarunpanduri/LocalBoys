@@ -16,7 +16,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
-import { ref, set } from "firebase/database";
+// --- 1. NEW FIRESTORE IMPORTS ---
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -142,19 +143,45 @@ export default function SignUp({ navigation }) {
   }
 
   const handleSignUp = async () => {
-    if (!firstName || !lastName || !email || !password || !mobile) return;
+    // Basic validation feedback
+    if (!firstName || !lastName || !email || !password || !mobile) {
+      Alert.alert("Missing Details", "Please fill in all fields to create an account.");
+      return;
+    }
+
     setLoading(true);
     try {
+      // 1. Create Auth User
       const { user: { uid } } = await createUserWithEmailAndPassword(getAuth(), email.trim(), password);
       
-      // --- CRITICAL FIX: CLEAR GUEST DATA UPON SIGN UP ---
+      // 2. CLEAR GUEST DATA UPON SIGN UP
       await AsyncStorage.removeItem('guestAddress');
-      // ---------------------------------------------------
 
-      await set(ref(db, `users/${uid}`), { uid, firstName, lastName, email, mobile, createdAt: new Date().toISOString() });
+      // 3. PRODUCTION FIRESTORE SAVE (Matching the new visual schema perfectly)
+      await setDoc(doc(db, "users", uid), { 
+        uid: uid, 
+        firstName: firstName.trim(), 
+        lastName: lastName.trim(), 
+        email: email.trim().toLowerCase(), 
+        mobile: mobile.trim(), 
+        role: "customer",          // Default RBAC role
+        addresses: {},             // Start with empty address map
+        preferences: {             // Default preferences
+          smsEnabled: true,
+          whatsappEnabled: true
+        },
+        createdAt: serverTimestamp() // Native Firestore timestamp
+      });
+
       navigation.navigate("Login");
     } catch (e) { 
-      Alert.alert("Sign Up Failed", e.message); 
+      // User-friendly error mapping
+      let errorMessage = e.message;
+      if (e.code === 'auth/email-already-in-use') errorMessage = 'This email is already registered. Please log in.';
+      if (e.code === 'auth/weak-password') errorMessage = 'Password should be at least 6 characters.';
+      if (e.code === 'auth/invalid-email') errorMessage = 'Please enter a valid email address.';
+      
+      Alert.alert("Sign Up Failed", errorMessage); 
     }
     finally { 
       setLoading(false); 

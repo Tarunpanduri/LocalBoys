@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useEffect, useRef, useMemo } from "react";
 import { 
   View, 
   Text, 
@@ -165,49 +165,27 @@ const AnimatedTimelineStep = ({ step, index, activeIndex }) => {
 
 export default function TrackOrder({ navigation }) {
   // Pull from Zustand
-  const { activeOrders, loadingOrders, startListening, stopListening } = useOrderStore(); 
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const { activeOrders, selectedOrder, loadingOrders, fetchActiveOrders, selectAndListenToOrder, stopListening } = useOrderStore(); 
 
   const [fontsLoaded] = useFonts({
     ...Ionicons.font,
     ...MaterialIcons.font,
   });
 
-  // PRODUCTION PATTERN: Mount-Only Realtime Listener
+  // PRODUCTION PATTERN: Mount-Only Fetch & Cleanup
   useEffect(() => {
-    startListening(); // Opens Firebase connection when screen mounts
+    fetchActiveOrders(); // Grabs the list of active orders once
+    
     return () => {
-      stopListening(); // Closes Firebase connection when user goes back
+      stopListening(); // Closes Firestore connection when user goes back
     };
   }, []);
-
-  // Sort orders dynamically so newest is always first
-  const sortedOrders = useMemo(() => {
-    return [...activeOrders].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  }, [activeOrders]);
-
-  // Handle selected order updates seamlessly
-  useEffect(() => {
-    if (sortedOrders.length === 0) {
-      setSelectedOrder(null);
-    } else if (selectedOrder) {
-      const updatedVersion = sortedOrders.find(o => o.id === selectedOrder.id);
-      
-      if (updatedVersion && updatedVersion.status !== selectedOrder.status) {
-        setSelectedOrder(updatedVersion);
-      } else if (!updatedVersion) {
-        setSelectedOrder(sortedOrders[0]);
-      }
-    } else {
-      setSelectedOrder(sortedOrders[0]);
-    }
-  }, [sortedOrders]); 
 
   if (loadingOrders || !fontsLoaded) {
     return <TrackOrderSkeleton />;
   }
   
-  if (sortedOrders.length === 0) return (
+  if (activeOrders.length === 0) return (
     <SafeAreaView style={styles.center}>
       <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
       <Text style={styles.noOrders}>We are always waiting for your orders.</Text>
@@ -231,7 +209,7 @@ export default function TrackOrder({ navigation }) {
     <TouchableOpacity 
       key={order.id} 
       style={[styles.orderCard, selectedOrder?.id === order.id && styles.orderCardSelected]} 
-      onPress={() => setSelectedOrder(order)} 
+      onPress={() => selectAndListenToOrder(order.id)} // Opens live tunnel for this specific order
       activeOpacity={0.8}
     >
       <Image source={{ uri: order.shopimage }} style={styles.shopImage} resizeMode="cover" />
@@ -269,8 +247,7 @@ export default function TrackOrder({ navigation }) {
           <Text style={styles.sectionTitle}>Active Orders</Text>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.ordersContainer}>
-          {/* Render sorted orders */}
-          {sortedOrders.map(renderOrderCard)}
+          {activeOrders.map(renderOrderCard)}
         </ScrollView>
       </View>
 
@@ -280,7 +257,11 @@ export default function TrackOrder({ navigation }) {
           
           <Text style={styles.orderTime}>Ordered At {formattedTime}</Text>
           
-          <View style={styles.itemList}>{Object.values(selectedOrder?.items || {}).map((itm, idx) => <Text key={idx} style={styles.itemText}>{itm.qty}x <Text style={styles.itemBold}>{itm.productname}</Text></Text>)}</View>
+          <View style={styles.itemList}>
+            {Object.values(selectedOrder?.items || {}).map((itm, idx) => (
+              <Text key={idx} style={styles.itemText}>{itm.qty}x <Text style={styles.itemBold}>{itm.productname}</Text></Text>
+            ))}
+          </View>
           <View style={styles.summaryContainer}>
             <Text style={styles.summaryLabel}>TOTAL AMOUNT</Text>
             <Text style={styles.summaryValue}>₹{selectedOrder?.total}</Text>

@@ -1,3 +1,4 @@
+// update of address screen with better UI and robust distance calculation for support contact assignment. Also added user feedback modals for delete actions and empty state.
 import React, { useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Pressable, StatusBar, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -42,7 +43,6 @@ export default function AddressesScreen({ navigation }) {
     setAddressToDelete(id);
     const entries = Object.entries(addresses);
     
-    // Prevent deleting the very last address with a polite warning modal
     if (entries.length <= 1) {
       setWarningModalVisible(true);
     } else {
@@ -108,7 +108,6 @@ export default function AddressesScreen({ navigation }) {
         }
       }
 
-      // Execute all updates to Firestore simultaneously
       await updateDoc(doc(db, "users", uid), updates);
 
     } catch (e) {
@@ -157,7 +156,7 @@ export default function AddressesScreen({ navigation }) {
         }
       }
       await updateDoc(doc(db, "users", uid), updates);
-      navigation.navigate('HomeScreen'); 
+      // Removed automatic navigation back to Home to allow users to select an address without abruptly changing screens
     } catch (e) {
       console.error('Set main address error:', e);
     }
@@ -179,47 +178,64 @@ export default function AddressesScreen({ navigation }) {
     navigation.navigate('HomeScreen');
   };
 
+  // --- NEW MODERN RENDER ITEM ---
   const renderItem = ({ item }) => {
     const id = item[0]; 
     const addr = item[1]; 
     const isMain = mainAddressId === id;
     
     return (
-      <View style={styles.card} key={id}>
+      <TouchableOpacity 
+        activeOpacity={0.8}
+        onPress={() => !isMain && onSetMain(id)}
+        style={[styles.card, isMain && styles.cardMain]} 
+        key={id}
+      >
         <View style={styles.cardLeft}>
-          <View style={[styles.iconWrap, isMain && { backgroundColor: '#009688' }]}>
-            <Ionicons name="location-outline" size={20} color={isMain ? '#fff' : '#009688'} />
-          </View>
+          <Ionicons 
+            name={isMain ? "radio-button-on" : "radio-button-off"} 
+            size={24} 
+            color={isMain ? "#ff7a00" : "#ccc"} 
+          />
         </View>
+        
         <View style={styles.cardBody}>
           <View style={styles.rowTop}>
-            <Text style={styles.title} numberOfLines={1}>{addr.name || 'Unnamed'}</Text>
-            {isMain && <View style={styles.mainPill}><Text style={styles.mainPillText}>MAIN</Text></View>}
+            <Text style={[styles.title, isMain && { color: "#ff7a00" }]} numberOfLines={1}>
+              {addr.name || 'Unnamed'}
+            </Text>
+            {isMain && (
+              <View style={styles.mainPill}>
+                <Text style={styles.mainPillText}>SELECTED</Text>
+              </View>
+            )}
           </View>
+          
           <Text style={styles.address} numberOfLines={2}>{addr.formattedAddress || '-'}</Text>
           <Text style={styles.phone}>{addr.phone || 'No phone number'}</Text>
+          
           <View style={styles.metaRow}>
             <View style={styles.actionsRow}>
-              <Pressable onPress={() => onEdit(id, addr)} style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}>
-                <Ionicons name="pencil" size={16} color="#007bff" /><Text style={styles.actionText}>Edit</Text>
-              </Pressable>
-              <Pressable onPress={() => onDelete(id)} style={({ pressed }) => [styles.actionBtn, pressed && styles.actionBtnPressed]}>
-                <Ionicons name="trash" size={16} color="#e53935" /><Text style={[styles.actionText, { color: '#e53935' }]}>Delete</Text>
-              </Pressable>
-              <Pressable onPress={() => onSetMain(id)} style={({ pressed }) => [styles.actionBtn, isMain ? styles.actionBtnMain : null, pressed && styles.actionBtnPressed]}>
-                <Ionicons name={isMain ? 'star' : 'star-outline'} size={16} color={isMain ? '#fff' : '#007bff'} />
-                <Text style={[styles.actionText, isMain && { color: '#fff' }]}>{isMain ? 'Main' : 'Set main'}</Text>
-              </Pressable>
+              {/* Using TouchableOpacity here to stop event propagation so clicking edit/delete doesn't select the card */}
+              <TouchableOpacity onPress={() => onEdit(id, addr)} style={styles.actionBtn}>
+                <Ionicons name="pencil" size={16} color="#444" />
+                <Text style={styles.actionText}>Edit</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity onPress={() => onDelete(id)} style={styles.actionBtn}>
+                <Ionicons name="trash" size={16} color="#e53935" />
+                <Text style={[styles.actionText, { color: '#e53935' }]}>Delete</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
   if (loading) return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.centered}>
-      <ActivityIndicator size="large" color="#009688" />
+      <ActivityIndicator size="large" color="#ff7a00" />
     </SafeAreaView>
   );
 
@@ -262,7 +278,6 @@ export default function AddressesScreen({ navigation }) {
           renderItem={renderItem}
           keyExtractor={(it) => it[0]}
           contentContainerStyle={styles.listContent}
-          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
         />
       )}
 
@@ -279,8 +294,8 @@ export default function AddressesScreen({ navigation }) {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <View style={[styles.modalIconContainer, { backgroundColor: '#e0f7fa' }]}>
-              <Ionicons name="information-circle-outline" size={36} color="#009688" />
+            <View style={[styles.modalIconContainer, { backgroundColor: '#fff8f0' }]}>
+              <Ionicons name="information-circle-outline" size={36} color="#ff7a00" />
             </View>
             <Text style={styles.modalTitle}>Keep one address</Text>
             <Text style={styles.modalMessage}>
@@ -328,36 +343,62 @@ export default function AddressesScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f6f7f9' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { paddingHorizontal: 16, paddingTop: Platform.OS === 'android' ? 14 : 20, paddingBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e6e6e6' },
+  
+  header: { paddingHorizontal: 16, paddingTop: Platform.OS === 'android' ? 14 : 20, paddingBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e6e6e6', backgroundColor: '#fff' },
   headerLeft: { flexDirection: 'row', alignItems: 'center' },
   backBtn: { marginRight: 8, padding: 6, borderRadius: 8 },
-  headerTitle: { fontSize: Platform.OS === 'ios' ? 12 : 16, fontFamily: 'Sen_Bold', color: '#222' },
-  headerAdd: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#009688', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  headerTitle: { fontSize: Platform.OS === 'ios' ? 14 : 16, fontFamily: 'Sen_Bold', color: '#222' },
+  headerAdd: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ff7a00', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
   headerAddText: { color: '#fff', fontFamily: 'Sen_Bold', marginLeft: 6, fontSize: Platform.OS === 'ios' ? 10 : 12 },
   disabledBtn: { backgroundColor: '#cccccc', opacity: 0.8 }, 
+  
   listContent: { padding: 14, paddingBottom: 120 },
-  card: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 14, padding: 14, elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6, alignItems: 'flex-start' },
-  cardLeft: { width: 44, alignItems: 'center', justifyContent: 'center' },
-  iconWrap: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#e8f6f6', alignItems: 'center', justifyContent: 'center' },
-  cardBody: { flex: 1, paddingLeft: 6 },
-  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontSize: 16, fontFamily: 'Sen_Bold', color: '#111', maxWidth: '78%' },
-  mainPill: { backgroundColor: '#28A745', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
-  mainPillText: { color: '#fff', fontFamily: 'Sen_Bold', fontSize: Platform.OS === 'ios' ? 9 : 10.5, letterSpacing: 0.5 },
-  address: { marginTop: 6, color: '#666', fontSize: 13.5, fontFamily: 'Sen_Regular', lineHeight: 19 },
-  metaRow: { marginTop: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  phone: { color: '#333', fontSize: 13, fontFamily: 'Sen_Medium' },
-  actionsRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  actionBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6, backgroundColor: '#f9f9f9', borderWidth: 1, borderColor: '#ddd' },
-  actionBtnPressed: { opacity: 0.6 },
-  actionBtnMain: { backgroundColor: '#28A745' },
-  actionText: { fontSize: 13, fontFamily: 'Sen_Medium', color: '#007bff', marginLeft: 4 },
+  
+  // --- MODERN CARD UI ---
+  card: { 
+    flexDirection: 'row', 
+    backgroundColor: '#fff', 
+    borderRadius: 14, 
+    padding: 16, 
+    marginBottom: 12,
+    borderWidth: 1.5, 
+    borderColor: '#e8e8e8',
+    elevation: 1, 
+    shadowColor: '#000', 
+    shadowOpacity: 0.04, 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowRadius: 4, 
+    alignItems: 'flex-start' 
+  },
+  cardMain: { 
+    borderColor: '#ff7a00', 
+    backgroundColor: '#fffcf7',
+    elevation: 3,
+    shadowOpacity: 0.08,
+  },
+  cardLeft: { marginRight: 12, marginTop: 2 },
+  cardBody: { flex: 1 },
+  
+  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  title: { fontSize: 16, fontFamily: 'Sen_Bold', color: '#111', flex: 1, paddingRight: 10 },
+  mainPill: { backgroundColor: '#ffe6cc', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  mainPillText: { color: '#ff7a00', fontFamily: 'Sen_Bold', fontSize: 10, letterSpacing: 0.5 },
+  
+  address: { color: '#666', fontSize: 13.5, fontFamily: 'Sen_Regular', lineHeight: 19 },
+  phone: { marginTop: 6, color: '#444', fontSize: 13, fontFamily: 'Sen_Medium' },
+  
+  metaRow: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+  actionsRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingRight: 10 },
+  actionText: { fontSize: 13, fontFamily: 'Sen_Medium', color: '#444', marginLeft: 4 },
+  
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28 },
   emptyTitle: { fontSize: 20, fontFamily: 'Sen_Bold', marginTop: 12, color: '#111' },
   emptySub: { color: '#777', textAlign: 'center', marginTop: 8, fontFamily: 'Sen_Regular', fontSize: 14, lineHeight: 20 },
-  addPrimary: { backgroundColor: '#009688', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 },
+  addPrimary: { backgroundColor: '#ff7a00', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10 },
   addPrimaryText: { color: '#fff', fontFamily: 'Sen_Bold', fontSize: 15 },
-  fab: { position: 'absolute', right: 20, bottom: 28, backgroundColor: '#009688', width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.12, shadowOffset: { width: 0, height: 4 }, shadowRadius: 8 },
+  
+  fab: { position: 'absolute', right: 20, bottom: 28, backgroundColor: '#ff7a00', width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#ff7a00', shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 8 },
   
   // --- MODAL STYLES ---
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
@@ -365,7 +406,7 @@ const styles = StyleSheet.create({
   modalIconContainer: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   modalTitle: { fontFamily: 'Sen_Bold', fontSize: 18, color: '#111', marginBottom: 10, textAlign: 'center' },
   modalMessage: { fontFamily: 'Sen_Regular', fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
-  modalPrimaryBtn: { backgroundColor: '#009688', width: '100%', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  modalPrimaryBtn: { backgroundColor: '#ff7a00', width: '100%', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
   modalPrimaryBtnText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 15 },
   modalBtnRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 12 },
   modalCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#f0f0f0' },

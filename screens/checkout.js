@@ -2,8 +2,9 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform, Dimensions, Animated, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
+// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
 import { db, auth } from "../firebase";
-import { ref, get, set, push } from "firebase/database";
+import { collection, doc, getDoc, addDoc, GeoPoint } from "firebase/firestore";
 import Toast from "react-native-root-toast";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -15,8 +16,8 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useUser } from "../context/UserContext";
 import { useAdmin } from "../context/AdminContext";
 import { useCoupon } from "../context/CouponContext";
-import { useShopStore } from "../store/ShopStore"; // <-- ZUSTAND
-import { useCartStore } from "../store/cartstore"; // <-- ZUSTAND
+import { useShopStore } from "../store/ShopStore"; 
+import { useCartStore } from "../store/cartstore"; 
 
 const { width, height } = Dimensions.get("window");
 
@@ -140,7 +141,7 @@ export default function CheckoutScreen() {
 
   // Derived
   const isPremiumOrder = subtotal > 10000;
-  const deliveryChargePerKm = branchConfig?.deliveryChargePerKm || 5;
+  const deliveryChargePerKm = branchConfig?.deliveryChargePerKm || 6;
 
   // --- 1. LOAD DATA ---
   useEffect(() => {
@@ -153,18 +154,19 @@ export default function CheckoutScreen() {
       setQrImage(foundShop.qr || "");
       setShopCommission(Number(foundShop.commission) || 15);
     } else {
-      get(ref(db, `shops/${shopId}`)).then(snap => {
+      // 🔥 FIRESTORE FALLBACK FETCH 🔥
+      getDoc(doc(db, "shops", shopId)).then(snap => {
         if(snap.exists()) {
-          const val = snap.val();
+          const val = snap.data();
           console.warn("Shop data loaded from DB for checkout:", val);
           setShop({ id: shopId, ...val });
           setQrImage(val.qr || "");
           setShopCommission(Number(val.commission) || 15);
         }
-      });
+      }).catch(err => console.error("Error fetching shop fallback:", err));
     }
 
-    // B. Load Cart (From params for Buy Now, else from Zustand Store)
+    // B. Load Cart
     if (paramCart) {
       const cleanCart = {};
       Object.keys(paramCart).forEach(k => {
@@ -200,10 +202,11 @@ export default function CheckoutScreen() {
 
     let calcDeliveryFee = 0;
     if (mainAddress && shop.location) {
-      const uLat = Number(mainAddress.lat);
-      const uLng = Number(mainAddress.lng);
-      const sLat = Number(shop.location.lat);
-      const sLng = Number(shop.location.lng);
+      // Handle standard JSON lat/lng AND native Firestore GeoPoints
+      const uLat = Number(mainAddress.lat ?? mainAddress.location?.latitude);
+      const uLng = Number(mainAddress.lng ?? mainAddress.location?.longitude);
+      const sLat = Number(shop.location.latitude ?? shop.location.lat);
+      const sLng = Number(shop.location.longitude ?? shop.location.lng);
 
       if (!isNaN(uLat) && !isNaN(uLng) && !isNaN(sLat) && !isNaN(sLng)) {
         const distanceKm = getDistanceInKm(sLat, sLng, uLat, uLng) * 1.3;
@@ -260,7 +263,15 @@ export default function CheckoutScreen() {
          cleanItems[pid] = { ...cart[pid] };
       });
 
+      // Extract shop lat/lng safely for GeoPoint creation
+      const sLat = Number(shop?.location?.latitude ?? shop?.location?.lat ?? 0);
+      const sLng = Number(shop?.location?.longitude ?? shop?.location?.lng ?? 0);
+      const uLat = Number(mainAddress.lat ?? mainAddress.location?.latitude ?? 0);
+      const uLng = Number(mainAddress.lng ?? mainAddress.location?.longitude ?? 0);
+
+      // 🔥 FIRESTORE FLATTENED ORDER SCHEMA 🔥
       const orderData = {
+        userId: user.uid, // Required for security rules
         shopId,
         shopname: shop?.name || "Unknown Shop",
         shopimage: shop?.image || "",
@@ -275,8 +286,9 @@ export default function CheckoutScreen() {
         transactionId: paymentMode === "Online" ? transactionId.trim() : null,
         address: mainAddress.formattedAddress,
         userLocation: { 
-            lat: mainAddress.lat,
-            lng: mainAddress.lng,
+            lat: uLat,
+            lng: uLng,
+            location: new GeoPoint(uLat, uLng), // Native GeoPoint
             ...mainAddress
         },
         customerName: userData?.firstName || "Customer",
@@ -302,12 +314,16 @@ export default function CheckoutScreen() {
           platformFee,
           isPremiumOrder,
           shopCommission,
-          shopLocation: shop?.location
+          shopLocation: {
+             lat: sLat,
+             lng: sLng,
+             location: new GeoPoint(sLat, sLng) // Native GeoPoint
+          }
         }
       };
 
-      const newOrderRef = push(ref(db, `orders/${user.uid}`));
-      await set(newOrderRef, orderData);
+      // 🔥 WRITE TO FIRESTORE 🔥
+      const newOrderRef = await addDoc(collection(db, "orders"), orderData);
       
       if (!isBuyNow) {
         await clearCart();  
@@ -315,7 +331,7 @@ export default function CheckoutScreen() {
 
       navigation.replace("OrderConfirmation", { 
         orderData: { 
-          order: { id: newOrderRef.key, ...orderData }, 
+          order: { id: newOrderRef.id, ...orderData }, 
           message: "Order placed successfully" 
         } 
       });
@@ -378,8 +394,6 @@ export default function CheckoutScreen() {
             backgroundStyle={styles.bottomSheetBackground}
             handleIndicatorStyle={styles.bottomSheetIndicator}
           >
-            {/* Scrollable Content inside Bottom Sheet */}
-            {/* Notice the paddingBottom here is 120 so content clears the fixed bottom bar */}
             <BottomSheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
               {isPremiumOrder && (
                 <View style={styles.premiumBadge}>
@@ -583,10 +597,10 @@ const styles = StyleSheet.create({
     alignItems: "center", 
     backgroundColor: "#fff", 
     padding: 16, 
-    paddingBottom: Platform.OS === 'ios' ? 34 : 16, // Extra padding for iOS home indicator
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16, 
     borderTopWidth: 1, 
     borderTopColor: "#ddd",
-    zIndex: 100 // High zIndex ensures it overlays the bottom sheet
+    zIndex: 100 
   },
   totalLabel: { color: "#555", fontSize: 12, fontFamily: "Sen_Regular" },
   totalAmount: { color: "#0e0e12", fontSize: 18, fontFamily: "Sen_Bold" },

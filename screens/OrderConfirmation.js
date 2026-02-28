@@ -1,14 +1,28 @@
-import React, { useState, useEffect,useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Animated, Linking, ActivityIndicator, Platform,Dimensions } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  ScrollView, 
+  StatusBar, 
+  Animated, 
+  Linking, 
+  Platform,
+  Dimensions 
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { ref, onValue, off } from "firebase/database";
-import { auth, db } from "../firebase";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font";
 
-const { width,height } = Dimensions.get("window");
+// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
+import { auth, db } from "../firebase";
+import { doc, onSnapshot } from "firebase/firestore";
 
+const { width, height } = Dimensions.get("window");
+
+// --- SKELETON COMPONENT ---
 const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   const translateX = useRef(new Animated.Value(-width)).current;
 
@@ -108,36 +122,66 @@ const OrderConfirmationSkeleton = () => {
 
 export default function OrderConfirmation({ route, navigation }) {
     const { orderData } = route.params;
-    const { order } = orderData;
+    const { order } = orderData; // Contains the initial data from Checkout
+    
+    // State
     const [currentOrder, setCurrentOrder] = useState(order);
     const [loading, setLoading] = useState(true);
     const [fadeAnim] = useState(new Animated.Value(0));
 
     const [fontsLoaded] = useFonts({
-    ...Ionicons.font,
-  });
+      ...Ionicons.font,
+    });
 
     useEffect(() => {
-        if (!auth.currentUser) { setLoading(false); return; }
-        const orderRef = ref(db, `orders/${auth.currentUser.uid}/${order.id}`);
-        onValue(orderRef, (snapshot) => {
-            if (snapshot.exists()) setCurrentOrder({ id: snapshot.key, ...snapshot.val() });
+        if (!auth.currentUser || !order?.id) { 
+          setLoading(false); 
+          return; 
+        }
+
+        // 🔥 NATIVE FIRESTORE LISTENER 🔥
+        // Opens a tunnel to the flattened orders collection for this specific ID
+        const unsubscribe = onSnapshot(doc(db, "orders", order.id), (docSnap) => {
+            if (docSnap.exists()) {
+              setCurrentOrder({ id: docSnap.id, ...docSnap.data() });
+            }
+            setLoading(false);
+        }, (error) => {
+            console.error("Confirmation Screen Error:", error);
             setLoading(false);
         });
-        Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }).start();
-        return () => off(orderRef);
+
+        // Trigger Fade In Animation
+        Animated.timing(fadeAnim, { 
+          toValue: 1, 
+          duration: 800, 
+          useNativeDriver: true 
+        }).start();
+
+        // Cleanup listener on unmount
+        return () => unsubscribe();
     }, [order.id]);
 
     const handleContactSupport = () => Linking.openURL(`tel:+919876543210`);
+    
     const getStatusColor = (status) => {
         switch (status) {
-            case "pending": return "#ffc107"; case "accepted": return "#17a2b8";
-            case "preparing": return "#fd7e14"; case "ready": return "#20c997";
-            case "out_for_delivery": return "#007bff"; case "delivered": return "#28a745";
-            case "cancelled": return "#dc3545"; default: return "#6c757d";
+            case "pending": return "#ffc107"; 
+            case "accepted_restaurent": return "#17a2b8";
+            case "ready": return "#20c997";
+            case "accepted_driver": return "#9C27B0";
+            case "picked_up": return "#FF5722"; 
+            case "completed": return "#28a745";
+            case "REJECTED": return "#dc3545"; 
+            default: return "#6c757d";
         }
     };
-    const formatOrderId = (orderId) => { if (!orderId) return "N/A"; const shortId = orderId.length > 8 ? orderId.slice(-8) : orderId; return `#${shortId.toUpperCase()}`; };
+
+    const formatOrderId = (orderId) => { 
+      if (!orderId) return "N/A"; 
+      const shortId = orderId.length > 8 ? orderId.slice(-8) : orderId; 
+      return `#${shortId.toUpperCase()}`; 
+    };
 
     if (loading || !fontsLoaded) {
         return <OrderConfirmationSkeleton />;
@@ -149,30 +193,69 @@ export default function OrderConfirmation({ route, navigation }) {
             <Animated.View style={{ opacity: fadeAnim, flex: 1 }}>
                 <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
                     <View style={styles.successContainer}>
-                        <View style={styles.successIcon}><Ionicons name="checkmark-circle" size={80} color="#28a745" /></View>
+                        <View style={styles.successIcon}>
+                          <Ionicons name="checkmark-circle" size={80} color="#28a745" />
+                        </View>
                         <Text style={styles.successTitle}>Order Confirmed!</Text>
-                        <Text style={styles.successSubtitle}>Your order {formatOrderId(currentOrder.id)} has been placed successfully. Will notify you once it's on the way.</Text>
-                        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(currentOrder.status) }]}><Text style={styles.statusText}>{currentOrder.status?.replace(/_/g, ' ').toUpperCase() || "PENDING"}</Text></View>
+                        <Text style={styles.successSubtitle}>
+                          Your order {formatOrderId(currentOrder.id)} has been placed successfully. We'll notify you once it's on the way.
+                        </Text>
+                        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(currentOrder.status) }]}>
+                          <Text style={styles.statusText}>
+                            {currentOrder.status?.replace(/_/g, ' ').toUpperCase() || "PENDING"}
+                          </Text>
+                        </View>
                     </View>
 
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Order Details</Text>
                         <View style={styles.detailsGrid}>
-                            <View style={styles.detailItem}><Text style={styles.detailLabel}>Order ID</Text><Text style={styles.detailValue}>{formatOrderId(currentOrder.id)}</Text></View>
-                            <View style={styles.detailItem}><Text style={styles.detailLabel}>Shop</Text><Text style={styles.detailValue}>{currentOrder.shopname || "Unknown Shop"}</Text></View>
-                            <View style={styles.detailItem}><Text style={styles.detailLabel}>Payment</Text><Text style={styles.detailValue}>{currentOrder.paymentMode || "COD"}</Text></View>
-                            <View style={styles.detailItem}><Text style={styles.detailLabel}>Order Time</Text><Text style={styles.detailValue}>{new Date(currentOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text></View>
+                            <View style={styles.detailItem}>
+                              <Text style={styles.detailLabel}>Order ID</Text>
+                              <Text style={styles.detailValue}>{formatOrderId(currentOrder.id)}</Text>
+                            </View>
+                            <View style={styles.detailItem}>
+                              <Text style={styles.detailLabel}>Shop</Text>
+                              <Text style={styles.detailValue}>{currentOrder.shopname || "Unknown Shop"}</Text>
+                            </View>
+                            <View style={styles.detailItem}>
+                              <Text style={styles.detailLabel}>Payment</Text>
+                              <Text style={styles.detailValue}>{currentOrder.paymentMode || "COD"}</Text>
+                            </View>
+                            <View style={styles.detailItem}>
+                              <Text style={styles.detailLabel}>Order Time</Text>
+                              <Text style={styles.detailValue}>
+                                {new Date(currentOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </Text>
+                            </View>
                         </View>
                     </View>
 
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Order Summary</Text>
                         <View style={styles.summaryGrid}>
-                            <View style={styles.summaryItem}><Text style={styles.summaryLabel}>Items Total</Text><Text style={styles.summaryValue}>₹{currentOrder.subtotal || 0}</Text></View>
-                            <View style={styles.summaryItem}><Text style={styles.summaryLabel}>Delivery</Text><Text style={styles.summaryValue}>₹{currentOrder.deliveryFee || 0}</Text></View>
-                            <View style={styles.summaryItem}><Text style={styles.summaryLabel}>Platform Fee</Text><Text style={styles.summaryValue}>₹{currentOrder.platformFee || 0}</Text></View>
-                            {currentOrder.discount > 0 && (<View style={styles.summaryItem}><Text style={styles.summaryLabel}>Discount</Text><Text style={[styles.summaryValue, styles.discountValue]}>-₹{currentOrder.discount || 0}</Text></View>)}
-                            <View style={[styles.summaryItem, styles.totalItem]}><Text style={styles.totalLabel}>Total Amount</Text><Text style={styles.totalValue}>₹{currentOrder.total || 0}</Text></View>
+                            <View style={styles.summaryItem}>
+                              <Text style={styles.summaryLabel}>Items Total</Text>
+                              <Text style={styles.summaryValue}>₹{currentOrder.subtotal || 0}</Text>
+                            </View>
+                            <View style={styles.summaryItem}>
+                              <Text style={styles.summaryLabel}>Delivery</Text>
+                              <Text style={styles.summaryValue}>₹{currentOrder.deliveryFee || 0}</Text>
+                            </View>
+                            <View style={styles.summaryItem}>
+                              <Text style={styles.summaryLabel}>Platform Fee</Text>
+                              <Text style={styles.summaryValue}>₹{currentOrder.platformFee || 0}</Text>
+                            </View>
+                            {currentOrder.discount > 0 && (
+                              <View style={styles.summaryItem}>
+                                <Text style={styles.summaryLabel}>Discount</Text>
+                                <Text style={[styles.summaryValue, styles.discountValue]}>-₹{currentOrder.discount || 0}</Text>
+                              </View>
+                            )}
+                            <View style={[styles.summaryItem, styles.totalItem]}>
+                              <Text style={styles.totalLabel}>Total Amount</Text>
+                              <Text style={styles.totalValue}>₹{currentOrder.total || 0}</Text>
+                            </View>
                         </View>
                     </View>
 
@@ -183,7 +266,10 @@ export default function OrderConfirmation({ route, navigation }) {
                                 const item = currentOrder.items[itemKey];
                                 return (
                                     <View key={index} style={styles.orderItem}>
-                                        <View style={styles.itemDetails}><Text style={styles.itemName}>{item.productname || "Product"}</Text><Text style={styles.itemQuantity}>Qty: {item.qty || 1}</Text></View>
+                                        <View style={styles.itemDetails}>
+                                          <Text style={styles.itemName}>{item.productname || "Product"}</Text>
+                                          <Text style={styles.itemQuantity}>Qty: {item.qty || 1}</Text>
+                                        </View>
                                         <Text style={styles.itemPrice}>₹{(item.price || 0) * (item.qty || 1)}</Text>
                                     </View>
                                 );
@@ -194,7 +280,7 @@ export default function OrderConfirmation({ route, navigation }) {
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>What Happens Next?</Text>
                         <View style={styles.timeline}>
-                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Admin Confirmation</Text></View>
+                            <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Shop receives your order</Text></View>
                             <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Order preparation</Text></View>
                             <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Driver assignment</Text></View>
                             <View style={styles.timelineStep}><View style={styles.timelineDot} /><Text style={styles.timelineText}>Delivery to your location</Text></View>
@@ -204,7 +290,8 @@ export default function OrderConfirmation({ route, navigation }) {
 
                 <View style={styles.footer}>
                     <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate("TrackOrder")}>
-                        <Ionicons name="location-outline" size={20} color="#fff" /><Text style={styles.primaryButtonText}>Track Your Order</Text>
+                        <Ionicons name="location-outline" size={20} color="#fff" />
+                        <Text style={styles.primaryButtonText}>Track Your Order</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.reset({ index: 0, routes: [{ name: "HomeScreen" }] })}>
                         <Text style={styles.secondaryButtonText}>Continue Shopping</Text>

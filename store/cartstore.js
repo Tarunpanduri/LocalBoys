@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ref, set, remove } from 'firebase/database';
+// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import Toast from 'react-native-root-toast';
 import { Alert } from 'react-native';
 
-// Background Syncer: Prevents spamming Firebase with writes
+// Background Syncer: Prevents spamming Firestore with writes
 let syncTimeout = null;
 const syncToFirebase = (cartData) => {
   const user = auth.currentUser;
@@ -16,11 +17,15 @@ const syncToFirebase = (cartData) => {
   
   syncTimeout = setTimeout(async () => {
     try {
-      const cartRef = ref(db, `carts/${user.uid}`);
+      // 🔥 FIRESTORE DOCUMENT REFERENCE 🔥
+      const cartRef = doc(db, 'carts', user.uid);
+      
       if (Object.keys(cartData).length === 0) {
-        await remove(cartRef);
+        // If cart is empty, delete the document
+        await deleteDoc(cartRef);
       } else {
-        await set(cartRef, cartData);
+        // Otherwise, overwrite/create the document with the new cart data
+        await setDoc(cartRef, cartData);
       }
     } catch (e) {
       console.error("Cart sync error:", e);

@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from "react";
 import { Alert } from "react-native";
-import { ref, set, remove, get } from "firebase/database";
+// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
+import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import Toast from "react-native-root-toast";
+import { onAuthStateChanged } from "firebase/auth";
 
 const CartContext = createContext();
 
@@ -11,16 +13,23 @@ export const useCart = () => useContext(CartContext);
 export const CartProvider = ({ children }) => {
   const [cartData, setCartData] = useState({});
   const [loading, setLoading] = useState(true);
-  
-  const user = auth.currentUser;
+  const [currentUser, setCurrentUser] = useState(null);
   
   // Trackers for debounce and initial load
   const isInitialLoad = useRef(true);
   const syncTimeoutRef = useRef(null);
 
-  // 1. Fetch Cart ONCE when context mounts (Replaces onValue)
+  // 1. Auth Listener to reliably set user
   useEffect(() => {
-    if (!user) {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsub();
+  }, []);
+
+  // 2. Fetch Cart ONCE when context mounts or user changes
+  useEffect(() => {
+    if (!currentUser) {
       setCartData({});
       setLoading(false);
       return;
@@ -28,11 +37,18 @@ export const CartProvider = ({ children }) => {
 
     const fetchCart = async () => {
       try {
-        const cartRef = ref(db, `carts/${user.uid}`);
-        const snapshot = await get(cartRef);
-        setCartData(snapshot.val() || {});
+        setLoading(true);
+        // 🔥 FIRESTORE FETCH 🔥
+        const cartRef = doc(db, "carts", currentUser.uid);
+        const snapshot = await getDoc(cartRef);
+        
+        if (snapshot.exists()) {
+          setCartData(snapshot.data());
+        } else {
+          setCartData({});
+        }
       } catch (error) {
-        console.error("Failed to fetch cart:", error);
+        console.error("Failed to fetch cart from Firestore:", error);
       } finally {
         setLoading(false);
         // Add a slight delay to ensure state updates before enabling sync
@@ -41,34 +57,38 @@ export const CartProvider = ({ children }) => {
     };
 
     fetchCart();
-  }, [user]);
+  }, [currentUser]);
 
-  // 2. Debounced Background Sync to Firebase
+  // 3. Debounced Background Sync to Firestore
   useEffect(() => {
     // Prevent wiping the DB before initial data is loaded
-    if (loading || isInitialLoad.current || !user) return;
+    if (loading || isInitialLoad.current || !currentUser) return;
 
     // Clear previous timeout if user taps again quickly
     if (syncTimeoutRef.current) {
       clearTimeout(syncTimeoutRef.current);
     }
 
-    // Wait 1.5 seconds after the last cart change to write to Firebase
+    // Wait 1.5 seconds after the last cart change to write to Firestore
     syncTimeoutRef.current = setTimeout(async () => {
       try {
-        const cartRef = ref(db, `carts/${user.uid}`);
+        // 🔥 FIRESTORE SYNC 🔥
+        const cartRef = doc(db, "carts", currentUser.uid);
+        
         if (Object.keys(cartData).length === 0) {
-          await remove(cartRef);
+          // If the cart is empty, delete the document entirely
+          await deleteDoc(cartRef);
         } else {
-          await set(cartRef, cartData);
+          // Otherwise, overwrite it with the new state
+          await setDoc(cartRef, cartData);
         }
       } catch (error) {
-        console.error("Firebase Cart Sync Error:", error);
+        console.error("Firestore Cart Sync Error:", error);
       }
     }, 1500);
 
     return () => clearTimeout(syncTimeoutRef.current);
-  }, [cartData, user, loading]);
+  }, [cartData, currentUser, loading]);
 
   // --- DERIVED STATE ---
   
@@ -100,7 +120,7 @@ export const CartProvider = ({ children }) => {
   // --- LOCAL ACTIONS (No direct Firebase calls) ---
 
   const addToCart = async (shop, product, quantity = 1) => {
-    if (!user) {
+    if (!currentUser) {
       Toast.show("Please login to add items.", { duration: Toast.durations.SHORT });
       return;
     }
@@ -116,7 +136,7 @@ export const CartProvider = ({ children }) => {
     if (cartShopId && cartShopId !== currentShopId) {
       Alert.alert(
         "Start new basket?",
-        `Your cart contains items from ${cartShop.shopname}. Do you want to clear it and add items from ${shop.name}?`,
+        `Your cart contains items from ${cartShop?.shopname || 'another shop'}. Do you want to clear it and add items from ${shop.name}?`,
         [
           { text: "Cancel", style: "cancel" },
           { 
@@ -172,7 +192,7 @@ export const CartProvider = ({ children }) => {
   };
 
   const decreaseQty = (shopId, product) => {
-    if (!user) return;
+    if (!currentUser) return;
 
     setCartData(prev => {
       const shopCart = prev[shopId];
@@ -212,7 +232,7 @@ export const CartProvider = ({ children }) => {
   };
 
   const removeFromCart = (shopId, productId) => {
-    if (!user) return;
+    if (!currentUser) return;
 
     setCartData(prev => {
       const shopCart = prev[shopId];
@@ -237,10 +257,11 @@ export const CartProvider = ({ children }) => {
 
   // Explicitly push clear request immediately for safety
   const clearCart = async () => {
-    if (!user) return;
+    if (!currentUser) return;
     try {
       setCartData({});
-      await remove(ref(db, `carts/${user.uid}`));
+      // 🔥 FIRESTORE IMMEDIATE DELETE 🔥
+      await deleteDoc(doc(db, "carts", currentUser.uid));
       Toast.show("Cart cleared.", { duration: Toast.durations.SHORT });
     } catch (err) {
       console.error("Clear cart error:", err);

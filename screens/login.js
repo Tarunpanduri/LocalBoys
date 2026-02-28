@@ -25,8 +25,11 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
+
+// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
 import { db } from "../firebase";
-import { ref, update } from "firebase/database";
+import { doc, updateDoc } from "firebase/firestore"; 
+
 import { useFonts } from "expo-font";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -173,7 +176,8 @@ export default function Login({ navigation }) {
       if (!expoToken) return;
 
       if (userId) {
-        await update(ref(db, `users/${userId}`), { expoPushToken: expoToken });
+        // 🔥 FIRESTORE UPDATE DOC 🔥
+        await updateDoc(doc(db, "users", userId), { expoPushToken: expoToken });
       }
     } catch (error) {
       console.error("Push token registration error:", error);
@@ -235,9 +239,7 @@ export default function Login({ navigation }) {
       );
 
       // --- CRITICAL FIX: CLEAR GUEST DATA ---
-      // This ensures the app stops acting like a Guest and loads the Real User's data
       await AsyncStorage.removeItem('guestAddress');
-      // --------------------------------------
 
       const userId = userCredential.user.uid;
 
@@ -256,40 +258,32 @@ export default function Login({ navigation }) {
         routes: [{ name: "Addresses" }],
       });
     } catch (error) {
-      console.log("Login Error Code:", error.code); // Good for debugging
+      console.log("Login Error Code:", error.code); 
       
       let title = "Login Failed";
       let message = "An unexpected error occurred. Please try again.";
 
-      // Map Firebase errors to user-friendly messages
       switch (error.code) {
         case 'auth/invalid-email':
           message = "The email address format is invalid.";
           break;
-        
-        // Note: Firebase often groups 'user-not-found' and 'wrong-password' 
-        // into 'invalid-credential' for security in newer versions.
         case 'auth/user-not-found':
         case 'auth/wrong-password':
         case 'auth/invalid-credential':
           message = "Incorrect email or password. Please check your credentials.";
           break;
-
         case 'auth/user-disabled':
           message = "This account has been disabled. Please contact support.";
           break;
-
         case 'auth/too-many-requests':
           message = "Too many failed attempts. Please try again later.";
           break;
-          
         case 'auth/network-request-failed':
           title = "Connection Error";
           message = "Please check your internet connection and try again.";
           break;
-          
         default:
-          message = "Unable to sign in. Please try again."; // Fallback generic message
+          message = "Unable to sign in. Please try again."; 
       }
 
       Alert.alert(title, message);
@@ -410,7 +404,6 @@ export default function Login({ navigation }) {
                   <Text style={styles.loginButtonText}>LOG IN</Text>
                 )}
               </TouchableOpacity>
-              {/* by clicking,i accept terms and conditions and privacy policy with terms navigation to terms page and privacy navigation to privacy page */}
               
               <View style={styles.termsContainer}>
                 <Text style={styles.termsText}>By clicking, I accept the <TouchableOpacity onPress={() => navigation.navigate("Terms")}><Text style={styles.termsLink}>Terms and Conditions</Text></TouchableOpacity> and <TouchableOpacity onPress={() => navigation.navigate("PrivacyPolicy")}><Text style={styles.termsLink}>Privacy Policy</Text></TouchableOpacity></Text>

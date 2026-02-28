@@ -1,11 +1,12 @@
 import React, { createContext, useState, useEffect, useContext, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants'; 
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const AdminContext = createContext();
 export const useAdmin = () => useContext(AdminContext);
 
-// Updated to point to your GLOBAL INDEX file
 const GLOBAL_CONFIG_URL = Constants.expoConfig?.extra?.configUrl; 
 
 export const AdminProvider = ({ children }) => {
@@ -16,9 +17,8 @@ export const AdminProvider = ({ children }) => {
   const [headerAnimationUrl, setHeaderAnimationUrl] = useState(null);
   const [appVersion, setAppVersion] = useState(null);
 
-  // Branch Specific State
   const [activeBranchId, setActiveBranchId] = useState(null);
-  const activeBranchIdRef = useRef(null); // Prevents infinite loops during fetch
+  const activeBranchIdRef = useRef(null); 
 
   const [branchConfig, setBranchConfig] = useState({
     deliveryChargePerKm: 5,
@@ -28,18 +28,36 @@ export const AdminProvider = ({ children }) => {
   });
   const [branchCoupons, setBranchCoupons] = useState({});
 
-  // 1. FETCH GLOBAL INDEX ON STARTUP
   useEffect(() => {
-    const fetchGlobalConfig = async () => {
+    const fetchGlobalConfigAndBranches = async () => {
       try {
-        const cachedData = await AsyncStorage.getItem('localboys_global_index');
-        if (cachedData) applyGlobalConfig(JSON.parse(cachedData));
+        if (GLOBAL_CONFIG_URL) {
+          const cachedData = await AsyncStorage.getItem('localboys_global_index');
+          if (cachedData) applyGlobalConfig(JSON.parse(cachedData));
 
-        const response = await fetch(GLOBAL_CONFIG_URL, { cache: 'no-store' }); 
-        const freshData = await response.json();
+          const response = await fetch(GLOBAL_CONFIG_URL, { cache: 'no-store' }); 
+          const freshData = await response.json();
 
-        applyGlobalConfig(freshData);
-        await AsyncStorage.setItem('localboys_global_index', JSON.stringify(freshData));
+          applyGlobalConfig(freshData);
+          await AsyncStorage.setItem('localboys_global_index', JSON.stringify(freshData));
+        }
+
+        const branchesSnap = await getDocs(collection(db, 'branches'));
+        const branchesData = [];
+        
+        branchesSnap.forEach(doc => {
+          const data = doc.data();
+          branchesData.push({
+            id: doc.id,
+            ...data,
+            // Extract lat/lng safely from Firestore GeoPoint
+            lat: data.location?.latitude ?? data.location?.lat,
+            lng: data.location?.longitude ?? data.location?.lng
+          });
+        });
+        
+        setAllBranches(branchesData);
+
       } catch (error) {
         console.error("Admin Config Sync Error:", error);
       } finally {
@@ -47,21 +65,17 @@ export const AdminProvider = ({ children }) => {
       }
     };
 
-    fetchGlobalConfig();
+    fetchGlobalConfigAndBranches();
   }, []);
 
   const applyGlobalConfig = (data) => {
     if (!data) return;
     setCategoryMeta(data.categories || {});
     setEventUrl(data.eventUrl || "");
-    setHeaderAnimationUrl(data.headerAnimationUrl || null); // Global festival override
+    setHeaderAnimationUrl(data.headerAnimationUrl || null); 
     setAppVersion(data.appVersion || {});
-    setAllBranches(data.branchIndex || []); // Now loading the lightweight index
   };
 
-  /**
-   * Calculates distance between two points using the Haversine formula.
-   */
   const getDistance = useCallback((lat1, lon1, lat2, lon2) => {
     const R = 6371; 
     const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -76,20 +90,15 @@ export const AdminProvider = ({ children }) => {
     return R * c; 
   }, []);
 
-  /**
-   * 2. DETERMINE BRANCH & FETCH SPECIFIC DETAIL CONFIG
-   * Wrapped in useCallback to guarantee stability and prevent infinite loops.
-   */
   const determineBranch = useCallback(async (userLat, userLng) => {
     if (!allBranches.length || !userLat || !userLng) return;
 
     let closestBranch = null;
     let minDistance = Infinity;
 
-    // Run math against the lightweight index
     allBranches.forEach((branch) => {
       if (branch.lat && branch.lng) {
-        const dist = getDistance(userLat, userLng, branch.lat, branch.lng);
+        const dist = getDistance(parseFloat(userLat), parseFloat(userLng), parseFloat(branch.lat), parseFloat(branch.lng));
         if (dist < minDistance) {
           minDistance = dist;
           closestBranch = branch;
@@ -98,58 +107,31 @@ export const AdminProvider = ({ children }) => {
     });
 
     if (closestBranch) {
-      const branchRadius = closestBranch.radius || 15;
+      const branchRadius = closestBranch.config?.shopVisibilityRadiusKm || 15;
 
       if (minDistance <= branchRadius) {
-        // Use ref to safely check without triggering React re-renders in this function
         if (activeBranchIdRef.current !== closestBranch.id) {
           activeBranchIdRef.current = closestBranch.id;
           setActiveBranchId(closestBranch.id);
           
-          try {
-            // Check cache for this specific city first
-            const cacheKey = `branch_detail_${closestBranch.id}`;
-            const cachedCity = await AsyncStorage.getItem(cacheKey);
-            
-            if (cachedCity) {
-              applyBranchConfig(JSON.parse(cachedCity), branchRadius);
-            }
+          setBranchConfig({
+            deliveryChargePerKm: closestBranch.config?.deliveryChargePerKm || 5,
+            shopVisibilityRadiusKm: branchRadius,
+            minOrderValue: closestBranch.config?.minOrderValue || 100,
+            maintenanceMode: closestBranch.config?.maintenanceMode || false
+          });
+          setBranchCoupons(closestBranch.coupons || {});
 
-            // Fetch heavy config for this specific city
-            if (closestBranch.configUrl) {
-              const res = await fetch(closestBranch.configUrl, { cache: 'no-store' });
-              const detailedData = await res.json();
-              
-              applyBranchConfig(detailedData, branchRadius);
-              await AsyncStorage.setItem(cacheKey, JSON.stringify(detailedData));
-            }
-          } catch (err) {
-            console.error(`Failed to fetch specific config for ${closestBranch.name}`, err);
+          if (closestBranch.config?.cityAnimationUrl && !headerAnimationUrl) {
+             setHeaderAnimationUrl(closestBranch.config.cityAnimationUrl);
           }
         }
       } else {
-        // User is too far
         activeBranchIdRef.current = null;
         setActiveBranchId(null);
       }
     }
-  }, [allBranches, getDistance]); // No volatile state in dependencies = 100% loop proof
-
-  const applyBranchConfig = (data, radius) => {
-    setBranchConfig({
-      deliveryChargePerKm: data.deliveryChargePerKm || 5,
-      shopVisibilityRadiusKm: radius,
-      minOrderValue: data.minOrderValue || 100,
-      maintenanceMode: data.maintenanceMode || false
-    });
-    setBranchCoupons(data.coupons || {});
-
-    // Override local animation if city has one AND global is empty
-    setHeaderAnimationUrl((prev) => {
-        if (!prev && data.cityAnimationUrl) return data.cityAnimationUrl;
-        return prev;
-    });
-  };
+  }, [allBranches, getDistance, headerAnimationUrl]);
 
   return (
     <AdminContext.Provider value={{

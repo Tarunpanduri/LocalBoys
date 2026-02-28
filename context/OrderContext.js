@@ -1,6 +1,8 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { ref, onValue, off } from 'firebase/database';
+// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 const OrderContext = createContext();
 
@@ -11,17 +13,21 @@ export const OrderProvider = ({ children }) => {
   const [loadingOrders, setLoadingOrders] = useState(true);
 
   useEffect(() => {
-    // FIX: Changed onAuthStateIdChanged to onAuthStateChanged
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+    let unsubscribeOrders = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
-        const ordersRef = ref(db, `orders/${user.uid}`);
+        // 🔥 FIRESTORE QUERY: Find orders where userId matches the current user
+        const q = query(
+          collection(db, 'orders'),
+          where('userId', '==', user.uid)
+        );
         
-        onValue(ordersRef, (snapshot) => {
-          const data = snapshot.val();
-          if (data) {
-            // Filter active orders directly in memory
-            const formatted = Object.entries(data)
-              .map(([id, order]) => ({ id, ...order }))
+        // Listen to changes in real-time
+        unsubscribeOrders = onSnapshot(q, (snapshot) => {
+          if (!snapshot.empty) {
+            const formatted = snapshot.docs
+              .map(doc => ({ id: doc.id, ...doc.data() }))
               .filter((order) => order.status !== "completed" && order.status !== "REJECTED");
               
             setActiveOrders(formatted);
@@ -29,16 +35,24 @@ export const OrderProvider = ({ children }) => {
             setActiveOrders([]);
           }
           setLoadingOrders(false);
+        }, (error) => {
+          console.error("Order fetch error:", error);
+          setLoadingOrders(false);
         });
+
       } else {
         setActiveOrders([]);
         setLoadingOrders(false);
-        // Clean up listeners if user logs out
-        off(ref(db, `orders`)); 
+        if (unsubscribeOrders) {
+          unsubscribeOrders(); // Clean up listeners if user logs out
+        }
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeOrders) unsubscribeOrders();
+    };
   }, []);
 
   return (

@@ -1,10 +1,12 @@
 import { initializeApp } from "firebase/app";
-import { initializeAuth, getReactNativePersistence, getAuth } from "firebase/auth";
+import { initializeAuth, getReactNativePersistence } from "firebase/auth";
 import ReactNativeAsyncStorage from "@react-native-async-storage/async-storage";
-import { getDatabase } from "firebase/database";
+// --- CHANGED: Use standard getFirestore ---
+import { getFirestore } from "firebase/firestore";
 import Constants from "expo-constants";
 
 const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
+
 const firebaseConfig = {
   apiKey: extra.apiKey,
   authDomain: extra.authDomain,
@@ -13,15 +15,19 @@ const firebaseConfig = {
   messagingSenderId: extra.messagingSenderId,
   appId: extra.appId,
   measurementId: extra.measurementId,
-  databaseURL: extra.databaseURL,
+  databaseURL: extra.databaseURL, 
 };
 
+// Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
+// Initialize Firebase Auth with React Native Persistence
 export const auth = initializeAuth(app, {
   persistence: getReactNativePersistence(ReactNativeAsyncStorage),
 });
 
-export const db = getDatabase(app);
+// --- CHANGED: Initialize standard Firestore ---
+// (Zustand + AsyncStorage handles all our offline capabilities flawlessly)
+export const db = getFirestore(app);
 
 export default app;

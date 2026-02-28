@@ -1,23 +1,20 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
-import { collection, query, orderBy, startAt, endAt, getDocs, doc, onSnapshot } from "firebase/firestore";
+import { collection, query, orderBy, startAt, endAt, getDocs } from "firebase/firestore";
 import { db } from "../firebase"; 
 import * as geofire from 'geofire-common';
-
-let statusListeners = {}; 
 
 export const useShopStore = create(
   persist(
     (set, getStore) => ({
       shops: [],
       loading: false,
-      realtimeStatuses: {}, 
 
       fetchNearbyShops: async (centerLat, centerLng, radiusInKm, isPullToRefresh = false) => {
         if (!centerLat || !centerLng) return;
 
+        // Offline-first: Only show loading if we have zero offline shops or user pulled to refresh
         if (isPullToRefresh || getStore().shops.length === 0) {
           set({ loading: true });
         }
@@ -29,7 +26,7 @@ export const useShopStore = create(
           
           let tempShopsMap = {}; 
 
-          // 🔥 FIRESTORE QUERIES 🔥
+          // 1. One-time fetch of the bounding boxes
           const promises = bounds.map(b => {
             const q = query(
               collection(db, 'shops'), 
@@ -50,11 +47,10 @@ export const useShopStore = create(
 
           const allShops = Object.values(tempShopsMap);
           
-          // 🔥 FIRESTORE GEOPOINT FILTERING 🔥
+          // 2. Client-side math to filter exact radius
           const filtered = allShops.filter(shop => {
             if (!shop.location) return false;
             
-            // Firestore uses .latitude and .longitude natively
             const shopLat = shop.location.latitude ?? shop.location.lat;
             const shopLng = shop.location.longitude ?? shop.location.lng;
             
@@ -64,7 +60,7 @@ export const useShopStore = create(
             return distanceInKm <= radiusInKm;
           });
 
-          // Sort closest first
+          // 3. Sort closest first
           filtered.sort((a, b) => {
             const latA = a.location?.latitude ?? a.location?.lat;
             const lngA = a.location?.longitude ?? a.location?.lng;
@@ -76,39 +72,13 @@ export const useShopStore = create(
             return distA - distB;
           });
 
+          // Update store with fresh data (including their current isActive status)
           set({ shops: filtered, loading: false });
-          getStore().setupStatusListeners();
 
         } catch (error) {
-          console.error("Production Error - fetching nearby shops:", error);
+          console.error("Error fetching nearby shops:", error);
           set({ loading: false });
         }
-      },
-
-      setupStatusListeners: () => {
-        const { shops } = getStore();
-
-        Object.keys(statusListeners).forEach(shopId => {
-           statusListeners[shopId](); 
-        });
-        statusListeners = {};
-
-        shops.forEach(shop => {
-          // 🔥 FIRESTORE REALTIME LISTENER 🔥
-          const unsub = onSnapshot(doc(db, "shops", shop.id), (docSnap) => {
-            if (docSnap.exists()) {
-              const isActive = docSnap.data().isActive;
-              set((state) => ({
-                realtimeStatuses: {
-                  ...state.realtimeStatuses,
-                  [shop.id]: isActive === undefined ? false : isActive
-                }
-              }));
-            }
-          });
-
-          statusListeners[shop.id] = unsub;
-        });
       }
     }),
     {

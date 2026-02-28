@@ -71,13 +71,14 @@ export default function ShopDetails({ route, navigation }) {
   const { shopId, shop } = route.params || {};
   const [activeCategory, setActiveCategory] = useState(null);
   const [loginModalVisible, setLoginModalVisible] = useState(false);
+  const [conflictModalVisible, setConflictModalVisible] = useState(false);
+  const [pendingProduct, setPendingProduct] = useState(null);
   
   const { categoryMeta } = useAdmin();
 
-  // --- ZUSTAND STORE HOOKS (FIXED FOR INFINITE LOOP) ---
+  // --- ZUSTAND STORE HOOKS ---
   const fetchProducts = useProductStore((state) => state.fetchProducts);
   
-  // FIX: Do NOT use `|| {}` inside the Zustand selector. 
   const rawProductsObj = useProductStore((state) => state.menus[shopId]);
   const productsObj = rawProductsObj || {}; 
   
@@ -97,10 +98,14 @@ export default function ShopDetails({ route, navigation }) {
   const cartItems = cartShop ? Object.keys(cartShop).filter(k => !["shopname", "shopimage", "shopphone"].includes(k)).map(key => ({ id: key, ...cartShop[key] })) : [];
   const cartItemCount = cartItems.reduce((count, item) => count + item.qty, 0);
 
-  // --- FETCH DATA ---
+  // --- FETCH DATA (OPTIMIZED) ---
   useEffect(() => {
-    if (shopId) fetchProducts(shopId);
-  }, [shopId, fetchProducts]);
+    // Only fetch if we don't already have products cached for this shop
+    const hasProducts = rawProductsObj && Object.keys(rawProductsObj).length > 0;
+    if (shopId && !hasProducts) {
+      fetchProducts(shopId);
+    }
+  }, [shopId, fetchProducts, rawProductsObj]);
 
   // --- DERIVED MENU DATA ---
   const productsArray = useMemo(() => Object.keys(productsObj).map((pid) => ({ id: pid, ...productsObj[pid] })), [productsObj]);
@@ -115,7 +120,21 @@ export default function ShopDetails({ route, navigation }) {
 
   const handleAddToCart = (item) => {
     if (!getAuth().currentUser) return setLoginModalVisible(true);
-    addToCart(shop, item);
+    
+    // Call addToCart, catch if conflict is true and show our custom modal
+    const result = addToCart(shop, item);
+    if (result && result.conflict) {
+      setPendingProduct(item);
+      setConflictModalVisible(true);
+    }
+  };
+
+  const handleForceAddToCart = () => {
+    if (pendingProduct) {
+      addToCart(shop, pendingProduct, 1, true); // force=true clears existing
+      setConflictModalVisible(false);
+      setPendingProduct(null);
+    }
   };
 
   const handleProceedCheckout = () => {
@@ -128,7 +147,8 @@ export default function ShopDetails({ route, navigation }) {
     else Alert.alert("Multiple Service Types", "Please separate ride and delivery items.", [{ text: "OK" }]);
   };
 
-  if (loading || !fontsLoaded) return <ShopDetailsSkeleton />;
+  // Skip loading screen if we already have the cached products rendering
+  if ((loading && productsArray.length === 0) || !fontsLoaded) return <ShopDetailsSkeleton />;
   if (!shopId) return <SafeAreaView style={styles.centered}><Text>No shop provided</Text></SafeAreaView>;
 
   const renderHeader = () => (
@@ -223,6 +243,7 @@ export default function ShopDetails({ route, navigation }) {
         </View>
       )}
 
+      {/* Login Modal */}
       <Modal animationType="fade" transparent={true} visible={loginModalVisible} onRequestClose={() => setLoginModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -231,6 +252,25 @@ export default function ShopDetails({ route, navigation }) {
             <Text style={styles.modalMessage}>Please log in to add items to your cart and track your order easily.</Text>
             <TouchableOpacity style={styles.modalLoginBtn} onPress={() => { setLoginModalVisible(false); navigation.navigate("Login"); }}><Text style={styles.modalLoginText}>Log In / Sign Up</Text></TouchableOpacity>
             <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLoginModalVisible(false)}><Text style={styles.modalCancelText}>I'm just browsing</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* NEW: Conflict (Start New Basket) Modal */}
+      <Modal animationType="fade" transparent={true} visible={conflictModalVisible} onRequestClose={() => setConflictModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.modalIconContainer, { backgroundColor: '#FFEBEB' }]}>
+              <Ionicons name="warning-outline" size={40} color="#FF3B30" />
+            </View>
+            <Text style={styles.modalTitle}>Start new basket?</Text>
+            <Text style={styles.modalMessage}>Your cart contains items from another shop. Do you want to clear it and add items from {shop?.name}?</Text>
+            <TouchableOpacity style={styles.modalLoginBtn} onPress={handleForceAddToCart}>
+              <Text style={styles.modalLoginText}>Yes, Start New</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalCancelBtn} onPress={() => { setConflictModalVisible(false); setPendingProduct(null); }}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>

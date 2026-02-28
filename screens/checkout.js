@@ -225,16 +225,19 @@ export default function CheckoutScreen() {
   }, [cart, shop, mainAddress, discount, deliveryChargePerKm, shopCommission]);
 
   // --- 3. HANDLERS ---
-  const applyCouponHandler = async () => {
+const applyCouponHandler = async () => {
     if (!couponCode.trim()) {
       Toast.show("Enter a coupon code", { duration: Toast.durations.SHORT });
       return;
     }
     try {
-      const discountValue = await validateCoupon(shopId, couponCode);
+      // 🔥 PASS SUBTOTAL HERE 🔥
+      const discountValue = await validateCoupon(shopId, couponCode, subtotal);
+      
       setDiscount(discountValue);
       Toast.show(`Discount applied: ₹${discountValue}`, { duration: Toast.durations.SHORT });
     } catch (error) {
+      // The error message now comes dynamically from the Context!
       Toast.show(error || "Invalid coupon", { duration: Toast.durations.SHORT });
       setDiscount(0);
     }

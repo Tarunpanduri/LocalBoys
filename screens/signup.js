@@ -12,7 +12,8 @@ import {
   StatusBar, 
   Image,
   Animated,
-  Dimensions 
+  Dimensions,
+  ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
@@ -235,7 +236,14 @@ export default function SignUp({ navigation }) {
             <TextInput style={styles.input} placeholder="+91 985*******" placeholderTextColor="#A0A0A0" keyboardType="phone-pad" value={mobile} onChangeText={setMobile} />
             
             <TouchableOpacity style={styles.signupButton} onPress={handleSignUp} disabled={loading}>
-              <Text style={styles.signupButtonText}>{loading ? "Creating Account..." : "SIGN UP"}</Text>
+              {loading ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.signupButtonText}>Creating Account...</Text>
+                </View>
+              ) : (
+                <Text style={styles.signupButtonText}>SIGN UP</Text>
+              )}
             </TouchableOpacity>
 
             {/* --- TERMS AND PRIVACY POLICY --- */}
@@ -274,7 +282,7 @@ const styles = StyleSheet.create({
   input: { backgroundColor: "#F3F6FA", borderRadius: 10, padding: 12, fontSize: 14, color: "#333", fontFamily: "Sen_Regular" },
   passwordContainer: { flexDirection: "row", alignItems: "center" },
   eyeIcon: { position: "absolute", right: 15 },
-  signupButton: { backgroundColor: "#28A745", borderRadius: 10, alignItems: "center", paddingVertical: 14, marginTop: 25 },
+  signupButton: { backgroundColor: "#28A745", borderRadius: 10, alignItems: "center", paddingVertical: 14, marginTop: 25, justifyContent: 'center' },
   signupButtonText: { color: "#fff", fontSize: 15, fontFamily: "Sen_Medium" },
   termsContainer: { marginTop: 5, alignItems: 'center', paddingHorizontal: 10 },
   termsText: { color: "#5C5C5C", fontSize: 10, textAlign: 'center', fontFamily: "Sen_Regular", lineHeight: 14 },

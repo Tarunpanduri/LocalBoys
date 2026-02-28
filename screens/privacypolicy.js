@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { 
   View, 
   Text, 
@@ -6,19 +6,113 @@ import {
   TouchableOpacity, 
   ScrollView, 
   StatusBar, 
-  Linking, 
-  Platform 
+  Linking,
+  Animated,
+  Dimensions
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const { width } = Dimensions.get("window");
+
+// --- ☁️ YOUR HOSTED JSON URL ---
+const PRIVACY_CDN_URL = "https://localboys-new.web.app/privacy.json";
+
+// --- 🛡️ FALLBACK DATA (Matches your provided text) ---
+const FALLBACK_PRIVACY = {
+  lastUpdated: "January 25, 2026",
+  intro: "This Privacy Policy describes Our policies and procedures on the collection, use and disclosure of Your information when You use the Service and tells You about Your privacy rights and how the law protects You.",
+  contactEmail: "localboys307@gmail.com",
+  sections: [
+    {
+      heading: "Interpretation and Definitions",
+      subHeading: "Definitions",
+      paragraphs: ["For the purposes of this Privacy Policy:"],
+      list: [
+        { bold: "Account:", text: " means a unique account created for You to access our Service." },
+        { bold: "Application:", text: " refers to Local Boys." },
+        { bold: "Personal Data:", text: " is any information that relates to an identified or identifiable individual." }
+      ]
+    },
+    {
+      heading: "Collecting and Using Your Personal Data",
+      smallHeading: "Personal Data",
+      paragraphs: ["While using Our Service, We may ask You to provide Us with certain personally identifiable information:"],
+      bullets: ["Email address", "First name and last name", "Phone number", "Location Data"]
+    },
+    {
+      heading: "Retention of Your Personal Data",
+      paragraphs: ["The Company will retain Your Personal Data only for as long as is necessary:"],
+      list: [
+        { bold: "User Accounts:", text: " Retained for the duration of relationship plus 24 months." },
+        { bold: "Chat transcripts:", text: " Up to 24 months." }
+      ]
+    }
+  ]
+};
+
+// --- SKELETON COMPONENT ---
+const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
+  const translateX = useRef(new Animated.Value(-width)).current;
+  useEffect(() => {
+    Animated.loop(Animated.timing(translateX, { toValue: width, duration: 1000, useNativeDriver: true })).start();
+  }, [width]);
+  return (
+    <View style={[{ width, height, backgroundColor: "#1a1a1f", borderRadius, overflow: "hidden" }, style]}>
+      <Animated.View style={{ width: "100%", height: "100%", transform: [{ translateX }] }}>
+        <LinearGradient colors={["transparent", "rgba(255, 255, 255, 0.05)", "transparent"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width: "100%", height: "100%" }} />
+      </Animated.View>
+    </View>
+  );
+};
+
+const PrivacySkeleton = () => (
+  <View style={styles.scrollContent}>
+    <SkeletonItem width={180} height={14} style={{ marginBottom: 20 }} />
+    <SkeletonItem width="100%" height={14} style={{ marginBottom: 6 }} />
+    {[1, 2, 3].map((i) => (
+      <View key={i} style={styles.section}>
+        <SkeletonItem width={200} height={20} style={{ marginBottom: 12 }} />
+        <SkeletonItem width="100%" height={14} style={{ marginBottom: 6 }} />
+        <SkeletonItem width="90%" height={14} style={{ marginBottom: 12 }} />
+      </View>
+    ))}
+  </View>
+);
 
 export default function PrivacyPolicyScreen() {
   const navigation = useNavigation();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const handleEmailPress = () => {
-    Linking.openURL('mailto:localboys307@gmail.com');
+  useEffect(() => {
+    const fetchPrivacy = async () => {
+      try {
+        const cached = await AsyncStorage.getItem('localboys_privacy');
+        if (cached) setData(JSON.parse(cached));
+
+        const response = await fetch(PRIVACY_CDN_URL, { cache: 'no-store' });
+        if (response.ok) {
+          const freshData = await response.json();
+          setData(freshData);
+          await AsyncStorage.setItem('localboys_privacy', JSON.stringify(freshData));
+        } else if (!cached) {
+          setData(FALLBACK_PRIVACY);
+        }
+      } catch (error) {
+        if (!data) setData(FALLBACK_PRIVACY);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPrivacy();
+  }, []);
+
+  const handleEmailPress = (email) => {
+    Linking.openURL(`mailto:${email}`);
   };
 
   return (
@@ -26,201 +120,64 @@ export default function PrivacyPolicyScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#0e0e12" />
       <View style={styles.container}>
         
-        {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton} 
-            onPress={() => navigation.goBack()}
-          >
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
             <Ionicons name="chevron-back-outline" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Privacy Policy</Text>
           <View style={{ width: 40 }} />
         </View>
 
-        <ScrollView 
-          showsVerticalScrollIndicator={false} 
-          contentContainerStyle={styles.scrollContent}
-        >
-          {/* Last Updated */}
-          <Text style={styles.lastUpdated}>Last updated: January 25, 2026</Text>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          {loading && !data ? (
+            <PrivacySkeleton />
+          ) : (
+            <>
+              <Text style={styles.lastUpdated}>Last updated: {data?.lastUpdated}</Text>
+              <Text style={styles.paragraph}>{data?.intro}</Text>
 
-          <Text style={styles.paragraph}>
-            This Privacy Policy describes Our policies and procedures on the collection, use and disclosure of Your information when You use the Service and tells You about Your privacy rights and how the law protects You.
-          </Text>
+              {data?.sections?.map((section, index) => (
+                <View key={index} style={styles.section}>
+                  <Text style={styles.heading}>{section.heading}</Text>
+                  
+                  {section.subHeading && <Text style={styles.subHeading}>{section.subHeading}</Text>}
+                  {section.smallHeading && <Text style={styles.smallHeading}>{section.smallHeading}</Text>}
+                  
+                  {section.paragraphs?.map((para, pIdx) => (
+                    <Text key={`p-${pIdx}`} style={styles.paragraph}>{para}</Text>
+                  ))}
 
-          <Text style={styles.paragraph}>
-            We use Your Personal Data to provide and improve the Service. By using the Service, You agree to the collection and use of information in accordance with this Privacy Policy.
-          </Text>
+                  {section.bullets && (
+                    <View style={styles.bulletList}>
+                      {section.bullets.map((bullet, bIdx) => (
+                        <Text key={`b-${bIdx}`} style={styles.bulletItem}>• {bullet}</Text>
+                      ))}
+                    </View>
+                  )}
 
-          {/* Section: Interpretation and Definitions */}
-          <View style={styles.section}>
-            <Text style={styles.heading}>Interpretation and Definitions</Text>
-            
-            <Text style={styles.subHeading}>Interpretation</Text>
-            <Text style={styles.paragraph}>
-              The words whose initial letters are capitalized have meanings defined under the following conditions. The following definitions shall have the same meaning regardless of whether they appear in singular or in plural.
-            </Text>
+                  {section.list && (
+                    <View style={styles.listContainer}>
+                      {section.list.map((item, lIdx) => (
+                        <Text key={`l-${lIdx}`} style={styles.listItem}>
+                          <Text style={styles.bold}>{item.bold}</Text>{item.text}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              ))}
 
-            <Text style={styles.subHeading}>Definitions</Text>
-            <Text style={styles.paragraph}>For the purposes of this Privacy Policy:</Text>
-            
-            <View style={styles.listContainer}>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Account:</Text> means a unique account created for You to access our Service or parts of our Service.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Affiliate:</Text> means an entity that controls, is controlled by, or is under common control with a party, where "control" means ownership of 50% or more of the shares, equity interest or other securities entitled to vote for election of directors or other managing authority.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Application:</Text> refers to Local Boys, the software program provided by the Company.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Company:</Text> (referred to as either "the Company", "We", "Us" or "Our" in this Privacy Policy) refers to Local Boys.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Country:</Text> refers to: Andhra Pradesh, India.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Device:</Text> means any device that can access the Service such as a computer, a cell phone or a digital tablet.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Personal Data:</Text> is any information that relates to an identified or identifiable individual.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Service:</Text> refers to the Application.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Service Provider:</Text> means any natural or legal person who processes the data on behalf of the Company. It refers to third-party companies or individuals employed by the Company to facilitate the Service.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>Usage Data:</Text> refers to data collected automatically, either generated by the use of the Service or from the Service infrastructure itself.
-              </Text>
-              <Text style={styles.listItem}>
-                <Text style={styles.bold}>You:</Text> means the individual accessing or using the Service, or the company, or other legal entity on behalf of which such individual is accessing or using the Service.
-              </Text>
-            </View>
-          </View>
-
-          {/* Section: Collecting Data */}
-          <View style={styles.section}>
-            <Text style={styles.heading}>Collecting and Using Your Personal Data</Text>
-            
-            <Text style={styles.subHeading}>Types of Data Collected</Text>
-            
-            <Text style={styles.smallHeading}>Personal Data</Text>
-            <Text style={styles.paragraph}>
-              While using Our Service, We may ask You to provide Us with certain personally identifiable information that can be used to contact or identify You. Personally identifiable information may include, but is not limited to:
-            </Text>
-            <View style={styles.bulletList}>
-              <Text style={styles.bulletItem}>• Email address</Text>
-              <Text style={styles.bulletItem}>• First name and last name</Text>
-              <Text style={styles.bulletItem}>• Phone number</Text>
-              <Text style={styles.bulletItem}>• Address, State, Province, ZIP/Postal code, City</Text>
-              <Text style={styles.bulletItem}>• Usage Data</Text>
-            </View>
-
-            <Text style={styles.smallHeading}>Usage Data</Text>
-            <Text style={styles.paragraph}>
-              Usage Data is collected automatically when using the Service. Usage Data may include information such as Your Device's Internet Protocol address (e.g. IP address), browser type, browser version, the pages of our Service that You visit, the time and date of Your visit, the time spent on those pages, unique device identifiers and other diagnostic data.
-            </Text>
-
-            <Text style={styles.smallHeading}>Information Collected while Using the Application</Text>
-            <Text style={styles.paragraph}>
-              While using Our Application, in order to provide features of Our Application, We may collect, with Your prior permission:
-            </Text>
-            <Text style={styles.listItem}>
-               <Text style={styles.bold}>• Information regarding your location:</Text> We use this information to provide features of Our Service, to improve and customize Our Service. The information may be uploaded to the Company's servers and/or a Service Provider's server or it may be simply stored on Your device.
-            </Text>
-            <Text style={styles.paragraph}>
-              You can enable or disable access to this information at any time, through Your Device settings.
-            </Text>
-          </View>
-
-          {/* Section: Use of Personal Data */}
-          <View style={styles.section}>
-            <Text style={styles.heading}>Use of Your Personal Data</Text>
-            <Text style={styles.paragraph}>The Company may use Personal Data for the following purposes:</Text>
-            
-            <View style={styles.listContainer}>
-              <Text style={styles.listItem}><Text style={styles.bold}>To provide and maintain our Service,</Text> including to monitor the usage of our Service.</Text>
-              <Text style={styles.listItem}><Text style={styles.bold}>To manage Your Account:</Text> to manage Your registration as a user of the Service.</Text>
-              <Text style={styles.listItem}><Text style={styles.bold}>For the performance of a contract:</Text> the development, compliance and undertaking of the purchase contract for the products, items or services You have purchased.</Text>
-              <Text style={styles.listItem}><Text style={styles.bold}>To contact You:</Text> By email, telephone calls, SMS, or other equivalent forms of electronic communication.</Text>
-              <Text style={styles.listItem}><Text style={styles.bold}>To provide You</Text> with news, special offers, and general information about other goods, services and events which We offer.</Text>
-              <Text style={styles.listItem}><Text style={styles.bold}>To manage Your requests:</Text> To attend and manage Your requests to Us.</Text>
-              <Text style={styles.listItem}><Text style={styles.bold}>For business transfers:</Text> We may use Your Personal Data to evaluate or conduct a merger, divestiture, restructuring, reorganization, dissolution, or other sale or transfer of some or all of Our assets.</Text>
-            </View>
-          </View>
-
-          {/* Section: Retention */}
-          <View style={styles.section}>
-            <Text style={styles.heading}>Retention of Your Personal Data</Text>
-            <Text style={styles.paragraph}>
-              The Company will retain Your Personal Data only for as long as is necessary for the purposes set out in this Privacy Policy. We apply different retention periods to different categories of Personal Data:
-            </Text>
-            <Text style={styles.listItem}><Text style={styles.bold}>User Accounts:</Text> Retained for the duration of your account relationship plus up to 24 months after account closure.</Text>
-            <Text style={styles.listItem}><Text style={styles.bold}>Support tickets:</Text> Up to 24 months from the date of ticket closure.</Text>
-            <Text style={styles.listItem}><Text style={styles.bold}>Chat transcripts:</Text> Up to 24 months.</Text>
-            <Text style={styles.listItem}><Text style={styles.bold}>Application usage statistics:</Text> Up to 24 months.</Text>
-            <Text style={styles.listItem}><Text style={styles.bold}>Server logs:</Text> Up to 24 months.</Text>
-            <Text style={styles.paragraph}>
-              When retention periods expire, We securely delete or anonymize Personal Data via deletion, backup retention protocols, or anonymization.
-            </Text>
-          </View>
-
-          {/* Section: Transfer & Delete */}
-          <View style={styles.section}>
-            <Text style={styles.heading}>Transfer & Deletion</Text>
-            <Text style={styles.paragraph}>
-              Your information may be transferred to — and maintained on — computers located outside of Your state, province, country or other governmental jurisdiction.
-            </Text>
-            <Text style={styles.subHeading}>Delete Your Personal Data</Text>
-            <Text style={styles.paragraph}>
-              You have the right to delete or request that We assist in deleting the Personal Data that We have collected about You. You may update, amend, or delete Your information at any time by signing in to Your Account and visiting the account settings section.
-            </Text>
-          </View>
-
-           {/* Section: Disclosure */}
-           <View style={styles.section}>
-            <Text style={styles.heading}>Disclosure of Your Personal Data</Text>
-            <Text style={styles.subHeading}>Business Transactions</Text>
-            <Text style={styles.paragraph}>If the Company is involved in a merger, acquisition or asset sale, Your Personal Data may be transferred.</Text>
-            
-            <Text style={styles.subHeading}>Law Enforcement</Text>
-            <Text style={styles.paragraph}>The Company may be required to disclose Your Personal Data if required to do so by law or in response to valid requests by public authorities.</Text>
-          </View>
-
-          {/* Section: Security & Children */}
-          <View style={styles.section}>
-            <Text style={styles.heading}>Security & Children's Privacy</Text>
-            <Text style={styles.paragraph}>
-              The security of Your Personal Data is important to Us, but remember that no method of transmission over the Internet is 100% secure.
-            </Text>
-            <Text style={styles.paragraph}>
-              Our Service does not address anyone under the age of 16. If You are a parent or guardian and You are aware that Your child has provided Us with Personal Data, please contact Us.
-            </Text>
-          </View>
-
-          {/* Section: Links & Changes */}
-          <View style={styles.section}>
-            <Text style={styles.heading}>Changes</Text>
-            <Text style={styles.paragraph}>
-              We may update Our Privacy Policy from time to time. You are advised to review this Privacy Policy periodically for any changes.
-            </Text>
-          </View>
-
-          {/* Contact Us */}
-          <View style={[styles.section, { borderBottomWidth: 0, marginBottom: 40 }]}>
-            <Text style={styles.heading}>Contact Us</Text>
-            <Text style={styles.paragraph}>If you have any questions about this Privacy Policy, You can contact us:</Text>
-            
-            <TouchableOpacity onPress={handleEmailPress} style={styles.contactBox}>
-              <Text style={styles.contactLabel}>By email:</Text>
-              <Text style={styles.contactLink}>localboys307@gmail.com</Text>
-            </TouchableOpacity>
-          </View>
-
+              {data?.contactEmail && (
+                <View style={[styles.section, { borderBottomWidth: 0, marginBottom: 40 }]}>
+                  <Text style={styles.heading}>Contact Us</Text>
+                  <TouchableOpacity onPress={() => handleEmailPress(data.contactEmail)} style={styles.contactBox}>
+                    <Text style={styles.contactLabel}>By email:</Text>
+                    <Text style={styles.contactLink}>{data.contactEmail}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </>
+          )}
         </ScrollView>
       </View>
     </SafeAreaView>
@@ -228,127 +185,23 @@ export default function PrivacyPolicyScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: "#0e0e12",
-  },
-  container: {
-    flex: 1,
-    backgroundColor: "#0e0e12",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#1a1a1f",
-    backgroundColor: "#0e0e12",
-  },
-  backButton: {
-    padding: 8,
-    borderRadius: 8,
-  },
-  backButtonText: {
-    color: "#ff7a00",
-    fontSize: 16,
-    fontFamily: "Sen_Medium",
-  },
-  headerTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontFamily: "Sen_Bold",
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 50,
-  },
-  lastUpdated: {
-    color: "#888",
-    fontSize: 13,
-    fontFamily: "Sen_Regular",
-    marginBottom: 20,
-    fontStyle: "italic",
-  },
-  section: {
-    marginBottom: 25,
-    borderBottomWidth: 1,
-    borderBottomColor: "#1a1a1f",
-    paddingBottom: 15,
-  },
-  heading: {
-    color: "#fff",
-    fontSize: 20,
-    fontFamily: "Sen_Bold",
-    marginBottom: 12,
-  },
-  subHeading: {
-    color: "#ff7a00",
-    fontSize: 16,
-    fontFamily: "Sen_Bold",
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  smallHeading: {
-    color: "#fff",
-    fontSize: 15,
-    fontFamily: "Sen_Bold",
-    marginTop: 8,
-    marginBottom: 4,
-    textDecorationLine: "underline",
-  },
-  paragraph: {
-    color: "#ccc",
-    fontSize: 14,
-    fontFamily: "Sen_Regular",
-    lineHeight: 22,
-    marginBottom: 12,
-    textAlign: "justify",
-  },
-  listContainer: {
-    marginTop: 5,
-  },
-  listItem: {
-    color: "#ccc",
-    fontSize: 14,
-    fontFamily: "Sen_Regular",
-    lineHeight: 22,
-    marginBottom: 10,
-    paddingLeft: 5,
-  },
-  bold: {
-    color: "#fff",
-    fontFamily: "Sen_Bold",
-  },
-  bulletList: {
-    paddingLeft: 10,
-    marginBottom: 12,
-  },
-  bulletItem: {
-    color: "#ccc",
-    fontSize: 14,
-    fontFamily: "Sen_Regular",
-    lineHeight: 24,
-  },
-  contactBox: {
-    backgroundColor: "#1a1a1f",
-    padding: 16,
-    borderRadius: 12,
-    marginTop: 10,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#333",
-  },
-  contactLabel: {
-    color: "#888",
-    fontSize: 14,
-    fontFamily: "Sen_Regular",
-    marginBottom: 4,
-  },
-  contactLink: {
-    color: "#ff7a00",
-    fontSize: 16,
-    fontFamily: "Sen_Bold",
-    textDecorationLine: "underline",
-  },
+  safeArea: { flex: 1, backgroundColor: "#0e0e12" },
+  container: { flex: 1, backgroundColor: "#0e0e12" },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: "#1a1a1f" },
+  backButton: { padding: 8 },
+  headerTitle: { color: "#fff", fontSize: 18, fontFamily: "Sen_Bold" },
+  scrollContent: { padding: 16, paddingBottom: 50 },
+  lastUpdated: { color: "#888", fontSize: 13, fontStyle: "italic", marginBottom: 20 },
+  section: { marginBottom: 25, borderBottomWidth: 1, borderBottomColor: "#1a1a1f", paddingBottom: 15 },
+  heading: { color: "#fff", fontSize: 20, fontFamily: "Sen_Bold", marginBottom: 12 },
+  subHeading: { color: "#ff7a00", fontSize: 16, fontFamily: "Sen_Bold", marginTop: 10, marginBottom: 8 },
+  smallHeading: { color: "#fff", fontSize: 15, fontFamily: "Sen_Bold", marginTop: 8, marginBottom: 4, textDecorationLine: "underline" },
+  paragraph: { color: "#ccc", fontSize: 14, lineHeight: 22, marginBottom: 12, textAlign: "justify" },
+  listItem: { color: "#ccc", fontSize: 14, lineHeight: 22, marginBottom: 10 },
+  bold: { color: "#fff", fontFamily: "Sen_Bold" },
+  bulletList: { paddingLeft: 10, marginBottom: 12 },
+  bulletItem: { color: "#ccc", fontSize: 14, lineHeight: 24, marginBottom: 6 },
+  contactBox: { backgroundColor: "#1a1a1f", padding: 16, borderRadius: 12, alignItems: "center", borderWidth: 1, borderColor: "#333" },
+  contactLabel: { color: "#888", fontSize: 14, marginBottom: 4 },
+  contactLink: { color: "#ff7a00", fontSize: 16, fontFamily: "Sen_Bold", textDecorationLine: "underline" },
 });

@@ -1,12 +1,11 @@
 import React, { createContext, useState, useEffect, useContext, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants'; 
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
 
 const AdminContext = createContext();
 export const useAdmin = () => useContext(AdminContext);
 
+// Points to your GLOBAL INDEX file on Firebase Hosting
 const GLOBAL_CONFIG_URL = Constants.expoConfig?.extra?.configUrl; 
 
 export const AdminProvider = ({ children }) => {
@@ -17,6 +16,7 @@ export const AdminProvider = ({ children }) => {
   const [headerAnimationUrl, setHeaderAnimationUrl] = useState(null);
   const [appVersion, setAppVersion] = useState(null);
 
+  // Branch Specific State
   const [activeBranchId, setActiveBranchId] = useState(null);
   const activeBranchIdRef = useRef(null); 
 
@@ -28,36 +28,20 @@ export const AdminProvider = ({ children }) => {
   });
   const [branchCoupons, setBranchCoupons] = useState({});
 
+  // 1. FETCH GLOBAL INDEX ON STARTUP (Zero Firestore Cost)
   useEffect(() => {
-    const fetchGlobalConfigAndBranches = async () => {
+    const fetchGlobalConfig = async () => {
       try {
-        if (GLOBAL_CONFIG_URL) {
-          const cachedData = await AsyncStorage.getItem('localboys_global_index');
-          if (cachedData) applyGlobalConfig(JSON.parse(cachedData));
+        if (!GLOBAL_CONFIG_URL) return;
 
-          const response = await fetch(GLOBAL_CONFIG_URL, { cache: 'no-store' }); 
-          const freshData = await response.json();
+        const cachedData = await AsyncStorage.getItem('localboys_global_index');
+        if (cachedData) applyGlobalConfig(JSON.parse(cachedData));
 
-          applyGlobalConfig(freshData);
-          await AsyncStorage.setItem('localboys_global_index', JSON.stringify(freshData));
-        }
+        const response = await fetch(GLOBAL_CONFIG_URL, { cache: 'no-store' }); 
+        const freshData = await response.json();
 
-        const branchesSnap = await getDocs(collection(db, 'branches'));
-        const branchesData = [];
-        
-        branchesSnap.forEach(doc => {
-          const data = doc.data();
-          branchesData.push({
-            id: doc.id,
-            ...data,
-            // Extract lat/lng safely from Firestore GeoPoint
-            lat: data.location?.latitude ?? data.location?.lat,
-            lng: data.location?.longitude ?? data.location?.lng
-          });
-        });
-        
-        setAllBranches(branchesData);
-
+        applyGlobalConfig(freshData);
+        await AsyncStorage.setItem('localboys_global_index', JSON.stringify(freshData));
       } catch (error) {
         console.error("Admin Config Sync Error:", error);
       } finally {
@@ -65,7 +49,7 @@ export const AdminProvider = ({ children }) => {
       }
     };
 
-    fetchGlobalConfigAndBranches();
+    fetchGlobalConfig();
   }, []);
 
   const applyGlobalConfig = (data) => {
@@ -74,8 +58,10 @@ export const AdminProvider = ({ children }) => {
     setEventUrl(data.eventUrl || "");
     setHeaderAnimationUrl(data.headerAnimationUrl || null); 
     setAppVersion(data.appVersion || {});
+    setAllBranches(data.branchIndex || []); // Loads branches and their configUrl (kkdconfig.json)
   };
 
+  // Distance Calculator
   const getDistance = useCallback((lat1, lon1, lat2, lon2) => {
     const R = 6371; 
     const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -90,6 +76,7 @@ export const AdminProvider = ({ children }) => {
     return R * c; 
   }, []);
 
+  // 2. DETERMINE BRANCH & FETCH COUPONS FROM SPECIFIC CONFIG URL
   const determineBranch = useCallback(async (userLat, userLng) => {
     if (!allBranches.length || !userLat || !userLng) return;
 
@@ -107,31 +94,58 @@ export const AdminProvider = ({ children }) => {
     });
 
     if (closestBranch) {
-      const branchRadius = closestBranch.config?.shopVisibilityRadiusKm || 15;
+      const branchRadius = closestBranch.radius || 15;
 
       if (minDistance <= branchRadius) {
         if (activeBranchIdRef.current !== closestBranch.id) {
           activeBranchIdRef.current = closestBranch.id;
           setActiveBranchId(closestBranch.id);
           
-          setBranchConfig({
-            deliveryChargePerKm: closestBranch.config?.deliveryChargePerKm || 5,
-            shopVisibilityRadiusKm: branchRadius,
-            minOrderValue: closestBranch.config?.minOrderValue || 100,
-            maintenanceMode: closestBranch.config?.maintenanceMode || false
-          });
-          setBranchCoupons(closestBranch.coupons || {});
-
-          if (closestBranch.config?.cityAnimationUrl && !headerAnimationUrl) {
-             setHeaderAnimationUrl(closestBranch.config.cityAnimationUrl);
+          try {
+            // Fetch heavy config for this specific city (e.g. kkdconfig.json)
+            if (closestBranch.configUrl) {
+              const res = await fetch(closestBranch.configUrl, { cache: 'no-store' });
+              const detailedData = await res.json();
+              
+              applyBranchConfig(detailedData, branchRadius);
+              
+              // Cache it so it loads instantly next time
+              await AsyncStorage.setItem(`branch_detail_${closestBranch.id}`, JSON.stringify(detailedData));
+            } else {
+              // Fallback to cache if offline
+              const cachedCity = await AsyncStorage.getItem(`branch_detail_${closestBranch.id}`);
+              if (cachedCity) applyBranchConfig(JSON.parse(cachedCity), branchRadius);
+            }
+          } catch (err) {
+            console.error(`Failed to fetch specific config for ${closestBranch.name}`, err);
           }
         }
       } else {
+        // User is outside delivery zone
         activeBranchIdRef.current = null;
         setActiveBranchId(null);
       }
     }
-  }, [allBranches, getDistance, headerAnimationUrl]);
+  }, [allBranches, getDistance]); 
+
+  // Safely sets state and COUPONS
+  const applyBranchConfig = (data, radius) => {
+    setBranchConfig({
+      deliveryChargePerKm: data.deliveryChargePerKm || 5,
+      shopVisibilityRadiusKm: radius,
+      minOrderValue: data.minOrderValue || 100,
+      maintenanceMode: data.maintenanceMode || false
+    });
+    
+    // 🔥 THIS RESTORES YOUR COUPONS! 🔥
+    setBranchCoupons(data.coupons || {});
+
+    // Set animation if available
+    setHeaderAnimationUrl((prev) => {
+        if (!prev && data.cityAnimationUrl) return data.cityAnimationUrl;
+        return prev;
+    });
+  };
 
   return (
     <AdminContext.Provider value={{

@@ -1,52 +1,23 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
-import { auth, db } from '../firebase';
+import { auth } from '../firebase';
 import Toast from 'react-native-root-toast';
-import { Alert } from 'react-native';
-
-// Background Syncer: Prevents spamming Firestore with writes
-let syncTimeout = null;
-const syncToFirebase = (cartData) => {
-  const user = auth.currentUser;
-  if (!user) return;
-  
-  if (syncTimeout) clearTimeout(syncTimeout);
-  
-  syncTimeout = setTimeout(async () => {
-    try {
-      // 🔥 FIRESTORE DOCUMENT REFERENCE 🔥
-      const cartRef = doc(db, 'carts', user.uid);
-      
-      if (Object.keys(cartData).length === 0) {
-        // If cart is empty, delete the document
-        await deleteDoc(cartRef);
-      } else {
-        // Otherwise, overwrite/create the document with the new cart data
-        await setDoc(cartRef, cartData);
-      }
-    } catch (e) {
-      console.error("Cart sync error:", e);
-    }
-  }, 2000); // 2 second delay after the user stops tapping
-};
 
 export const useCartStore = create(
   persist(
     (set, getStore) => ({
       cartData: {},
 
-      addToCart: (shop, product, quantity = 1) => {
+      addToCart: (shop, product, quantity = 1, force = false) => {
         const user = auth.currentUser;
         if (!user) {
           Toast.show("Please login to add items.", { duration: Toast.durations.SHORT });
-          return;
+          return { success: false, reason: 'auth' };
         }
         if (product.inStock === false) {
           Toast.show("Product is out of stock.", { duration: Toast.durations.SHORT });
-          return;
+          return { success: false, reason: 'stock' };
         }
 
         const currentData = getStore().cartData;
@@ -54,47 +25,26 @@ export const useCartStore = create(
         const cartShopId = keys.length > 0 ? keys[0] : null;
         const targetShopId = shop.id;
 
-        // Shop Conflict Alert
+        // Shop Conflict Detection
         if (cartShopId && cartShopId !== targetShopId) {
-          Alert.alert(
-            "Start new basket?",
-            `Your cart contains items from another shop. Do you want to clear it and add items from ${shop.name}?`,
-            [
-              { text: "Cancel", style: "cancel" },
-              { 
-                text: "Yes, Start New", 
-                onPress: () => {
-                  const newCart = {
-                    [targetShopId]: {
-                      shopname: shop.name,
-                      shopimage: shop.image,
-                      [product.id]: {
-                        productname: product.name,
-                        price: product.price,
-                        qty: quantity,
-                        serviceType: product.serviceType || null,
-                        image: product.image || null
-                      }
-                    },
-                    updatedAt: Date.now()
-                  };
-                  set({ cartData: newCart });
-                  syncToFirebase(newCart);
-                  Toast.show(`${product.name} added.`, { duration: Toast.durations.SHORT });
-                }
-              }
-            ]
-          );
-          return;
+          if (!force) {
+            // Return conflict flag so the UI can handle it with a custom modal
+            return { conflict: true, cartShopId };
+          }
         }
 
-        // Add or Update
-        const existingShop = currentData[targetShopId] || {};
+        // Add or Update (If force is true, we wipe the currentData first to start a new basket)
+        let baseData = currentData;
+        if (cartShopId && cartShopId !== targetShopId && force) {
+          baseData = {};
+        }
+
+        const existingShop = baseData[targetShopId] || {};
         const existingItem = existingShop[product.id];
         const newQty = existingItem ? existingItem.qty + quantity : quantity;
 
         const updatedCart = {
-          ...currentData,
+          ...baseData,
           [targetShopId]: {
             ...existingShop,
             shopname: shop.name,
@@ -111,8 +61,8 @@ export const useCartStore = create(
         };
 
         set({ cartData: updatedCart });
-        syncToFirebase(updatedCart);
-        Toast.show(`${product.name} added to cart.`, { duration: Toast.durations.SHORT });
+        Toast.show(`${product.name} ${force ? 'added.' : 'added to cart.'}`, { duration: Toast.durations.SHORT });
+        return { success: true };
       },
 
       decreaseQty: (shopId, product) => {
@@ -149,7 +99,6 @@ export const useCartStore = create(
         }
 
         set({ cartData: updatedCart });
-        syncToFirebase(updatedCart);
       },
 
       removeFromCart: (shopId, productId) => {
@@ -171,13 +120,11 @@ export const useCartStore = create(
         }
 
         set({ cartData: updatedCart });
-        syncToFirebase(updatedCart);
         Toast.show("Item removed.", { duration: Toast.durations.SHORT });
       },
 
       clearCart: () => {
         set({ cartData: {} });
-        syncToFirebase({});
         Toast.show("Cart cleared.", { duration: Toast.durations.SHORT });
       }
     }),

@@ -40,14 +40,24 @@ export const UserProvider = ({ children }) => {
   };
 
   useEffect(() => {
+    // 1. Declare the unsubscribe function OUTSIDE the auth callback
+    let unsubDb = null; 
+
     const unsubAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       
+      // 2. Clear any existing Firestore listener BEFORE creating a new one or logging out
+      if (unsubDb) {
+        unsubDb();
+        unsubDb = null;
+      }
+
       if (currentUser) {
         // 🔥 FIRESTORE SYNC LOGIC 🔥
         const userRef = doc(db, 'users', currentUser.uid);
         
-        const unsubDb = onSnapshot(userRef, (snapshot) => {
+        // 3. Assign the new listener to our variable
+        unsubDb = onSnapshot(userRef, (snapshot) => {
           if (snapshot.exists()) {
             const val = snapshot.data();
             
@@ -96,11 +106,15 @@ export const UserProvider = ({ children }) => {
           }
           setLoading(false);
         }, (error) => {
-           console.error("Firestore user sync error:", error);
+           // 4. Gracefully ignore permission errors that happen at the exact millisecond of account deletion
+           if (error.code === 'permission-denied') {
+             console.log("User logged out or deleted. Detaching listener.");
+           } else {
+             console.error("Firestore user sync error:", error);
+           }
            setLoading(false);
         });
 
-        return () => unsubDb();
       } else {
         setUserData(null);
         setMainAddress(null);
@@ -109,7 +123,11 @@ export const UserProvider = ({ children }) => {
       }
     });
 
-    return () => unsubAuth();
+    return () => {
+      // 5. Clean up BOTH listeners when the entire provider unmounts
+      if (unsubDb) unsubDb();
+      unsubAuth();
+    };
   }, []);
 
   return (

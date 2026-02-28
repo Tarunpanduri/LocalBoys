@@ -8,13 +8,20 @@ import {
   ScrollView,
   Modal,
   ActivityIndicator,
-  Alert
+  Alert,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { getAuth, deleteUser, signOut } from "firebase/auth";
-import { getDatabase, ref, remove, update } from "firebase/database";
+
+// 🔥 FIREBASE AUTH & FIRESTORE IMPORTS 🔥
+import { getAuth, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
+import { doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { db } from "../firebase";
+
 import { useFonts } from "expo-font";
 import { Sen_400Regular, Sen_500Medium, Sen_700Bold } from "@expo-google-fonts/sen";
 
@@ -24,18 +31,21 @@ import { useUser } from "../context/UserContext";
 export default function Settings() {
   const navigation = useNavigation();
   const auth = getAuth();
-  const db = getDatabase();
   
-  // 1. USE CONTEXT instead of local fetching
   const { userData, loading: userLoading } = useUser();
 
-  // Toggles State (Default true)
+  // Toggles State
   const [smsEnabled, setSmsEnabled] = useState(true);
   const [whatsappEnabled, setWhatsappEnabled] = useState(true);
 
-  // Deletion State
+  // Deletion & Re-Auth State
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [showReauthModal, setShowReauthModal] = useState(false);
+  const [showFullScreenLoader, setShowFullScreenLoader] = useState(false);
+  
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [reauthPassword, setReauthPassword] = useState("");
+  const [reauthError, setReauthError] = useState("");
 
   const [fontsLoaded] = useFonts({
     Sen_Regular: Sen_400Regular,
@@ -43,112 +53,115 @@ export default function Settings() {
     Sen_Bold: Sen_700Bold,
   });
 
-  // --- 2. SYNC STATE WITH CONTEXT DATA ---
-  // Whenever userData updates in the background (via Context), update local state
   useEffect(() => {
     if (userData) {
       const prefs = userData.preferences || {};
-      
-      // If key exists in DB, use it. Otherwise default to true.
       setSmsEnabled(prefs.smsEnabled !== undefined ? prefs.smsEnabled : true);
       setWhatsappEnabled(prefs.whatsappEnabled !== undefined ? prefs.whatsappEnabled : true);
     }
   }, [userData]);
 
-  // --- 3. HANDLE TOGGLES ---
+  // --- TOGGLES ---
   const handleSmsToggle = async (value) => {
-    setSmsEnabled(value); // Optimistic Update (UI changes immediately)
+    setSmsEnabled(value); 
     const user = auth.currentUser;
     if (user) {
       try {
-        await update(ref(db, `users/${user.uid}/preferences`), {
-          smsEnabled: value
-        });
+        await updateDoc(doc(db, "users", user.uid), { "preferences.smsEnabled": value });
       } catch (error) {
-        console.error("Failed to update SMS pref:", error);
-        setSmsEnabled(!value); // Revert on error
+        setSmsEnabled(!value); 
       }
     }
   };
 
   const handleWhatsappToggle = async (value) => {
-    setWhatsappEnabled(value); // Optimistic Update
+    setWhatsappEnabled(value);
     const user = auth.currentUser;
     if (user) {
       try {
-        await update(ref(db, `users/${user.uid}/preferences`), {
-          whatsappEnabled: value
-        });
+        await updateDoc(doc(db, "users", user.uid), { "preferences.whatsappEnabled": value });
       } catch (error) {
-        console.error("Failed to update WhatsApp pref:", error);
-        setWhatsappEnabled(!value); // Revert on error
+        setWhatsappEnabled(!value); 
       }
     }
   };
 
-  // --- 4. HANDLE DELETE ACCOUNT (SAFE VERSION) ---
-  const handleDeleteAccount = async () => {
+  // --- ENTERPRISE DELETION FLOW ---
+  
+  // 1. Initiate Request
+  const initiateDeletion = () => {
     const user = auth.currentUser;
     if (!user) return;
 
-    // --- STEP A: SAFETY CHECK BEFORE DELETING DATA ---
     const lastSignInTime = new Date(user.metadata.lastSignInTime).getTime();
-    const currentTime = Date.now();
-    const timeSinceLogin = currentTime - lastSignInTime;
+    const timeSinceLogin = Date.now() - lastSignInTime;
     const REAUTH_THRESHOLD = 5 * 60 * 1000; // 5 minutes
 
-    // If login was > 5 mins ago, force re-login
+    setShowDeleteModal(false);
+
+    // If session is old, prompt in-app password confirmation
     if (timeSinceLogin > REAUTH_THRESHOLD) {
-      setShowDeleteModal(false);
-      Alert.alert(
-        "Security Check Required", 
-        "For your security, you must have recently logged in to delete your account. Please log in again.",
-        [
-          { 
-            text: "Log In Now", 
-            onPress: async () => {
-              await signOut(auth);
-              navigation.reset({ index: 0, routes: [{ name: "Login" }] });
-            }
-          },
-          { text: "Cancel", style: "cancel" }
-        ]
-      );
+      setReauthPassword("");
+      setReauthError("");
+      setShowReauthModal(true);
+    } else {
+      executeDeletion();
+    }
+  };
+
+  // 2. Re-Authenticate (If necessary)
+  const handleReauthenticate = async () => {
+    const user = auth.currentUser;
+    if (!user || !reauthPassword.trim()) {
+      setReauthError("Password is required.");
       return;
     }
 
-    // --- STEP B: PROCEED WITH DELETION ---
-    setIsDeleting(true);
+    setIsAuthenticating(true);
+    setReauthError("");
+    try {
+      const credential = EmailAuthProvider.credential(user.email, reauthPassword);
+      await reauthenticateWithCredential(user, credential);
+      
+      // Stop local loader, close modal, and proceed to wipe
+      setIsAuthenticating(false);
+      setShowReauthModal(false);
+      await executeDeletion();
+    } catch (error) {
+      setIsAuthenticating(false);
+      setReauthError("Incorrect password. Please try again.");
+    }
+  };
+
+  // 3. Execute Database Wipe
+  const executeDeletion = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    // Show full screen blocking loader
+    setShowDeleteModal(false);
+    setShowReauthModal(false);
+    setShowFullScreenLoader(true);
+
     try {
       const userId = user.uid;
 
-      // 1. Delete User Data from Realtime Database
-      await Promise.all([
-        remove(ref(db, `users/${userId}`)),
-        remove(ref(db, `orders/${userId}`))
-      ]);
+      // 1. MUST wipe Firestore Data FIRST while the user is still Authenticated (to pass security rules)
+      await deleteDoc(doc(db, "carts", userId));
+      await deleteDoc(doc(db, "users", userId));
 
-      // 2. Delete User Authentication
+      // 2. Delete Firebase Auth Account LAST
       await deleteUser(user);
 
-      setShowDeleteModal(false);
-      Alert.alert("Account Deleted", "Your data has been erased. We're sorry to see you go.");
-      
+      // 3. Clean up and navigate out
+      setShowFullScreenLoader(false);
+      Alert.alert("Account Deleted", "Your personal data has been erased. We're sorry to see you go.");
       navigation.reset({ index: 0, routes: [{ name: "Login" }] });
 
     } catch (error) {
-      console.error("Delete Error", error);
-      
-      if (error.code === 'auth/requires-recent-login') {
-         Alert.alert(
-          "Security Check", 
-          "Please log out and log back in to delete your account."
-        );
-      } else {
-        Alert.alert("Error", "Could not delete account. Please try again later.");
-      }
-    } finally {
-      setIsDeleting(false);
+      console.error("Deletion Error", error);
+      setShowFullScreenLoader(false);
+      Alert.alert("Error", "Could not complete account deletion. Please try again or contact support.");
     }
   };
 
@@ -158,7 +171,6 @@ export default function Settings() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#000" />
@@ -167,8 +179,6 @@ export default function Settings() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        
-        {/* SECTION 1: RECOMMENDATIONS */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionHeaderText}>RECOMMENDATIONS & REMINDERS</Text>
         </View>
@@ -176,13 +186,10 @@ export default function Settings() {
         <View style={styles.whiteContainer}>
           <View style={styles.infoRow}>
             <Text style={styles.infoText}>
-              Keep this on to receive offer recommendations & timely reminders based on your interests
+              Keep this on to receive offer recommendations & timely reminders based on your interests.
             </Text>
           </View>
-          
           <View style={styles.divider} />
-
-          {/* SMS Toggle */}
           <View style={styles.row}>
             <Text style={styles.rowLabel}>SMS</Text>
             <Switch
@@ -193,10 +200,7 @@ export default function Settings() {
               value={smsEnabled}
             />
           </View>
-
           <View style={styles.divider} />
-
-          {/* WhatsApp Toggle */}
           <View style={styles.row}>
             <Text style={styles.rowLabel}>WhatsApp</Text>
             <Switch
@@ -210,10 +214,9 @@ export default function Settings() {
         </View>
 
         <Text style={styles.footerNote}>
-          Order related SMS cannot be disabled as they are critical to provide service
+          Order related SMS cannot be disabled as they are critical to provide service.
         </Text>
 
-        {/* SECTION 3: ACCOUNT DELETION */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionHeaderText}>ACCOUNT DELETION</Text>
         </View>
@@ -223,10 +226,9 @@ export default function Settings() {
             <Text style={styles.deleteText}>Delete Account</Text>
           </TouchableOpacity>
         </View>
-
       </ScrollView>
 
-      {/* --- DELETE CONFIRMATION MODAL --- */}
+      {/* --- WARNING MODAL --- */}
       <Modal
         visible={showDeleteModal}
         transparent={true}
@@ -240,31 +242,85 @@ export default function Settings() {
             </View>
             <Text style={styles.modalTitle}>Delete Account?</Text>
             <Text style={styles.modalText}>
-              No data is stored after this. We will miss you!{"\n\n"}
-              This will permanently delete your profile and order history.
+              This action is permanent. It will erase your profile and you will lose access to your order history.
             </Text>
             
             <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowDeleteModal(false)}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteBtn} onPress={initiateDeletion}>
+                <Text style={styles.deleteBtnText}>Proceed</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* --- IN-APP RE-AUTHENTICATION MODAL --- */}
+      <Modal
+        visible={showReauthModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => !isAuthenticating && setShowReauthModal(false)}
+      >
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.warningIcon, { backgroundColor: '#FFF3E0' }]}>
+              <Ionicons name="lock-closed" size={32} color="#FF9800" />
+            </View>
+            <Text style={styles.modalTitle}>Security Verification</Text>
+            <Text style={styles.modalText}>
+              For your security, please enter your password to confirm account deletion.
+            </Text>
+
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Enter your password"
+              placeholderTextColor="#aaa"
+              secureTextEntry
+              value={reauthPassword}
+              onChangeText={(text) => {
+                setReauthPassword(text);
+                setReauthError("");
+              }}
+              editable={!isAuthenticating}
+            />
+            {reauthError ? <Text style={styles.errorText}>{reauthError}</Text> : null}
+
+            <View style={styles.modalButtons}>
               <TouchableOpacity 
                 style={styles.cancelBtn} 
-                onPress={() => setShowDeleteModal(false)}
-                disabled={isDeleting}
+                onPress={() => setShowReauthModal(false)}
+                disabled={isAuthenticating}
               >
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
-              
               <TouchableOpacity 
                 style={styles.deleteBtn} 
-                onPress={handleDeleteAccount}
-                disabled={isDeleting}
+                onPress={handleReauthenticate}
+                disabled={isAuthenticating}
               >
-                {isDeleting ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.deleteBtnText}>Delete</Text>
-                )}
+                {isAuthenticating ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.deleteBtnText}>Confirm</Text>}
               </TouchableOpacity>
             </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* --- FULL SCREEN LOADING MODAL --- */}
+      <Modal
+        visible={showFullScreenLoader}
+        transparent={true}
+        animationType="fade"
+        // Prevent closing by tapping back button on Android
+        onRequestClose={() => {}} 
+      >
+        <View style={styles.fullScreenLoaderOverlay}>
+          <View style={styles.fullScreenLoaderContent}>
+            <ActivityIndicator size="large" color="#E63946" />
+            <Text style={styles.fullScreenLoaderText}>Deleting account...</Text>
+            <Text style={styles.fullScreenLoaderSubText}>Please do not close the app</Text>
           </View>
         </View>
       </Modal>
@@ -275,114 +331,39 @@ export default function Settings() {
 
 const styles = StyleSheet.create({
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#F4F5F7" },
-  container: {
-    flex: 1,
-    backgroundColor: "#F4F5F7", 
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0E0E0",
-  },
-  backButton: {
-    paddingRight: 16,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontFamily: "Sen_Bold",
-    color: "#333",
-    textTransform: "uppercase",
-  },
-  scrollContent: {
-    paddingBottom: 40,
-  },
-  sectionHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 24,
-    paddingBottom: 8,
-  },
-  sectionHeaderText: {
-    fontSize: 12,
-    fontFamily: "Sen_Bold",
-    color: "#666",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  whiteContainer: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "#E0E0E0",
-  },
-  infoRow: {
-    paddingVertical: 16,
-  },
-  infoText: {
-    fontSize: 13,
-    fontFamily: "Sen_Regular",
-    color: "#666",
-    lineHeight: 20,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 16,
-  },
-  rowLabel: {
-    fontSize: 16,
-    fontFamily: "Sen_Medium",
-    color: "#222",
-  },
-  deleteText: {
-    fontSize: 16,
-    fontFamily: "Sen_Bold",
-    color: "#FF6B00",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#F0F0F0",
-  },
-  footerNote: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    fontSize: 12,
-    fontFamily: "Sen_Regular",
-    color: "#888",
-    lineHeight: 16,
-  },
+  container: { flex: 1, backgroundColor: "#F4F5F7" },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#E0E0E0" },
+  backButton: { paddingRight: 16 },
+  headerTitle: { fontSize: 16, fontFamily: "Sen_Bold", color: "#333", textTransform: "uppercase" },
+  scrollContent: { paddingBottom: 40 },
+  sectionHeader: { paddingHorizontal: 16, paddingTop: 24, paddingBottom: 8 },
+  sectionHeaderText: { fontSize: 12, fontFamily: "Sen_Bold", color: "#666", textTransform: "uppercase", letterSpacing: 0.5 },
+  whiteContainer: { backgroundColor: "#fff", paddingHorizontal: 16, borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#E0E0E0" },
+  infoRow: { paddingVertical: 16 },
+  infoText: { fontSize: 13, fontFamily: "Sen_Regular", color: "#666", lineHeight: 20 },
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 16 },
+  rowLabel: { fontSize: 16, fontFamily: "Sen_Medium", color: "#222" },
+  deleteText: { fontSize: 16, fontFamily: "Sen_Bold", color: "#E63946" },
+  divider: { height: 1, backgroundColor: "#F0F0F0" },
+  footerNote: { paddingHorizontal: 16, paddingTop: 8, fontSize: 12, fontFamily: "Sen_Regular", color: "#888", lineHeight: 16 },
   
   // MODAL STYLES
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 25,
-    width: '100%',
-    alignItems: 'center',
-    elevation: 10
-  },
-  warningIcon: {
-    backgroundColor: '#FFECEC',
-    padding: 15,
-    borderRadius: 50,
-    marginBottom: 15
-  },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: '#fff', borderRadius: 24, padding: 25, width: '100%', alignItems: 'center', elevation: 10 },
+  warningIcon: { backgroundColor: '#FFECEC', padding: 15, borderRadius: 50, marginBottom: 15 },
   modalTitle: { fontSize: 20, fontFamily: "Sen_Bold", color: '#1A1A1A', marginBottom: 10 },
-  modalText: { fontSize: 14, fontFamily: "Sen_Regular", color: '#666', textAlign: 'center', lineHeight: 20, marginBottom: 25 },
-  modalButtons: { flexDirection: 'row', width: '100%', gap: 12 },
+  modalText: { fontSize: 14, fontFamily: "Sen_Regular", color: '#666', textAlign: 'center', lineHeight: 20, marginBottom: 20 },
+  passwordInput: { width: '100%', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 14, fontSize: 15, fontFamily: "Sen_Regular", marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
+  errorText: { color: '#E63946', fontSize: 12, fontFamily: "Sen_Medium", marginBottom: 15, width: '100%', textAlign: 'left', paddingLeft: 4 },
+  modalButtons: { flexDirection: 'row', width: '100%', gap: 12, marginTop: 10 },
   cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#F3F4F6', alignItems: 'center' },
   cancelBtnText: { color: '#666', fontSize: 16, fontFamily: "Sen_Medium" },
   deleteBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#E63946', alignItems: 'center', justifyContent: 'center' },
-  deleteBtnText: { color: '#fff', fontSize: 16, fontFamily: "Sen_Bold" }
+  deleteBtnText: { color: '#fff', fontSize: 16, fontFamily: "Sen_Bold" },
+
+  // FULL SCREEN LOADER STYLES
+  fullScreenLoaderOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
+  fullScreenLoaderContent: { backgroundColor: '#fff', padding: 30, borderRadius: 20, alignItems: 'center', elevation: 10, minWidth: 200 },
+  fullScreenLoaderText: { marginTop: 20, fontSize: 16, fontFamily: "Sen_Bold", color: '#1A1A1A' },
+  fullScreenLoaderSubText: { marginTop: 6, fontSize: 13, fontFamily: "Sen_Regular", color: '#666' }
 });

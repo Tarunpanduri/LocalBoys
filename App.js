@@ -12,12 +12,13 @@ import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // --- CONTEXT PROVIDERS  ---
-import { ShopProvider } from './context/ShopContext';
 import { CartProvider } from './context/CartContext';
 import { AdminProvider } from './context/AdminContext';
 import { UserProvider } from './context/UserContext';
 import { CouponProvider } from './context/CouponContext';
 import { OrderProvider } from './context/OrderContext';
+
+// import zustand stores
 
 // Screens
 import Login from './screens/login';
@@ -37,7 +38,6 @@ import TermsAndConditionsScreen from './screens/Terms';
 import ContactUs from './screens/contact';
 import Settings from './screens/settings';
 
-// import updatemodal from './components/UpdateModal';
 
 // Firebase
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -181,7 +181,6 @@ export default function App() {
   return (
     <RootSiblingParent>
       <View style={styles.container} onLayout={onLayoutRootView}>
-        <ShopProvider>
           <CartProvider>
             <AdminProvider>
               <UserProvider>
@@ -212,7 +211,6 @@ export default function App() {
               </UserProvider>
             </AdminProvider>
           </CartProvider>
-        </ShopProvider>
       </View>
     </RootSiblingParent>
   );

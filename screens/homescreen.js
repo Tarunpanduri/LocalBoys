@@ -19,11 +19,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import { getAuth } from "firebase/auth";
-import LottieView from 'lottie-react-native';
 import UpdateModal from "../components/UpdateModal";
 
-// 1. IMPORT CONTEXTS
-import { useShops } from "../context/ShopContext";
+// IMPORT ZUSTAND STORE & CONTEXTS
+import { useShopStore } from "../store/ShopStore"; 
 import { useAdmin } from "../context/AdminContext"; 
 import { useUser } from "../context/UserContext"; 
 
@@ -103,8 +102,27 @@ const SkeletonLoadingScreen = () => {
   );
 };
 
+// --- MEMOIZED SHOP CARD (Production Performance Boost) ---
+const ShopCard = React.memo(({ shop, onPress }) => (
+  <TouchableOpacity style={styles.shopCard} onPress={() => onPress(shop.id, shop)}>
+    <Image source={{ uri: shop.image }} style={styles.shopImage} resizeMode="cover" />
+    <View style={styles.shopInfo}>
+      <Text style={styles.shopName}>{shop.name}</Text>
+      <View style={styles.shopMetaRow}>
+        <View style={styles.metaItem}><FontAwesome5 name="star" size={14} /><Text style={styles.metaText}> {shop.rating ?? "—"}</Text></View>
+        <View style={[styles.metaItem, { marginLeft: 12 }]}><MaterialIcons name="local-shipping" size={16} /><Text style={styles.metaText}> Free</Text></View>
+        <View style={[styles.metaItem, { marginLeft: 12 }]}><Ionicons name="time-outline" size={16} /><Text style={styles.metaText}> {shop.deliveryTime ?? `${shop.avgPrepTime ?? "—"} min`}</Text></View>
+      </View>
+    </View>
+  </TouchableOpacity>
+));
+
 export default function HomeScreen({ navigation }) {
-  const { shops, loading: shopsLoading, fetchNearbyShops } = useShops();
+  // EXTRACT FROM ZUSTAND STORE
+  const shops = useShopStore((state) => state.shops);
+  const shopsLoading = useShopStore((state) => state.loading);
+  const fetchNearbyShops = useShopStore((state) => state.fetchNearbyShops);
+
   const { categoryMeta, eventUrl, headerAnimationUrl, loading: adminLoading, determineBranch, branchConfig, activeBranchId } = useAdmin();
   const { userLocation, mainAddress, loading: userLoading } = useUser(); 
 
@@ -154,8 +172,11 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
+  const handleShopPress = useCallback((shopId, shop) => {
+    navigation.navigate("ShopDetails", { shopId, shop });
+  }, [navigation]);
+
   // --- 1. COORDINATION EFFECT (BRANCH) ---
-  // DEPENDENCY FIX: Only primitive values allowed here to stop infinite loops.
   useEffect(() => {
     if (userLocation?.lat && userLocation?.lng) {
       determineBranch(userLocation.lat, userLocation.lng);
@@ -163,7 +184,6 @@ export default function HomeScreen({ navigation }) {
   }, [userLocation?.lat, userLocation?.lng, determineBranch]);
 
   // --- 2. COORDINATION EFFECT (FETCH SHOPS) ---
-  // DEPENDENCY FIX: Using specific radius number, not the whole config object.
   useEffect(() => {
     if (userLoading || adminLoading) return; 
 
@@ -226,7 +246,6 @@ export default function HomeScreen({ navigation }) {
     });
   }, [dynamicCategories, shops, activeTab]);
 
-
   const onRefresh = useCallback(async () => {
     const radius = branchConfig?.shopVisibilityRadiusKm;
     if (userLocation?.lat && userLocation?.lng && radius) {
@@ -236,7 +255,6 @@ export default function HomeScreen({ navigation }) {
       setRefreshing(false);
     }
   }, [userLocation?.lat, userLocation?.lng, branchConfig?.shopVisibilityRadiusKm, fetchNearbyShops, determineBranch]);
-
 
   const activeCategoryColor = categoryMeta[dynamicCategories.find((c) => c.id === activeCategory)?.label]?.Theme || "#66BB6A";
   
@@ -266,20 +284,6 @@ export default function HomeScreen({ navigation }) {
     );
   };
 
-  const ShopCard = ({ shop }) => (
-    <TouchableOpacity style={styles.shopCard} onPress={() => navigation?.navigate?.("ShopDetails", { shopId: shop.id, shop })}>
-      <Image source={{ uri: shop.image }} style={styles.shopImage} resizeMode="cover" />
-      <View style={styles.shopInfo}>
-        <Text style={styles.shopName}>{shop.name}</Text>
-        <View style={styles.shopMetaRow}>
-          <View style={styles.metaItem}><FontAwesome5 name="star" size={14} /><Text style={styles.metaText}> {shop.rating ?? "—"}</Text></View>
-          <View style={[styles.metaItem, { marginLeft: 12 }]}><MaterialIcons name="local-shipping" size={16} /><Text style={styles.metaText}> Free</Text></View>
-          <View style={[styles.metaItem, { marginLeft: 12 }]}><Ionicons name="time-outline" size={16} /><Text style={styles.metaText}> {shop.deliveryTime ?? `${shop.avgPrepTime ?? "—"} min`}</Text></View>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-
   if (shopsLoading || adminLoading || userLoading || !fontsLoaded || !hasFetchedShops) {
     return <SkeletonLoadingScreen />;
   }
@@ -302,7 +306,7 @@ export default function HomeScreen({ navigation }) {
       <FlatList
         data={filteredShops} 
         keyExtractor={(item) => item.id || Math.random().toString()} 
-        renderItem={({ item }) => <ShopCard shop={item} />} 
+        renderItem={({ item }) => <ShopCard shop={item} onPress={handleShopPress} />} 
         contentContainerStyle={{ paddingBottom: 90 }} 
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} 
         ListEmptyComponent={() => (
@@ -320,7 +324,6 @@ export default function HomeScreen({ navigation }) {
     <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
       <StatusBar barStyle="dark-content" backgroundColor="#19212a" translucent={false} />
       <LinearGradient colors={[activeCategoryColor || "#66BB6A", "#ffffff"]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 180 }} />
-      <UpdateModal />
       <View style={styles.screen}>
         <View style={styles.headerRow}>
           <View style={styles.deliveryCol}>
@@ -349,25 +352,6 @@ export default function HomeScreen({ navigation }) {
             <Ionicons name="search" size={18} style={{ marginRight: 8 }} />
             <TextInput placeholder="Search products or services" placeholderTextColor="#666" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
           </View>
-
-          {/* --- NEW SDUI ANIMATION / BANNER BLOCK ---
-          <View style={{ alignItems: 'center', width: '100%' }}>
-            {headerAnimationUrl ? (
-              <LottieView
-                source={{ uri: headerAnimationUrl }}
-                autoPlay
-                loop
-                style={{ width: width - 36, maxHeight: 130 }}
-                resizeMode="contain"
-              />
-            ) : eventUrl ? (
-              <Image 
-                source={{ uri: eventUrl }} 
-                style={[styles.banner, { width: width - 36, height: (width - 100) * 0.5 }]} 
-                resizeMode="stretch" 
-              />
-            ) : null}
-          </View> */}
 
           {renderContent()}
         </View>
@@ -453,5 +437,3 @@ const styles = StyleSheet.create({
   modalCancelBtn: { paddingVertical: 10 },
   modalCancelText: { fontFamily: 'Sen_Medium', color: '#888', fontSize: 14 },
 });
-
-// https://i.ibb.co/FPsCSW3/hpy-sankranti.gif

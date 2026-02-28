@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform, Modal, FlatList, Animated, Dimensions } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform, Modal, FlatList, Animated, Dimensions, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { db, auth } from "../firebase";
-import { ref, get, set, push, remove } from "firebase/database";
+import { ref, get, set, push } from "firebase/database";
 import Toast from "react-native-root-toast";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -11,12 +11,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
-// --- IMPORT CONTEXTS ---
+// --- IMPORT CONTEXTS & STORES ---
 import { useUser } from "../context/UserContext";
 import { useAdmin } from "../context/AdminContext";
-import { useShops } from "../context/ShopContext";
 import { useCoupon } from "../context/CouponContext";
-import { useCart } from "../context/CartContext";
+import { useShopStore } from "../store/ShopStore"; // <-- ZUSTAND
+import { useCartStore } from "../store/cartstore"; // <-- ZUSTAND
 
 const { width, height } = Dimensions.get("window");
 
@@ -27,6 +27,11 @@ const getDistanceInKm = (lat1, lon1, lat2, lon2) => {
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+};
+
+const calculateCommission = (subtotal, shopCommission, isPremiumOrder = false) => {
+  if (isPremiumOrder) return Math.ceil(subtotal * 0.00001);
+  return Math.ceil(subtotal * (shopCommission / 100));
 };
 
 // --- SKELETONS ---
@@ -93,19 +98,23 @@ export default function CheckoutTwoScreen() {
   const bottomSheetRef = useRef(null);
   const snapPoints = useMemo(() => ["55%", "92%"], []);
   
-  // --- DESTRUCTURE PARAMS with explicit isBuyNow flag (default false) ---
+  // --- DESTRUCTURE PARAMS ---
   const { 
     shopId: paramShopId, 
     cart: paramCart, 
-    isBuyNow = false   // Pass isBuyNow=true for direct purchases.
+    isBuyNow = false 
   } = route.params || {};
 
-  // --- CONTEXTS ---
+  // --- CONTEXTS & STORES ---
   const { user, userData, mainAddress, loading: userLoading } = useUser();
   const { branchConfig, loading: adminLoading } = useAdmin();
-  const { shops, loading: shopsLoading } = useShops();
   const { validateCoupon } = useCoupon();
-  const { cartData, clearCart, loading: contextCartLoading } = useCart();
+
+  // ZUSTAND
+  const shops = useShopStore((state) => state.shops);
+  const shopsLoading = useShopStore((state) => state.loading);
+  const cartData = useCartStore((state) => state.cartData);
+  const clearCart = useCartStore((state) => state.clearCart);
 
   // --- STATE ---
   const [shopId] = useState(paramShopId);
@@ -137,8 +146,9 @@ export default function CheckoutTwoScreen() {
 
   // --- LOAD DATA ---
   useEffect(() => {
-    if (userLoading || shopsLoading || contextCartLoading || !shopId) return;
+    if (userLoading || shopsLoading || !shopId) return;
 
+    // A. Set Shop Data
     const foundShop = shops.find(s => s.id === shopId);
     if (foundShop) {
       setShop(foundShop);
@@ -169,7 +179,7 @@ export default function CheckoutTwoScreen() {
       setPickupAddress({ id: firstId, ...userData.addresses[firstId]});
     }
 
-    // Load cart: priority = paramCart (Buy Now) → Context (normal cart)
+    // B. Load Cart
     if (paramCart) {
       const cleanCart = {};
       Object.keys(paramCart).forEach(k => {
@@ -189,7 +199,7 @@ export default function CheckoutTwoScreen() {
        setCart({});
        setLoadingCart(false);
     }
-  }, [userLoading, shopsLoading, contextCartLoading, shopId, userData, mainAddress, paramCart, cartData]);
+  }, [userLoading, shopsLoading, shopId, userData, mainAddress, paramCart, cartData, shops]);
 
   // --- CALCULATE TOTALS ---
   useEffect(() => {
@@ -219,9 +229,7 @@ export default function CheckoutTwoScreen() {
     const calcTotal = calcSubtotal - discount + calcDeliveryFee + calcPlatFee;
     setTotal(calcTotal);
 
-    const commissionAmount = calcSubtotal > 10000 ? 
-      Math.ceil(calcSubtotal * 0.00001) : 
-      Math.ceil(calcSubtotal * (shopCommission / 100));
+    const commissionAmount = calculateCommission(calcSubtotal, shopCommission, calcSubtotal > 10000);
     setRestaurantTotal(Math.ceil(calcSubtotal - commissionAmount));
 
   }, [cart, pickupAddress, dropAddress, discount, shopCommission, deliveryChargePerKm]);
@@ -321,12 +329,9 @@ export default function CheckoutTwoScreen() {
       const newOrderRef = push(ref(db, `orders/${user.uid}`));
       await set(newOrderRef, orderData);
       
-      // ✅ CLEAR CART ONLY IF THIS IS NOT A BUY NOW ORDER
+      // Clear Cart unless it's a Buy Now flow
       if (!isBuyNow) {
-        console.log("Clearing cart after successful order placement");
-        await clearCart();  // Now silent – no confirmation alert
-      } else {
-        console.log("Buy Now flow - skipping cart clear");
+        await clearCart();  
       }
 
       navigation.replace("OrderConfirmation", { 
@@ -421,7 +426,6 @@ export default function CheckoutTwoScreen() {
             backgroundStyle={styles.bottomSheetBackground}
             handleIndicatorStyle={styles.bottomSheetIndicator}
           >
-            {/* Scrollable Content inside Bottom Sheet */}
             <BottomSheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
               {isPremiumOrder && (
                 <View style={styles.premiumBadge}>
@@ -532,7 +536,7 @@ export default function CheckoutTwoScreen() {
             </BottomSheetScrollView>
           </BottomSheet>
 
-          {/* Sticky Bottom Bar - FIXED ABSOLUTELY AT THE BOTTOM OF THE SCREEN */}
+          {/* Sticky Bottom Bar */}
           <View style={styles.bottomBar}>
             <View>
               <Text style={styles.totalLabel}>TOTAL</Text>
@@ -548,7 +552,6 @@ export default function CheckoutTwoScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Address Modal moved to the end of the container */}
           <Modal 
             visible={showAddressModal} 
             animationType="slide" 
@@ -585,7 +588,6 @@ export default function CheckoutTwoScreen() {
   );
 }
 
-// ---------- STYLES ----------
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#0e0e12" }, 
   container: { flex: 1, backgroundColor: "#0e0e12", position: "relative" }, 
@@ -607,7 +609,6 @@ const styles = StyleSheet.create({
   selectAddressButton: { backgroundColor: "#2a2a2f", padding: 16, borderRadius: 10, alignItems: "center", borderWidth: 1, borderColor: "#ff7a00", borderStyle: "dashed" }, 
   selectAddressText: { color: "#ff7a00", fontSize: 14, fontFamily: "Sen_Medium" }, 
   
-  // New Bottom Sheet Styles for Gorhom
   bottomSheetBackground: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   bottomSheetIndicator: { backgroundColor: "#ccc", width: 40, height: 4 },
   skeletonBottomSheet: { position: "absolute", bottom: 0, width: "100%", backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
@@ -644,7 +645,6 @@ const styles = StyleSheet.create({
   transactionInput: { backgroundColor: "#f0f0f0", color: "#0e0e12", borderRadius: 8, width: "90%", padding: 10, marginBottom: 8, fontFamily: "Sen_Regular" }, 
   qrNote: { fontSize: 12, color: "#555", textAlign: "center", fontFamily: "Sen_Regular" }, 
   
-  // FIXED BOTTOM BAR STYLES
   bottomBar: { 
     position: "absolute", 
     bottom: 0, 
@@ -655,10 +655,10 @@ const styles = StyleSheet.create({
     alignItems: "center", 
     backgroundColor: "#fff", 
     padding: 16, 
-    paddingBottom: Platform.OS === 'ios' ? 34 : 16, // Extra padding for iOS home indicator
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16, 
     borderTopWidth: 1, 
     borderTopColor: "#ddd",
-    zIndex: 100 // High zIndex ensures it overlays the bottom sheet
+    zIndex: 100 
   },
   
   totalLabel: { color: "#555", fontSize:Platform.OS === 'ios' ? 12 : 12, fontFamily: "Sen_Regular" }, 

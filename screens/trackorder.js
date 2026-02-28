@@ -14,8 +14,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font"; 
 
-// IMPORT THE NEW CONTEXT
-import { useOrders } from "../context/OrderContext";
+// --- IMPORT ZUSTAND STORE ---
+import { useOrderStore } from "../store/orderStore";
 
 const { width, height } = Dimensions.get("window");
 
@@ -163,8 +163,9 @@ const AnimatedTimelineStep = ({ step, index, activeIndex }) => {
   );
 };
 
-const TrackOrder = ({ navigation }) => {
-  const { activeOrders, loadingOrders } = useOrders(); 
+export default function TrackOrder({ navigation }) {
+  // Pull from Zustand
+  const { activeOrders, loadingOrders, startListening, stopListening } = useOrderStore(); 
   const [selectedOrder, setSelectedOrder] = useState(null);
 
   const [fontsLoaded] = useFonts({
@@ -172,12 +173,20 @@ const TrackOrder = ({ navigation }) => {
     ...MaterialIcons.font,
   });
 
-  // --- NEW: Sort orders dynamically so newest is always first ---
+  // PRODUCTION PATTERN: Mount-Only Realtime Listener
+  useEffect(() => {
+    startListening(); // Opens Firebase connection when screen mounts
+    return () => {
+      stopListening(); // Closes Firebase connection when user goes back
+    };
+  }, []);
+
+  // Sort orders dynamically so newest is always first
   const sortedOrders = useMemo(() => {
     return [...activeOrders].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }, [activeOrders]);
 
-  // Update effect to use sortedOrders instead of activeOrders
+  // Handle selected order updates seamlessly
   useEffect(() => {
     if (sortedOrders.length === 0) {
       setSelectedOrder(null);
@@ -239,7 +248,7 @@ const TrackOrder = ({ navigation }) => {
 
   const currentIndex = STATUS_STEPS.findIndex((s) => s.key === selectedOrder?.status);
 
-  // --- NEW: 12 Hour Time Formatter ---
+  // 12 Hour Time Formatter
   const formattedTime = selectedOrder?.createdAt 
     ? new Date(selectedOrder.createdAt).toLocaleString("en-US", {
         day: "2-digit",
@@ -269,7 +278,6 @@ const TrackOrder = ({ navigation }) => {
         <View style={styles.detailsCard}>
           <Text style={styles.shopTitle}>{selectedOrder?.shopname}</Text>
           
-          {/* Apply newly formatted 12-hour AM/PM time */}
           <Text style={styles.orderTime}>Ordered At {formattedTime}</Text>
           
           <View style={styles.itemList}>{Object.values(selectedOrder?.items || {}).map((itm, idx) => <Text key={idx} style={styles.itemText}>{itm.qty}x <Text style={styles.itemBold}>{itm.productname}</Text></Text>)}</View>
@@ -295,9 +303,7 @@ const TrackOrder = ({ navigation }) => {
       </ScrollView>
     </SafeAreaView>
   );
-};
-
-export default TrackOrder;
+}
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8F9FA" },

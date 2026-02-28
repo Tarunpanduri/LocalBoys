@@ -16,15 +16,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { auth, db } from "../firebase";
 import { getAuth } from "firebase/auth";
-// CHANGED: Imported 'get' instead of 'onValue'
-import { ref as dbRef, get } from "firebase/database"; 
 import Toast from "react-native-root-toast";
 import { useFonts } from "expo-font";
 
-// --- IMPORT CONTEXTS ---
-import { useCart } from "../context/CartContext"; 
+// --- IMPORT NEW ZUSTAND STORES ---
+import { useCartStore } from "../store/cartstore"; 
+import { useProductStore } from "../store/productStore";
 import { useAdmin } from "../context/AdminContext"; 
 
 const { width } = Dimensions.get("window");
@@ -35,236 +33,136 @@ const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   const translateX = useRef(new Animated.Value(-width)).current;
 
   useEffect(() => {
-    Animated.loop(
-      Animated.timing(translateX, {
-        toValue: width,
-        duration: 1000,
-        useNativeDriver: true,
-      })
-    ).start();
+    Animated.loop(Animated.timing(translateX, { toValue: width, duration: 1000, useNativeDriver: true })).start();
   }, [width]);
 
   return (
-    <View
-      style={[
-        {
-          width: width,
-          height: height,
-          backgroundColor: "#E1E9EE",
-          borderRadius: borderRadius,
-          overflow: "hidden",
-        },
-        style,
-      ]}
-    >
-      <Animated.View
-        style={{
-          width: "100%",
-          height: "100%",
-          transform: [{ translateX }],
-        }}
-      >
-        <LinearGradient
-          colors={["transparent", "rgba(255, 255, 255, 0.6)", "transparent"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={{ width: "100%", height: "100%" }}
-        />
+    <View style={[{ width, height, backgroundColor: "#E1E9EE", borderRadius, overflow: "hidden" }, style]}>
+      <Animated.View style={{ width: "100%", height: "100%", transform: [{ translateX }] }}>
+        <LinearGradient colors={["transparent", "rgba(255, 255, 255, 0.6)", "transparent"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width: "100%", height: "100%" }} />
       </Animated.View>
     </View>
   );
 };
 
-const ShopDetailsSkeleton = () => {
-  return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      <View style={[styles.headerRow, { marginBottom: 10 }]}>
-        <SkeletonItem width={38} height={38} borderRadius={19} />
-        <SkeletonItem width={120} height={20} />
-        <SkeletonItem width={38} height={38} borderRadius={19} />
+const ShopDetailsSkeleton = () => (
+  <SafeAreaView style={styles.safe}>
+    <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+    <View style={[styles.headerRow, { marginBottom: 10 }]}><SkeletonItem width={38} height={38} borderRadius={19} /><SkeletonItem width={120} height={20} /><SkeletonItem width={38} height={38} borderRadius={19} /></View>
+    <View style={{ paddingHorizontal: CARD_PADDING }}>
+      <SkeletonItem width="100%" height={160} borderRadius={18} style={{ marginBottom: 12 }} />
+      <SkeletonItem width={200} height={24} style={{ marginBottom: 8 }} />
+      <SkeletonItem width="90%" height={14} style={{ marginBottom: 6 }} />
+      <View style={{ flexDirection: 'row', gap: 15, marginBottom: 20 }}><SkeletonItem width={50} height={16} /><SkeletonItem width={50} height={16} /></View>
+      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>{[1, 2, 3].map(i => <SkeletonItem key={i} width={70} height={32} borderRadius={22} />)}</View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+        {[1, 2, 3, 4].map(i => (
+          <View key={i} style={{ width: CARD_WIDTH, marginBottom: CARD_GUTTER, borderRadius: 14, borderWidth: 1, borderColor: '#eee' }}>
+            <SkeletonItem width="100%" height={CARD_WIDTH * 0.6} borderRadius={0} />
+            <View style={{ padding: 10 }}><SkeletonItem width="90%" height={16} style={{ marginBottom: 6 }} /><SkeletonItem width="70%" height={12} style={{ marginBottom: 10 }} /></View>
+          </View>
+        ))}
       </View>
-      <View style={{ paddingHorizontal: CARD_PADDING }}>
-        <SkeletonItem width="100%" height={160} borderRadius={18} style={{ marginBottom: 12 }} />
-        <SkeletonItem width={200} height={24} style={{ marginBottom: 8 }} />
-        <SkeletonItem width="90%" height={14} style={{ marginBottom: 6 }} />
-        <SkeletonItem width="60%" height={14} style={{ marginBottom: 14 }} />
-        <View style={{ flexDirection: 'row', gap: 15, marginBottom: 20 }}>
-          <SkeletonItem width={50} height={16} />
-          <SkeletonItem width={50} height={16} />
-          <SkeletonItem width={50} height={16} />
-        </View>
-        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
-          {[1, 2, 3, 4].map((i) => (
-            <SkeletonItem key={i} width={70} height={32} borderRadius={22} />
-          ))}
-        </View>
-        <SkeletonItem width={100} height={20} style={{ marginBottom: 12 }} />
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-          {[1, 2, 3, 4].map((i) => (
-            <View key={i} style={{ width: CARD_WIDTH, marginBottom: CARD_GUTTER, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: '#eee' }}>
-              <SkeletonItem width="100%" height={CARD_WIDTH * 0.6} borderRadius={0} />
-              <View style={{ padding: 10 }}>
-                <SkeletonItem width="90%" height={16} style={{ marginBottom: 6 }} />
-                <SkeletonItem width="70%" height={12} style={{ marginBottom: 10 }} />
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <SkeletonItem width={40} height={16} />
-                  <SkeletonItem width={36} height={36} borderRadius={18} />
-                </View>
-              </View>
-            </View>
-          ))}
-        </View>
-      </View>
-    </SafeAreaView>
-  );
-};
+    </View>
+  </SafeAreaView>
+);
 
 export default function ShopDetails({ route, navigation }) {
   const { shopId, shop } = route.params || {};
-  const [productsObj, setProductsObj] = useState({});
-  const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState(null);
-  const [error, setError] = useState(null);
-  
   const [loginModalVisible, setLoginModalVisible] = useState(false);
   
-  const user = auth.currentUser;
-  
-  // --- PULL CATEGORY DATA FROM ADMIN CONTEXT ---
   const { categoryMeta } = useAdmin();
 
-  // --- USE CART CONTEXT ---
-  const { 
-    cartShopId, 
-    cartShop, 
-    cartItems,
-    cartItemCount,
-    addToCart, 
-    decreaseQty, 
-    clearCart 
-  } = useCart();
+  // --- ZUSTAND STORE HOOKS (FIXED FOR INFINITE LOOP) ---
+  const fetchProducts = useProductStore((state) => state.fetchProducts);
+  
+  // FIX: Do NOT use `|| {}` inside the Zustand selector. 
+  const rawProductsObj = useProductStore((state) => state.menus[shopId]);
+  const productsObj = rawProductsObj || {}; 
+  
+  const loading = useProductStore((state) => state.loadingStates[shopId]);
 
-  const [fontsLoaded] = useFonts({
-    ...Ionicons.font,
-    ...MaterialIcons.font,
-  });
+  const cartData = useCartStore((state) => state.cartData);
+  const addToCart = useCartStore((state) => state.addToCart);
+  const decreaseQty = useCartStore((state) => state.decreaseQty);
+  const clearCart = useCartStore((state) => state.clearCart);
 
-  const handleAddToCart = (item) => {
-    const authInstance = getAuth();
-    if (!authInstance.currentUser) {
-      setLoginModalVisible(true);
-      return;
-    }
-    addToCart(shop, item);
-  };
+  const [fontsLoaded] = useFonts({ ...Ionicons.font, ...MaterialIcons.font });
 
-  const handleProceedCheckout = async () => {
-    if (!cartShopId) return;
+  // CART DERIVED STATE
+  const keys = Object.keys(cartData).filter(k => k !== "updatedAt");
+  const cartShopId = keys.length > 0 ? keys[0] : null;
+  const cartShop = cartShopId ? cartData[cartShopId] : null;
+  const cartItems = cartShop ? Object.keys(cartShop).filter(k => !["shopname", "shopimage", "shopphone"].includes(k)).map(key => ({ id: key, ...cartShop[key] })) : [];
+  const cartItemCount = cartItems.reduce((count, item) => count + item.qty, 0);
 
-    if (!cartItems || !cartItems.length) return Toast.show("Cart is empty.", { duration: Toast.durations.SHORT });
-
-    const hasRideService = cartItems.some(item => item.serviceType === "ride");
-    const hasDeliveryService = cartItems.some(item => item.serviceType === "delivery");
-
-    if (hasRideService && !hasDeliveryService) {
-      navigation.navigate("CheckoutScreentwo", { shopId: cartShopId, shop, cart: cartShop });
-    } else if (hasDeliveryService && !hasRideService) {
-      navigation.navigate("Checkout", { shopId: cartShopId, shop, cart: cartShop });
-    } else {
-      Alert.alert(
-        "Multiple Service Types",
-        "Your cart contains items with different service types. Please separate them into different orders.",
-        [{ text: "OK" }]
-      );
-    }
-  };
-
-  // --- FETCH PRODUCTS (Local Shop Data ONLY) ---
+  // --- FETCH DATA ---
   useEffect(() => {
-    if (!shopId) { 
-      setError("No shopId provided"); 
-      setLoading(false); 
-      return; 
-    }
-    
-    setLoading(true);
-    const productsRef = dbRef(db, `products/${shopId}`);
-    
-    // CHANGED: Used get() instead of onValue()
-    get(productsRef).then((snap) => {
-      setProductsObj(snap.val() || {}); 
-      setLoading(false); 
-    }).catch((err) => {
-      console.warn("products read error", err); 
-      setError("Failed to load products"); 
-      setLoading(false); 
-    });
-    
-  }, [shopId]);
+    if (shopId) fetchProducts(shopId);
+  }, [shopId, fetchProducts]);
 
-  // --- DERIVED DATA ---
-  const productsArray = useMemo(() => Object.keys(productsObj || {}).map((pid) => ({ id: pid, ...productsObj[pid] })), [productsObj]);
+  // --- DERIVED MENU DATA ---
+  const productsArray = useMemo(() => Object.keys(productsObj).map((pid) => ({ id: pid, ...productsObj[pid] })), [productsObj]);
   const categories = useMemo(() => ["All", ...Array.from(new Set(productsArray.map((p) => p.category || "Other")))], [productsArray]);
   
   useEffect(() => { if (categories.length && !activeCategory) setActiveCategory("All"); }, [categories, activeCategory]);
   
   const productsByActiveCategory = useMemo(() => (!activeCategory || activeCategory === "All") ? productsArray : productsArray.filter((p) => (p.category || "Other") === activeCategory), [productsArray, activeCategory]);
   
-  // Now fetching colors safely from the Admin Context
   const getCategoryTheme = useCallback((catLabel) => (catLabel === "All" ? "#28A745" : categoryMeta?.[catLabel]?.Theme || "#28A745"), [categoryMeta]);
   const themeColor = getCategoryTheme(activeCategory);
 
+  const handleAddToCart = (item) => {
+    if (!getAuth().currentUser) return setLoginModalVisible(true);
+    addToCart(shop, item);
+  };
+
+  const handleProceedCheckout = () => {
+    if (!cartShopId || !cartItems.length) return Toast.show("Cart is empty.", { duration: Toast.durations.SHORT });
+    const hasRide = cartItems.some(i => i.serviceType === "ride");
+    const hasDelivery = cartItems.some(i => i.serviceType === "delivery");
+
+    if (hasRide && !hasDelivery) navigation.navigate("CheckoutScreentwo", { shopId: cartShopId, shop, cart: cartShop });
+    else if (hasDelivery && !hasRide) navigation.navigate("Checkout", { shopId: cartShopId, shop, cart: cartShop });
+    else Alert.alert("Multiple Service Types", "Please separate ride and delivery items.", [{ text: "OK" }]);
+  };
+
   if (loading || !fontsLoaded) return <ShopDetailsSkeleton />;
-  if (error) return <SafeAreaView style={styles.centered}><Text style={{ color: "#b00020" }}>{error}</Text></SafeAreaView>;
-  if (!shop) return <SafeAreaView style={styles.centered}><Text style={{ color: "#333" }}>Shop not found</Text></SafeAreaView>;
+  if (!shopId) return <SafeAreaView style={styles.centered}><Text>No shop provided</Text></SafeAreaView>;
 
   const renderHeader = () => (
     <>
       <View style={styles.headerRow}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={20} color="#10202A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Shop Details</Text>
-        <TouchableOpacity >
-          <Ionicons name="ellipsis-vertical" size={18} color="#ffffff" />
-        </TouchableOpacity>
+        <TouchableOpacity><Ionicons name="ellipsis-vertical" size={18} color="#ffffff" /></TouchableOpacity>
       </View>
-      <View style={styles.bannerWrap}>
-        <Image source={shop.image ? { uri: shop.image } : { uri: "https://www.trueangle.in/public/assets/img/product-default.png" }} style={styles.banner} resizeMode="cover" />
-      </View>
+      <View style={styles.bannerWrap}><Image source={shop?.image ? { uri: shop.image } : { uri: "https://www.trueangle.in/public/assets/img/product-default.png" }} style={styles.banner} resizeMode="cover" /></View>
       <View style={styles.info}>
-        <Text style={styles.shopName}>{shop.name}</Text>
-        <Text style={styles.shopDesc}>{shop.description || "No description available."}</Text>
+        <Text style={styles.shopName}>{shop?.name}</Text>
+        <Text style={styles.shopDesc}>{shop?.description || "No description available."}</Text>
         <View style={styles.metaRow}>
-          <View style={styles.metaItem}><Ionicons name="star" size={16} color="#28A745" /><Text style={styles.metaText}>{shop.rating ?? "—"}</Text></View>
+          <View style={styles.metaItem}><Ionicons name="star" size={16} color="#28A745" /><Text style={styles.metaText}>{shop?.rating ?? "—"}</Text></View>
           <View style={[styles.metaItem, { marginLeft: 18 }]}><MaterialIcons name="local-shipping" size={16} color="#444" /><Text style={styles.metaText}> Free</Text></View>
-          <View style={[styles.metaItem, { marginLeft: 18 }]}><Ionicons name="time-outline" size={16} color="#444" /><Text style={styles.metaText}>{shop.deliveryTime ?? `${shop.avgPrepTime ?? "—"} min`}</Text></View>
+          <View style={[styles.metaItem, { marginLeft: 18 }]}><Ionicons name="time-outline" size={16} color="#444" /><Text style={styles.metaText}>{shop?.deliveryTime ?? `${shop?.avgPrepTime ?? "—"} min`}</Text></View>
         </View>
       </View>
       <View style={{ marginTop: 18 }}>
         <FlatList 
-            horizontal 
-            data={categories} 
-            keyExtractor={(item, idx) => `${item}-${idx}`} 
-            showsHorizontalScrollIndicator={false} 
-            contentContainerStyle={{ paddingVertical: 6, paddingHorizontal: 12 }}
+            horizontal data={categories} keyExtractor={(i, idx) => `${i}-${idx}`} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 6, paddingHorizontal: 12 }}
             renderItem={({ item, index }) => {
                 const active = activeCategory === item, catColor = getCategoryTheme(item);
                 return (
-                    <TouchableOpacity 
-                        onPress={() => setActiveCategory(item)} 
-                        style={[styles.catChip, active && { backgroundColor: catColor, borderColor: catColor }, index === categories.length - 1 ? { marginRight: 0 } : null]} 
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                    >
+                    <TouchableOpacity onPress={() => setActiveCategory(item)} style={[styles.catChip, active && { backgroundColor: catColor, borderColor: catColor }, index === categories.length - 1 && { marginRight: 0 }]}>
                         <Text style={[styles.catLabel, active && { color: "#fff", fontFamily: "Sen_Bold" }]}>{item}</Text>
                     </TouchableOpacity>
                 );
         }} />
       </View>
-      <View style={{ marginVertical: 12 }}>
-        <Text style={styles.sectionHeading}>{activeCategory} <Text style={styles.sectionCount}>({productsByActiveCategory.length})</Text></Text>
-      </View>
+      <View style={{ marginVertical: 12 }}><Text style={styles.sectionHeading}>{activeCategory} <Text style={styles.sectionCount}>({productsByActiveCategory.length})</Text></Text></View>
     </>
   );
 
@@ -280,10 +178,7 @@ export default function ShopDetails({ route, navigation }) {
         contentContainerStyle={{ paddingHorizontal: CARD_PADDING, paddingBottom: 140 }}
         ListHeaderComponent={renderHeader}
         renderItem={({ item }) => {
-          
-          const isCurrentShopInCart = cartShopId === shopId;
-          const cartItem = (isCurrentShopInCart && cartShop) ? cartShop[item.id] : null;
-
+          const cartItem = (cartShopId === shopId && cartShop) ? cartShop[item.id] : null;
           return (
             <View style={styles.productCard}>
               <Image source={{ uri: item.image }} style={styles.productImage} resizeMode="cover" />
@@ -294,32 +189,14 @@ export default function ShopDetails({ route, navigation }) {
                 
                 <View style={styles.productRow}>
                   <Text style={styles.price}>₹{item.price}</Text>
-                  
                   {cartItem ? (
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
-                      <TouchableOpacity 
-                        onPress={() => decreaseQty(shopId, item)} 
-                        style={[styles.addBtn, { marginRight: 6, backgroundColor: "#ccc" }]}
-                      >
-                        <Ionicons name="remove" size={18} color="#fff" />
-                      </TouchableOpacity>
-                      
+                      <TouchableOpacity onPress={() => decreaseQty(shopId, item)} style={[styles.addBtn, { marginRight: 6, backgroundColor: "#ccc" }]}><Ionicons name="remove" size={18} color="#fff" /></TouchableOpacity>
                       <Text style={{ marginHorizontal: 4 }}>{cartItem.qty}</Text>
-                      
-                      <TouchableOpacity 
-                        onPress={() => addToCart(shop, item)} 
-                        style={[styles.addBtn, { backgroundColor: themeColor }]}
-                      >
-                        <Ionicons name="add" size={18} color="#fff" />
-                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => addToCart(shop, item)} style={[styles.addBtn, { backgroundColor: themeColor }]}><Ionicons name="add" size={18} color="#fff" /></TouchableOpacity>
                     </View>
                   ) : (
-                    <TouchableOpacity 
-                        style={[styles.addBtn, { backgroundColor: themeColor }]} 
-                        onPress={() => handleAddToCart(item)}
-                    >
-                      <Ionicons name="add" size={18} color="#fff" />
-                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.addBtn, { backgroundColor: themeColor }]} onPress={() => handleAddToCart(item)}><Ionicons name="add" size={18} color="#fff" /></TouchableOpacity>
                   )}
                 </View>
                 {item.inStock === false && <Text style={{ color: "red", fontSize: 12, marginTop: 4, fontFamily:'Sen_Medium' }}>Out of Stock</Text>}
@@ -330,7 +207,6 @@ export default function ShopDetails({ route, navigation }) {
         ListEmptyComponent={() => <View style={{ padding: 20 }}><Text style={{ color: "#666", textAlign: "center" }}>No items in this category.</Text></View>}
       />
 
-      {/* --- CART BAR (Only for real cart activity) --- */}
       {cartShop && cartItemCount > 0 && cartShopId === shopId && (
         <View style={styles.cartBar}>
           <View style={styles.cartInfo}>
@@ -340,54 +216,24 @@ export default function ShopDetails({ route, navigation }) {
               <Text style={styles.cartSubText}>from {cartShop.shopname}</Text>
             </View>
             <View style={styles.cartActions}>
-              <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#ccc" }]} onPress={clearCart}>
-                <Text style={styles.cartBtnText}>Clear</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#28A745" }]} onPress={handleProceedCheckout}>
-                <Text style={[styles.cartBtnText, { color: "#fff" }]}>Checkout</Text>
-              </TouchableOpacity>
+              <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#ccc" }]} onPress={clearCart}><Text style={styles.cartBtnText}>Clear</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#28A745" }]} onPress={handleProceedCheckout}><Text style={[styles.cartBtnText, { color: "#fff" }]}>Checkout</Text></TouchableOpacity>
             </View>
           </View>
         </View>
       )}
 
-      {/* --- POLITE LOGIN MODAL --- */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={loginModalVisible}
-        onRequestClose={() => setLoginModalVisible(false)}
-      >
+      <Modal animationType="fade" transparent={true} visible={loginModalVisible} onRequestClose={() => setLoginModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <View style={styles.modalIconContainer}>
-                <Ionicons name="cart-outline" size={40} color="#28A745" />
-            </View>
+            <View style={styles.modalIconContainer}><Ionicons name="cart-outline" size={40} color="#28A745" /></View>
             <Text style={styles.modalTitle}>Ready to Order?</Text>
-            <Text style={styles.modalMessage}>
-              We'd love to deliver this to you! Please log in to add items to your cart and track your order easily.
-            </Text>
-            
-            <TouchableOpacity 
-                style={styles.modalLoginBtn} 
-                onPress={() => {
-                    setLoginModalVisible(false);
-                    navigation.navigate("Login");
-                }}
-            >
-                <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-                style={styles.modalCancelBtn} 
-                onPress={() => setLoginModalVisible(false)}
-            >
-                <Text style={styles.modalCancelText}>I'm just browsing</Text>
-            </TouchableOpacity>
+            <Text style={styles.modalMessage}>Please log in to add items to your cart and track your order easily.</Text>
+            <TouchableOpacity style={styles.modalLoginBtn} onPress={() => { setLoginModalVisible(false); navigation.navigate("Login"); }}><Text style={styles.modalLoginText}>Log In / Sign Up</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLoginModalVisible(false)}><Text style={styles.modalCancelText}>I'm just browsing</Text></TouchableOpacity>
           </View>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 }

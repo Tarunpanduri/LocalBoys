@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform, Dimensions, Animated } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform, Dimensions, Animated, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { db, auth } from "../firebase";
-import { ref, get, set, push, remove } from "firebase/database";
+import { ref, get, set, push } from "firebase/database";
 import Toast from "react-native-root-toast";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -11,12 +11,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
-// --- IMPORT CONTEXTS ---
+// --- IMPORT CONTEXTS & STORES ---
 import { useUser } from "../context/UserContext";
 import { useAdmin } from "../context/AdminContext";
-import { useShops } from "../context/ShopContext";
 import { useCoupon } from "../context/CouponContext";
-import { useCart } from "../context/CartContext"; 
+import { useShopStore } from "../store/ShopStore"; // <-- ZUSTAND
+import { useCartStore } from "../store/cartstore"; // <-- ZUSTAND
 
 const { width, height } = Dimensions.get("window");
 
@@ -105,12 +105,16 @@ export default function CheckoutScreen() {
     isBuyNow = false 
   } = route.params || {};
 
-  // --- CONTEXTS ---
+  // --- CONTEXTS & STORES ---
   const { user, userData, mainAddress, loading: userLoading } = useUser();
   const { branchConfig, loading: adminLoading } = useAdmin();
-  const { shops, loading: shopsLoading } = useShops();
   const { validateCoupon } = useCoupon();
-  const { cartData, clearCart, loading: contextCartLoading } = useCart(); 
+  
+  // ZUSTAND
+  const shops = useShopStore((state) => state.shops);
+  const shopsLoading = useShopStore((state) => state.loading);
+  const cartData = useCartStore((state) => state.cartData);
+  const clearCart = useCartStore((state) => state.clearCart);
 
   // --- STATE ---
   const [shopId] = useState(paramShopId);
@@ -140,7 +144,7 @@ export default function CheckoutScreen() {
 
   // --- 1. LOAD DATA ---
   useEffect(() => {
-    if (userLoading || shopsLoading || contextCartLoading || !shopId) return;
+    if (userLoading || shopsLoading || !shopId) return;
 
     // A. Set Shop Data
     const foundShop = shops.find(s => s.id === shopId);
@@ -160,7 +164,7 @@ export default function CheckoutScreen() {
       });
     }
 
-    // B. Load Cart
+    // B. Load Cart (From params for Buy Now, else from Zustand Store)
     if (paramCart) {
       const cleanCart = {};
       Object.keys(paramCart).forEach(k => {
@@ -180,7 +184,7 @@ export default function CheckoutScreen() {
         setCart({});
         setLoadingCart(false);
     }
-  }, [userLoading, shopsLoading, contextCartLoading, shopId, paramCart, cartData]);
+  }, [userLoading, shopsLoading, shopId, paramCart, cartData, shops]);
 
   // --- 2. CALCULATE TOTALS ---
   useEffect(() => {

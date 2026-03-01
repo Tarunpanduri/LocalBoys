@@ -17,6 +17,8 @@ import { getAuth, signOut } from "firebase/auth";
 import { useFonts } from "expo-font";
 import { Sen_400Regular, Sen_500Medium, Sen_700Bold, Sen_800ExtraBold } from "@expo-google-fonts/sen";
 import { LinearGradient } from "expo-linear-gradient";
+import { useCartStore } from '../store/cartstore';
+
 
 // 🔥 IMPORT OUR FIRESTORE-POWERED USER CONTEXT 🔥
 import { useUser } from "../context/UserContext";
@@ -113,12 +115,11 @@ const ProfileSkeleton = () => {
 export default function Profile({ navigation, route }) {
   const { greetingName = "User" } = route.params || {};
   const auth = getAuth();
-  
-  // 🔥 GRAB FIRESTORE DATA DIRECTLY FROM CONTEXT 🔥
-  // This automatically syncs in real-time and uses offline cache!
+
   const { userData, loading } = useUser();
 
   const MY_PROFILE_URL = "https://tarunpanduri.github.io/Portfolio/";
+  const clearCart = useCartStore((state) => state.clearCart);
 
   const [fontsLoaded] = useFonts({
     Sen_Regular: Sen_400Regular,
@@ -130,8 +131,9 @@ export default function Profile({ navigation, route }) {
     ...MaterialIcons.font,
   });
 
-  const handleLogout = async () => {
+const handleLogout = async () => {
     try {
+      clearCart(); 
       await signOut(auth);
       navigation.reset({ index: 0, routes: [{ name: "Login" }] });
     } catch (error) {

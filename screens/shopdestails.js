@@ -1,17 +1,16 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  Image, 
-  FlatList, 
-  Dimensions, 
-  StatusBar, 
-  Modal, 
-  Animated, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  FlatList,
+  Dimensions,
+  StatusBar,
+  Modal,
+  Animated,
   Platform,
-  Alert 
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
@@ -19,11 +18,13 @@ import { LinearGradient } from "expo-linear-gradient";
 import { getAuth } from "firebase/auth";
 import Toast from "react-native-root-toast";
 import { useFonts } from "expo-font";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
 
 // --- IMPORT NEW ZUSTAND STORES ---
-import { useCartStore } from "../store/cartstore"; 
+import { useCartStore } from "../store/cartstore";
 import { useProductStore } from "../store/productStore";
-import { useAdmin } from "../context/AdminContext"; 
+import { useAdmin } from "../context/AdminContext";
 
 const { width } = Dimensions.get("window");
 const CARD_PADDING = 12, CARD_GUTTER = 12, CARD_WIDTH = Math.round((width - CARD_PADDING * 2 - CARD_GUTTER) / 2);
@@ -70,18 +71,29 @@ const ShopDetailsSkeleton = () => (
 export default function ShopDetails({ route, navigation }) {
   const { shopId, shop } = route.params || {};
   const [activeCategory, setActiveCategory] = useState(null);
+
+  // Modals state
   const [loginModalVisible, setLoginModalVisible] = useState(false);
   const [conflictModalVisible, setConflictModalVisible] = useState(false);
   const [pendingProduct, setPendingProduct] = useState(null);
-  
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  // Custom Dynamic Checkout Alert Modal
+  const [checkoutAlert, setCheckoutAlert] = useState({
+    visible: false,
+    title: "",
+    message: "",
+    icon: "warning-outline",
+    btnText: "OK",
+    onAction: () => { }
+  });
+
   const { categoryMeta } = useAdmin();
 
   // --- ZUSTAND STORE HOOKS ---
   const fetchProducts = useProductStore((state) => state.fetchProducts);
-  
   const rawProductsObj = useProductStore((state) => state.menus[shopId]);
-  const productsObj = rawProductsObj || {}; 
-  
+  const productsObj = rawProductsObj || {};
   const loading = useProductStore((state) => state.loadingStates[shopId]);
 
   const cartData = useCartStore((state) => state.cartData);
@@ -100,7 +112,6 @@ export default function ShopDetails({ route, navigation }) {
 
   // --- FETCH DATA (OPTIMIZED) ---
   useEffect(() => {
-    // Only fetch if we don't already have products cached for this shop
     const hasProducts = rawProductsObj && Object.keys(rawProductsObj).length > 0;
     if (shopId && !hasProducts) {
       fetchProducts(shopId);
@@ -110,18 +121,17 @@ export default function ShopDetails({ route, navigation }) {
   // --- DERIVED MENU DATA ---
   const productsArray = useMemo(() => Object.keys(productsObj).map((pid) => ({ id: pid, ...productsObj[pid] })), [productsObj]);
   const categories = useMemo(() => ["All", ...Array.from(new Set(productsArray.map((p) => p.category || "Other")))], [productsArray]);
-  
+
   useEffect(() => { if (categories.length && !activeCategory) setActiveCategory("All"); }, [categories, activeCategory]);
-  
+
   const productsByActiveCategory = useMemo(() => (!activeCategory || activeCategory === "All") ? productsArray : productsArray.filter((p) => (p.category || "Other") === activeCategory), [productsArray, activeCategory]);
-  
+
   const getCategoryTheme = useCallback((catLabel) => (catLabel === "All" ? "#28A745" : categoryMeta?.[catLabel]?.Theme || "#28A745"), [categoryMeta]);
   const themeColor = getCategoryTheme(activeCategory);
 
   const handleAddToCart = (item) => {
     if (!getAuth().currentUser) return setLoginModalVisible(true);
-    
-    // Call addToCart, catch if conflict is true and show our custom modal
+
     const result = addToCart(shop, item);
     if (result && result.conflict) {
       setPendingProduct(item);
@@ -131,23 +141,116 @@ export default function ShopDetails({ route, navigation }) {
 
   const handleForceAddToCart = () => {
     if (pendingProduct) {
-      addToCart(shop, pendingProduct, 1, true); // force=true clears existing
+      addToCart(shop, pendingProduct, 1, true);
       setConflictModalVisible(false);
       setPendingProduct(null);
     }
   };
 
-  const handleProceedCheckout = () => {
-    if (!cartShopId || !cartItems.length) return Toast.show("Cart is empty.", { duration: Toast.durations.SHORT });
-    const hasRide = cartItems.some(i => i.serviceType === "ride");
-    const hasDelivery = cartItems.some(i => i.serviceType === "delivery");
-
-    if (hasRide && !hasDelivery) navigation.navigate("CheckoutScreentwo", { shopId: cartShopId, shop, cart: cartShop });
-    else if (hasDelivery && !hasRide) navigation.navigate("Checkout", { shopId: cartShopId, shop, cart: cartShop });
-    else Alert.alert("Multiple Service Types", "Please separate ride and delivery items.", [{ text: "OK" }]);
+  const handleRefresh = () => {
+    if (shopId) {
+      Toast.show("Refreshing menu...", { duration: Toast.durations.SHORT });
+      fetchProducts(shopId);
+    }
   };
 
-  // Skip loading screen if we already have the cached products rendering
+  const handleProceedCheckout = async () => {
+    if (!cartShopId || !cartItems.length) {
+      return Toast.show("Cart is empty.", { duration: Toast.durations.SHORT });
+    }
+
+    if (isVerifying) return;
+    setIsVerifying(true);
+
+    try {
+      // 1. LIVE CHECK: Is the Shop still active?
+      const shopRef = doc(db, "shops", cartShopId);
+      const shopSnap = await getDoc(shopRef);
+
+      if (!shopSnap.exists() || shopSnap.data().isActive === false || shopSnap.data().maintenanceMode === true) {
+        setIsVerifying(false);
+        setCheckoutAlert({
+          visible: true,
+          title: "Shop Closed",
+          message: "Sorry, this shop is currently closed or not accepting orders.",
+          icon: "close-circle-outline",
+          btnText: "Go to Home",
+          onAction: () => {
+            setCheckoutAlert(prev => ({ ...prev, visible: false }));
+            // Navigate to home and pass refresh param to trigger update
+            navigation.navigate("HomeScreen", { refresh: true });
+          }
+        });
+        return;
+      }
+
+      const liveShopData = shopSnap.data();
+
+      // 2. LIVE CHECK: Are the items still in stock?
+      const itemPromises = cartItems.map(item =>
+        getDoc(doc(db, `shops/${cartShopId}/products/${item.id}`))
+      );
+      const itemSnaps = await Promise.all(itemPromises);
+
+      let outOfStockItems = [];
+
+      itemSnaps.forEach((snap, index) => {
+        const cartItem = cartItems[index];
+        if (snap.exists()) {
+          const liveProductData = snap.data();
+          if (liveProductData.inStock === false) {
+            outOfStockItems.push(cartItem.productname);
+          }
+        } else {
+          outOfStockItems.push(cartItem.productname);
+        }
+      });
+
+      // 3. Handle Out of Stock
+      if (outOfStockItems.length > 0) {
+        setIsVerifying(false);
+        fetchProducts(cartShopId);
+        setCheckoutAlert({
+          visible: true,
+          title: "Items Out of Stock",
+          message: `The following items are not available:\n\n${outOfStockItems.join(", ")}\n\nPlease remove them from your cart to proceed.`,
+          icon: "cart-outline",
+          btnText: "Got it",
+          onAction: () => setCheckoutAlert(prev => ({ ...prev, visible: false }))
+        });
+        return;
+      }
+
+      // 4. All checks passed! Proceed to Checkout
+      const hasRide = cartItems.some(i => i.serviceType === "ride");
+      const hasDelivery = cartItems.some(i => i.serviceType === "delivery");
+
+      const shopToPass = { id: cartShopId, ...liveShopData };
+
+      if (hasRide && !hasDelivery) {
+        navigation.navigate("Checkout", { shopId: cartShopId, shop: shopToPass, cart: cartShop, orderType: "parcel" });
+      } else if (hasDelivery && !hasRide) {
+        navigation.navigate("Checkout", { shopId: cartShopId, shop: shopToPass, cart: cartShop, orderType: "delivery" });
+      } else {
+        setIsVerifying(false);
+        setCheckoutAlert({
+          visible: true,
+          title: "Multiple Service Types",
+          message: "Please separate ride and delivery items into different orders.",
+          icon: "albums-outline",
+          btnText: "OK",
+          onAction: () => setCheckoutAlert(prev => ({ ...prev, visible: false }))
+        });
+      }
+
+    } catch (error) {
+      console.error("Checkout verification failed:", error);
+      Toast.show("Failed to verify items. Please check your connection.");
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   if ((loading && productsArray.length === 0) || !fontsLoaded) return <ShopDetailsSkeleton />;
   if (!shopId) return <SafeAreaView style={styles.centered}><Text>No shop provided</Text></SafeAreaView>;
 
@@ -158,7 +261,9 @@ export default function ShopDetails({ route, navigation }) {
           <Ionicons name="chevron-back" size={20} color="#10202A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Shop Details</Text>
-        <TouchableOpacity><Ionicons name="ellipsis-vertical" size={18} color="#ffffff" /></TouchableOpacity>
+        <TouchableOpacity style={styles.iconBtn} onPress={handleRefresh}>
+          <Ionicons name="refresh" size={20} color="#10202A" />
+        </TouchableOpacity>
       </View>
       <View style={styles.bannerWrap}><Image source={shop?.image ? { uri: shop.image } : { uri: "https://www.trueangle.in/public/assets/img/product-default.png" }} style={styles.banner} resizeMode="cover" /></View>
       <View style={styles.info}>
@@ -171,16 +276,16 @@ export default function ShopDetails({ route, navigation }) {
         </View>
       </View>
       <View style={{ marginTop: 18 }}>
-        <FlatList 
-            horizontal data={categories} keyExtractor={(i, idx) => `${i}-${idx}`} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 6, paddingHorizontal: 12 }}
-            renderItem={({ item, index }) => {
-                const active = activeCategory === item, catColor = getCategoryTheme(item);
-                return (
-                    <TouchableOpacity onPress={() => setActiveCategory(item)} style={[styles.catChip, active && { backgroundColor: catColor, borderColor: catColor }, index === categories.length - 1 && { marginRight: 0 }]}>
-                        <Text style={[styles.catLabel, active && { color: "#fff", fontFamily: "Sen_Bold" }]}>{item}</Text>
-                    </TouchableOpacity>
-                );
-        }} />
+        <FlatList
+          horizontal data={categories} keyExtractor={(i, idx) => `${i}-${idx}`} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 6, paddingHorizontal: 12 }}
+          renderItem={({ item, index }) => {
+            const active = activeCategory === item, catColor = getCategoryTheme(item);
+            return (
+              <TouchableOpacity onPress={() => setActiveCategory(item)} style={[styles.catChip, active && { backgroundColor: catColor, borderColor: catColor }, index === categories.length - 1 && { marginRight: 0 }]}>
+                <Text style={[styles.catLabel, active && { color: "#fff", fontFamily: "Sen_Bold" }]}>{item}</Text>
+              </TouchableOpacity>
+            );
+          }} />
       </View>
       <View style={{ marginVertical: 12 }}><Text style={styles.sectionHeading}>{activeCategory} <Text style={styles.sectionCount}>({productsByActiveCategory.length})</Text></Text></View>
     </>
@@ -206,7 +311,7 @@ export default function ShopDetails({ route, navigation }) {
                 <Text style={styles.productTitle} numberOfLines={2}>{item.name}</Text>
                 <Text style={styles.productSubtitle} numberOfLines={1}>{item.description || "No description"}</Text>
                 <Text style={styles.productquantity}>{item.quantity || "N/A"}</Text>
-                
+
                 <View style={styles.productRow}>
                   <Text style={styles.price}>₹{item.price}</Text>
                   {cartItem ? (
@@ -219,7 +324,7 @@ export default function ShopDetails({ route, navigation }) {
                     <TouchableOpacity style={[styles.addBtn, { backgroundColor: themeColor }]} onPress={() => handleAddToCart(item)}><Ionicons name="add" size={18} color="#fff" /></TouchableOpacity>
                   )}
                 </View>
-                {item.inStock === false && <Text style={{ color: "red", fontSize: 12, marginTop: 4, fontFamily:'Sen_Medium' }}>Out of Stock</Text>}
+                {item.inStock === false && <Text style={{ color: "red", fontSize: 12, marginTop: 4, fontFamily: 'Sen_Medium' }}>Out of Stock</Text>}
               </View>
             </View>
           );
@@ -237,7 +342,15 @@ export default function ShopDetails({ route, navigation }) {
             </View>
             <View style={styles.cartActions}>
               <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#ccc" }]} onPress={clearCart}><Text style={styles.cartBtnText}>Clear</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#28A745" }]} onPress={handleProceedCheckout}><Text style={[styles.cartBtnText, { color: "#fff" }]}>Checkout</Text></TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.cartBtn, { backgroundColor: isVerifying ? "#888" : "#28A745" }]}
+                onPress={handleProceedCheckout}
+                disabled={isVerifying}
+              >
+                <Text style={[styles.cartBtnText, { color: "#fff" }]}>
+                  {isVerifying ? "Verifying..." : "Checkout"}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -256,7 +369,7 @@ export default function ShopDetails({ route, navigation }) {
         </View>
       </Modal>
 
-      {/* NEW: Conflict (Start New Basket) Modal */}
+      {/* Conflict (Start New Basket) Modal */}
       <Modal animationType="fade" transparent={true} visible={conflictModalVisible} onRequestClose={() => setConflictModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -274,6 +387,23 @@ export default function ShopDetails({ route, navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* Dynamic Checkout Alert Modal (Replaces standard Alert.alert) */}
+      <Modal animationType="fade" transparent={true} visible={checkoutAlert.visible} onRequestClose={checkoutAlert.onAction}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.modalIconContainer, { backgroundColor: '#FFEBEB' }]}>
+              <Ionicons name={checkoutAlert.icon} size={40} color="#FF3B30" />
+            </View>
+            <Text style={styles.modalTitle}>{checkoutAlert.title}</Text>
+            <Text style={styles.modalMessage}>{checkoutAlert.message}</Text>
+            <TouchableOpacity style={[styles.modalLoginBtn, { backgroundColor: '#FF3B30' }]} onPress={checkoutAlert.onAction}>
+              <Text style={styles.modalLoginText}>{checkoutAlert.btnText}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -313,7 +443,7 @@ const styles = StyleSheet.create({
   cartActions: { flexDirection: "row", alignItems: "center" },
   cartBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginLeft: 10 },
   cartBtnText: { fontSize: Platform.OS === 'ios' ? 10 : 14, fontFamily: "Sen_Medium", color: "#333" },
-  
+
   // --- MODAL STYLES ---
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },

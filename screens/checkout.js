@@ -1,5 +1,9 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, TextInput, Image, ScrollView, StatusBar, Platform, Dimensions, Animated, Alert } from "react-native";
+import { 
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, 
+  TextInput, Image, ScrollView, StatusBar, Platform, Modal, 
+  FlatList, Animated, Dimensions, Alert 
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
 // 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
@@ -16,7 +20,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useUser } from "../context/UserContext";
 import { useAdmin } from "../context/AdminContext";
 import { useCoupon } from "../context/CouponContext";
-import { useShopStore } from "../store/ShopStore"; 
+import { useShopStore } from "../store/shopStore"; 
 import { useCartStore } from "../store/cartstore"; 
 
 const { width, height } = Dimensions.get("window");
@@ -97,13 +101,15 @@ export default function CheckoutScreen() {
   
   // --- BOTTOM SHEET CONFIG ---
   const bottomSheetRef = useRef(null);
-  const snapPoints = useMemo(() => ["72%", "92%"], []);
+  const snapPoints = useMemo(() => ["60%", "92%"], []);
   
   // --- DESTRUCTURE PARAMS ---
   const { 
     shopId: paramShopId, 
+    shop: paramShop,
     cart: paramCart, 
-    isBuyNow = false 
+    isBuyNow = false,
+    orderType = "delivery" // 🔥 CORE MERGE LOGIC: defaults to delivery, handles 'parcel' if passed
   } = route.params || {};
 
   // --- CONTEXTS & STORES ---
@@ -122,6 +128,12 @@ export default function CheckoutScreen() {
   const [shop, setShop] = useState(null);
   const [cart, setCart] = useState(null);
   
+  // Shared Address State
+  const [pickupAddress, setPickupAddress] = useState(null);
+  const [dropAddress, setDropAddress] = useState(null);
+  const [userAddresses, setUserAddresses] = useState([]);
+  const [showAddressModal, setShowAddressModal] = useState(false);
+
   // Financials
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [platformFee, setPlatformFee] = useState(10);
@@ -143,38 +155,54 @@ export default function CheckoutScreen() {
   const isPremiumOrder = subtotal > 10000;
   const deliveryChargePerKm = branchConfig?.deliveryChargePerKm || 6;
 
-  // --- 1. LOAD DATA ---
+// --- 1. LOAD DATA ---
   useEffect(() => {
-    if (userLoading || shopsLoading || !shopId) return;
+    if (userLoading || shopsLoading || adminLoading || !shopId) return;
 
     // A. Set Shop Data
-    const foundShop = shops.find(s => s.id === shopId);
-    if (foundShop) {
-      setShop(foundShop);
-      setQrImage(foundShop.qr || "");
-      setShopCommission(Number(foundShop.commission) || 15);
-    } else {
-      // 🔥 FIRESTORE FALLBACK FETCH 🔥
-      getDoc(doc(db, "shops", shopId)).then(snap => {
-        if(snap.exists()) {
-          const val = snap.data();
-          console.warn("Shop data loaded from DB for checkout:", val);
-          setShop({ id: shopId, ...val });
-          setQrImage(val.qr || "");
-          setShopCommission(Number(val.commission) || 15);
-        }
-      }).catch(err => console.error("Error fetching shop fallback:", err));
+    if (paramShop && Object.keys(paramShop).length > 0) {
+      setShop(paramShop);
+      setQrImage(paramShop.qr || branchConfig?.qr || "");
+      setShopCommission(Number(paramShop.commission) || 15);
+    } 
+    else {
+      const foundShop = shops.find(s => s.id === shopId);
+      if (foundShop) {
+        setShop(foundShop);
+        setQrImage(foundShop.qr || branchConfig?.qr || "");
+        setShopCommission(Number(foundShop.commission) || 15);
+      } 
+      else {
+        getDoc(doc(db, "shops", shopId)).then(snap => {
+          if(snap.exists()) {
+            const val = snap.data();
+            setShop({ id: shopId, ...val });
+            setQrImage(val.qr || branchConfig?.qr || "");
+            setShopCommission(Number(val.commission) || 15);
+          }
+        }).catch(err => console.error("Error fetching shop fallback:", err));
+      }
     }
 
-    // B. Load Cart
-    if (paramCart) {
-      const cleanCart = {};
-      Object.keys(paramCart).forEach(k => {
-        if (paramCart[k]?.price) cleanCart[k] = paramCart[k];
-      });
-      setCart(cleanCart);
-      setLoadingCart(false);
-    } else if (cartData && cartData[shopId]) {
+    // B. Prepare Addresses (for Parcel mode mostly)
+    if (userData?.addresses) {
+      const addrList = Object.keys(userData.addresses).map(key => ({
+        id: key, ...userData.addresses[key]
+      }));
+      setUserAddresses(addrList);
+    }
+
+    if (orderType === "parcel") {
+      if (mainAddress) {
+        setPickupAddress({ id: userData.mainAddressId, ...mainAddress });
+      } else if (userData?.addresses) {
+        const firstId = Object.keys(userData.addresses)[0];
+        setPickupAddress({ id: firstId, ...userData.addresses[firstId]});
+      }
+    }
+
+    // C. Load Cart
+    if (cartData && cartData[shopId]) {
       const cleanCart = {};
       const val = cartData[shopId];
       Object.keys(val).forEach(k => {
@@ -182,13 +210,22 @@ export default function CheckoutScreen() {
       });
       setCart(cleanCart);
       setLoadingCart(false);
-    } else {
-        setCart({});
-        setLoadingCart(false);
+    } 
+    else if (paramCart) {
+      const cleanCart = {};
+      Object.keys(paramCart).forEach(k => {
+        if (paramCart[k]?.price) cleanCart[k] = paramCart[k];
+      });
+      setCart(cleanCart);
+      setLoadingCart(false);
+    } 
+    else {
+       setCart({});
+       setLoadingCart(false);
     }
-  }, [userLoading, shopsLoading, shopId, paramCart, cartData, shops]);
+  }, [userLoading, shopsLoading, adminLoading, shopId, paramCart, cartData, shops, paramShop, branchConfig, userData, mainAddress, orderType]);
 
-  // --- 2. CALCULATE TOTALS ---
+  // --- 2. CALCULATE TOTALS (Dynamic based on Order Type) ---
   useEffect(() => {
     if (!cart || !shop) return;
 
@@ -201,8 +238,21 @@ export default function CheckoutScreen() {
     setPlatformFee(calcPlatFee);
 
     let calcDeliveryFee = 0;
-    if (mainAddress && shop.location) {
-      // Handle standard JSON lat/lng AND native Firestore GeoPoints
+    
+    // CONDITIONAL DISTANCE CALCULATION
+    if (orderType === "parcel" && pickupAddress && dropAddress) {
+      const pLat = Number(pickupAddress.lat ?? pickupAddress.location?.latitude);
+      const pLng = Number(pickupAddress.lng ?? pickupAddress.location?.longitude);
+      const dLat = Number(dropAddress.lat ?? dropAddress.location?.latitude);
+      const dLng = Number(dropAddress.lng ?? dropAddress.location?.longitude);
+      
+      if (!isNaN(pLat) && !isNaN(pLng) && !isNaN(dLat) && !isNaN(dLng)) {
+        const distanceKm = getDistanceInKm(pLat, pLng, dLat, dLng) * 1.3;
+        const fee = (calcSubtotal > 10000) ? 0 : 20 + distanceKm * deliveryChargePerKm;
+        calcDeliveryFee = Math.ceil(fee);
+      }
+    } 
+    else if (orderType === "delivery" && mainAddress && shop.location) {
       const uLat = Number(mainAddress.lat ?? mainAddress.location?.latitude);
       const uLng = Number(mainAddress.lng ?? mainAddress.location?.longitude);
       const sLat = Number(shop.location.latitude ?? shop.location.lat);
@@ -215,32 +265,34 @@ export default function CheckoutScreen() {
         calcDeliveryFee = Math.ceil(fee);
       }
     }
-    setDeliveryFee(calcDeliveryFee);
 
+    setDeliveryFee(calcDeliveryFee);
     setTotal(calcSubtotal - discount + calcDeliveryFee + calcPlatFee);
 
     const commissionAmount = calculateCommission(calcSubtotal, shopCommission, calcSubtotal > 10000);
     setRestaurantTotal(Math.ceil(calcSubtotal - commissionAmount));
 
-  }, [cart, shop, mainAddress, discount, deliveryChargePerKm, shopCommission]);
+  }, [cart, shop, mainAddress, pickupAddress, dropAddress, discount, deliveryChargePerKm, shopCommission, orderType]);
 
   // --- 3. HANDLERS ---
-const applyCouponHandler = async () => {
+  const applyCouponHandler = async () => {
     if (!couponCode.trim()) {
       Toast.show("Enter a coupon code", { duration: Toast.durations.SHORT });
       return;
     }
     try {
-      // 🔥 PASS SUBTOTAL HERE 🔥
       const discountValue = await validateCoupon(shopId, couponCode, subtotal);
-      
       setDiscount(discountValue);
       Toast.show(`Discount applied: ₹${discountValue}`, { duration: Toast.durations.SHORT });
     } catch (error) {
-      // The error message now comes dynamically from the Context!
       Toast.show(error || "Invalid coupon", { duration: Toast.durations.SHORT });
       setDiscount(0);
     }
+  };
+
+  const handleSelectDropAddress = (address) => {
+    setDropAddress(address);
+    setShowAddressModal(false);
   };
 
   const handlePlaceOrder = async () => {
@@ -248,11 +300,18 @@ const applyCouponHandler = async () => {
       Toast.show("Please login to place order", { duration: Toast.durations.SHORT });
       return;
     }
-    if (!mainAddress) {
+    
+    // Validate addresses based on type
+    if (orderType === "delivery" && !mainAddress) {
       Toast.show("Please add a delivery address", { duration: Toast.durations.SHORT });
       navigation.navigate("Addresses");
       return;
     }
+    if (orderType === "parcel" && !dropAddress) {
+      Toast.show("Please select a drop address", { duration: Toast.durations.SHORT });
+      return;
+    }
+
     if (paymentMode === "Online" && !transactionId.trim()) {
       Toast.show("Enter transaction ID", { duration: Toast.durations.SHORT });
       return;
@@ -266,15 +325,9 @@ const applyCouponHandler = async () => {
          cleanItems[pid] = { ...cart[pid] };
       });
 
-      // Extract shop lat/lng safely for GeoPoint creation
-      const sLat = Number(shop?.location?.latitude ?? shop?.location?.lat ?? 0);
-      const sLng = Number(shop?.location?.longitude ?? shop?.location?.lng ?? 0);
-      const uLat = Number(mainAddress.lat ?? mainAddress.location?.latitude ?? 0);
-      const uLng = Number(mainAddress.lng ?? mainAddress.location?.longitude ?? 0);
-
-      // 🔥 FIRESTORE FLATTENED ORDER SCHEMA 🔥
-      const orderData = {
-        userId: user.uid, // Required for security rules
+      // Common Base Data
+      const baseOrderData = {
+        userId: user.uid,
         shopId,
         shopname: shop?.name || "Unknown Shop",
         shopimage: shop?.image || "",
@@ -287,19 +340,13 @@ const applyCouponHandler = async () => {
         total: Math.ceil(total),
         paymentMode,
         transactionId: paymentMode === "Online" ? transactionId.trim() : null,
-        address: mainAddress.formattedAddress,
-        userLocation: { 
-            lat: uLat,
-            lng: uLng,
-            location: new GeoPoint(uLat, uLng), // Native GeoPoint
-            ...mainAddress
-        },
-        customerName: userData?.firstName || "Customer",
+        customerName: userData?.name || userData?.firstName || "Customer",
         customerPhone: userData?.mobile || "",
         customerEmail: user.email,
         status: "pending",
         createdAt: Date.now(),
-        orderType: "delivery", 
+        orderType: orderType, // Conditionally set
+        driverPayout: Math.ceil(deliveryFee),
         restaurantPayout: {
           restaurantTotal,
           platformCommission: Math.ceil(subtotal - restaurantTotal),
@@ -309,24 +356,49 @@ const applyCouponHandler = async () => {
             shopCommissionRate: shopCommission / 100,
             isPremiumOrder
           }
-        },
-        driverPayout: Math.ceil(deliveryFee),
-        calculationMetadata: {
-          deliveryChargePerKm,
-          baseDeliveryFee: 20,
-          platformFee,
-          isPremiumOrder,
-          shopCommission,
-          shopLocation: {
-             lat: sLat,
-             lng: sLng,
-             location: new GeoPoint(sLat, sLng) // Native GeoPoint
-          }
         }
       };
 
+      // Append conditional payload logic based on Order Type
+      if (orderType === "parcel") {
+        const pLat = Number(pickupAddress.lat ?? pickupAddress.location?.latitude ?? 0);
+        const pLng = Number(pickupAddress.lng ?? pickupAddress.location?.longitude ?? 0);
+        const dLat = Number(dropAddress.lat ?? dropAddress.location?.latitude ?? 0);
+        const dLng = Number(dropAddress.lng ?? dropAddress.location?.longitude ?? 0);
+
+        baseOrderData.pickupAddress = { 
+          ...pickupAddress, 
+          customerName: userData?.name || userData?.firstName, 
+          customerPhone: userData?.mobile,
+          location: new GeoPoint(pLat, pLng)
+        };
+        baseOrderData.dropAddress = { 
+          ...dropAddress,
+          location: new GeoPoint(dLat, dLng)
+        };
+        baseOrderData.calculationMetadata = {
+          deliveryChargePerKm, baseDeliveryFee: 20, platformFee, isPremiumOrder, shopCommission,
+          pickupLocation: { lat: pLat, lng: pLng, location: new GeoPoint(pLat, pLng) },
+          dropLocation: { lat: dLat, lng: dLng, location: new GeoPoint(dLat, dLng) }
+        };
+      } else {
+        const uLat = Number(mainAddress.lat ?? mainAddress.location?.latitude ?? 0);
+        const uLng = Number(mainAddress.lng ?? mainAddress.location?.longitude ?? 0);
+        const sLat = Number(shop?.location?.latitude ?? shop?.location?.lat ?? 0);
+        const sLng = Number(shop?.location?.longitude ?? shop?.location?.lng ?? 0);
+
+        baseOrderData.address = mainAddress.formattedAddress;
+        baseOrderData.userLocation = { 
+            lat: uLat, lng: uLng, location: new GeoPoint(uLat, uLng), ...mainAddress
+        };
+        baseOrderData.calculationMetadata = {
+          deliveryChargePerKm, baseDeliveryFee: 20, platformFee, isPremiumOrder, shopCommission,
+          shopLocation: { lat: sLat, lng: sLng, location: new GeoPoint(sLat, sLng) }
+        };
+      }
+
       // 🔥 WRITE TO FIRESTORE 🔥
-      const newOrderRef = await addDoc(collection(db, "orders"), orderData);
+      const newOrderRef = await addDoc(collection(db, "orders"), baseOrderData);
       
       if (!isBuyNow) {
         await clearCart();  
@@ -334,8 +406,8 @@ const applyCouponHandler = async () => {
 
       navigation.replace("OrderConfirmation", { 
         orderData: { 
-          order: { id: newOrderRef.id, ...orderData }, 
-          message: "Order placed successfully" 
+          order: { id: newOrderRef.id, ...baseOrderData }, 
+          message: orderType === "parcel" ? "Parcel order placed successfully" : "Order placed successfully" 
         } 
       });
 
@@ -346,6 +418,18 @@ const applyCouponHandler = async () => {
       setPlacingOrder(false);
     }
   };
+
+  const renderAddressItem = ({ item }) => (
+    <TouchableOpacity 
+      style={[styles.addressItem, dropAddress?.id === item.id && styles.selectedAddressItem]} 
+      onPress={() => handleSelectDropAddress(item)}
+    >
+      <Text style={styles.addressItemName}>{item.name}</Text>
+      <Text style={styles.addressItemText}>{item.formattedAddress}</Text>
+      <Text style={styles.addressItemSub}>{item.city}, {item.state} - {item.pincode}</Text>
+      {dropAddress?.id === item.id && <Text style={styles.selectedText}>Selected</Text>}
+    </TouchableOpacity>
+  );
 
   if (userLoading || loadingCart) return <CheckoutSkeleton />;
 
@@ -366,27 +450,71 @@ const applyCouponHandler = async () => {
         <View style={styles.container}>
           
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 180 }}>
-            <View style={[styles.section, { marginTop: 40 }]}>
-              <View style={styles.headerRow}>
-                <Text style={styles.sectionTitle}>DELIVERY ADDRESS</Text>
-                <TouchableOpacity onPress={() => navigation.navigate("Addresses")}>
-                  <Text style={styles.editText}>CHANGE</Text>
-                </TouchableOpacity>
-              </View>
-              {mainAddress ? (
-                <View style={styles.addressBox}>
-                  <Text style={styles.username}>{mainAddress.name || userData?.firstName}</Text>
-                  <Text style={styles.addressText}>{mainAddress.formattedAddress}</Text>
-                  <Text style={styles.addressSub}>
-                    {mainAddress.city}, {mainAddress.state} - {mainAddress.pincode}
-                  </Text>
+            {/* 🔥 CONDITIONAL ADDRESS UI RENDERING 🔥 */}
+            {orderType === "parcel" ? (
+              <>
+                {/* Parcel: Pickup Address */}
+                <View style={[styles.section, { marginTop: 15 }]}>
+                  <View style={styles.headerRow}>
+                    <Text style={[styles.sectionTitle, { marginBottom: 5 }]}>PICKUP ADDRESS</Text>
+                    <TouchableOpacity onPress={() => navigation.navigate("HomeScreen")}>
+                      <Text style={styles.editText}>EDIT</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {pickupAddress ? (
+                    <View style={styles.addressBox}>
+                      <Text style={styles.username}>{pickupAddress.name}</Text>
+                      <Text style={styles.addressText}>{pickupAddress.formattedAddress}</Text>
+                      <Text style={styles.addressSub}>{pickupAddress.city}, {pickupAddress.state} - {pickupAddress.pincode}</Text>
+                    </View>
+                  ) : <Text style={styles.emptyText}>No pickup address found</Text>}
                 </View>
-              ) : (
-                <TouchableOpacity onPress={() => navigation.navigate("Addresses")} style={styles.noAddressBox}>
-                   <Text style={styles.emptyText}>+ Add Delivery Address</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+
+                {/* Parcel: Drop Address */}
+                <View style={styles.section}>
+                  <View style={styles.headerRow}>
+                    <Text style={[styles.sectionTitle, { marginBottom: 5, marginTop: 20 }]}>DROP ADDRESS</Text>
+                    <TouchableOpacity onPress={() => setShowAddressModal(true)}>
+                      <Text style={styles.editText}>SELECT</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {dropAddress ? (
+                    <View style={styles.addressBox}>
+                      <Text style={styles.username}>{dropAddress.name}</Text>
+                      <Text style={styles.addressText}>{dropAddress.formattedAddress}</Text>
+                      <Text style={styles.addressSub}>{dropAddress.city}, {dropAddress.state} - {dropAddress.pincode}</Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity style={styles.selectAddressButton} onPress={() => setShowAddressModal(true)}>
+                      <Text style={styles.selectAddressText}>+ Select Drop Address</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </>
+            ) : (
+              /* Delivery: Single Address */
+              <View style={[styles.section, { marginTop: 40 }]}>
+                <View style={styles.headerRow}>
+                  <Text style={styles.sectionTitle}>DELIVERY ADDRESS</Text>
+                  <TouchableOpacity onPress={() => navigation.navigate("Addresses")}>
+                    <Text style={styles.editText}>CHANGE</Text>
+                  </TouchableOpacity>
+                </View>
+                {mainAddress ? (
+                  <View style={styles.addressBox}>
+                    <Text style={styles.username}>{mainAddress.name || userData?.firstName}</Text>
+                    <Text style={styles.addressText}>{mainAddress.formattedAddress}</Text>
+                    <Text style={styles.addressSub}>
+                      {mainAddress.city}, {mainAddress.state} - {mainAddress.pincode}
+                    </Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity onPress={() => navigation.navigate("Addresses")} style={styles.noAddressBox}>
+                     <Text style={styles.emptyText}>+ Add Delivery Address</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
           </ScrollView>
 
           {/* GORHOM BOTTOM SHEET */}
@@ -405,8 +533,8 @@ const applyCouponHandler = async () => {
               )}
 
               <View style={styles.section}>
-                <View style={styles.headerRow}>
-                  <Text style={styles.sectionTitletwo}>YOUR ITEMS</Text>
+                <View style={styles.headerRowtwo}>
+                  <Text style={[styles.sectionTitletwo, { color: "black", fontSize: 14 }]}>YOUR ITEMS</Text>
                   <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Text style={styles.editText}>EDIT ITEMS</Text>
                   </TouchableOpacity>
@@ -423,7 +551,7 @@ const applyCouponHandler = async () => {
               </View>
 
               <View style={styles.sectiontwo}>
-                <Text style={styles.sectionTitletwo}>COUPON</Text>
+                <Text style={[styles.sectionTitletwo, { color: 'black', fontSize: 14 }]}>COUPON</Text>
                 <View style={styles.couponRow}>
                   <TextInput
                     style={styles.couponInput}
@@ -469,7 +597,7 @@ const applyCouponHandler = async () => {
               </View>
 
               <View style={styles.sectiontwo}>
-                <Text style={styles.sectionTitletwo}>PAYMENT MODE</Text>
+                <Text style={[styles.sectionTitletwo, { color: 'black', fontSize: 14 }]}>PAYMENT MODE</Text>
                 <View style={styles.paymentRow}>
                   <TouchableOpacity
                     style={[styles.modeBtn, paymentMode === "COD" && styles.activeMode]}
@@ -529,6 +657,37 @@ const applyCouponHandler = async () => {
             </TouchableOpacity>
           </View>
 
+          {/* Shared Drop Address Modal for Parcel mode */}
+          <Modal 
+            visible={showAddressModal} 
+            animationType="slide" 
+            transparent 
+            onRequestClose={() => setShowAddressModal(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Select Drop Address</Text>
+                  <TouchableOpacity onPress={() => setShowAddressModal(false)}>
+                    <Text style={styles.modalClose}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                <FlatList 
+                  data={userAddresses} 
+                  renderItem={renderAddressItem} 
+                  keyExtractor={item => item.id} 
+                  showsVerticalScrollIndicator={false} 
+                  contentContainerStyle={styles.addressList} 
+                />
+                {userAddresses.length === 0 && (
+                  <View style={styles.noAddresses}>
+                    <Text style={styles.noAddressesText}>No addresses found</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </Modal>
+
         </View>
       </SafeAreaView>
     </GestureHandlerRootView>
@@ -540,14 +699,17 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0e0e12", position: "relative" },
   center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0e0e12" },
   emptyText: { color: "#aaa", fontSize: 15, fontFamily: "Sen_Regular" },
-  section: { marginTop: 20, paddingHorizontal: 16 },
-  sectiontwo: { paddingHorizontal: 16, marginTop: 20 },
+  section: { marginTop: 0, paddingHorizontal: 16 },
+  sectiontwo: { paddingHorizontal: 16, marginTop: 5 },
   sectionTitle: { color: "#fff", fontSize: Platform.OS === 'ios' ? 12 : 14, fontFamily: "Sen_Medium", marginBottom: 10, opacity: 0.9, marginLeft: 3 },
   sectionTitletwo: { color: "#0e0e12", fontSize: Platform.OS === 'ios' ? 10 : 14, fontFamily: "Sen_Medium", marginBottom: 5, opacity: 0.9, marginLeft: 3 },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  headerRowtwo: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginVertical: 5 }, 
   editText: { color: "#ff7a00", fontSize: Platform.OS === 'ios' ? 10 : 13, fontFamily: "Sen_Medium" },
   addressBox: { backgroundColor: "#1a1a1f", padding: 14, borderRadius: 10 },
   noAddressBox: { backgroundColor: "#1a1a1f", padding: 20, borderRadius: 10, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: '#555' },
+  selectAddressButton: { backgroundColor: "#2a2a2f", padding: 16, borderRadius: 10, alignItems: "center", borderWidth: 1, borderColor: "#ff7a00", borderStyle: "dashed" }, 
+  selectAddressText: { color: "#ff7a00", fontSize: 14, fontFamily: "Sen_Medium" }, 
   username: { color: "#fff", fontSize: Platform.OS === 'ios' ? 12 : 16, fontFamily: "Sen_Bold", marginBottom: 4 },
   addressText: { color: "#fff", fontSize: Platform.OS === 'ios' ? 12 : 14, fontFamily: "Sen_Regular" },
   addressSub: { color: "#888", fontSize: Platform.OS === 'ios' ? 11 : 13, marginTop: 4, fontFamily: "Sen_Regular" },
@@ -597,7 +759,7 @@ const styles = StyleSheet.create({
     right: 0, 
     flexDirection: "row", 
     justifyContent: "space-between", 
-    alignItems: "center", 
+    align机items: "center", 
     backgroundColor: "#fff", 
     padding: 16, 
     paddingBottom: Platform.OS === 'ios' ? 34 : 16, 
@@ -613,4 +775,20 @@ const styles = StyleSheet.create({
   orderText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 14 },
   backButton: { backgroundColor: "#ff7a00", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, marginTop: 16 },
   backButtonText: { color: "#fff", fontFamily: "Sen_Medium", fontSize: 14 },
+
+  // MODAL STYLES (From CheckoutTwo)
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.7)", justifyContent: "flex-end", zIndex: 1000 }, 
+  modalContent: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "70%", paddingBottom: Platform.OS === "ios" ? 20 : 20 }, 
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: "#eee" }, 
+  modalTitle: { fontSize: 18, fontFamily: "Sen_Bold", color: "#0e0e12" }, 
+  modalClose: { fontSize: 20, color: "#666" }, 
+  addressList: { padding: 16 }, 
+  addressItem: { backgroundColor: "#f9f9f9", padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: "#eee" }, 
+  selectedAddressItem: { backgroundColor: "#fff8f0", borderColor: "#ff7a00", borderWidth: 2 }, 
+  addressItemName: { fontSize: 16, fontFamily: "Sen_Bold", color: "#0e0e12", marginBottom: 4 }, 
+  addressItemText: { fontSize: 14, fontFamily: "Sen_Regular", color: "#333", marginBottom: 2 }, 
+  addressItemSub: { fontSize: 12, fontFamily: "Sen_Regular", color: "#666" }, 
+  selectedText: { color: "#ff7a00", fontSize: 12, fontFamily: "Sen_Medium", marginTop: 4 }, 
+  noAddresses: { padding: 40, alignItems: "center" }, 
+  noAddressesText: { color: "#999", fontSize: 16, fontFamily: "Sen_Regular" }
 });

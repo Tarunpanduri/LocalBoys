@@ -11,11 +11,9 @@ import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // --- CONTEXT PROVIDERS  ---
-import { CartProvider } from './context/CartContext';
 import { AdminProvider } from './context/AdminContext';
 import { UserProvider } from './context/UserContext';
 import { CouponProvider } from './context/CouponContext';
-// Note: OrderProvider removed. TrackOrder now uses Zustand `orderStore`.
 
 // Screens
 import Login from './screens/login';
@@ -28,17 +26,14 @@ import OrderConfirmation from "./screens/OrderConfirmation";
 import TrackOrder from './screens/trackorder';
 import AddressesScreen from './screens/AddressesScreen';
 import Profile from './screens/profile';
-import CheckoutScreentwo from './screens/checkouttwo';
 import EditProfile from './screens/editprofile';
 import PrivacyPolicyScreen from './screens/privacypolicy';
 import TermsAndConditionsScreen from './screens/Terms';
 import ContactUs from './screens/contact';
 import Settings from './screens/settings';
 
-// --- FIREBASE IMPORTS ---
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebase';
-// NEW: Firestore imports replace RTDB
 import { doc, updateDoc } from 'firebase/firestore'; 
 
 SplashScreen.preventAutoHideAsync();
@@ -109,9 +104,7 @@ export default function App() {
 
       const expoToken = tokenData.data;
 
-      // --- FIRESTORE UPDATE ---
       if (userId && expoToken) {
-        // Save the token securely to the user's Firestore document
         await updateDoc(doc(db, "users", userId), { 
           expoPushToken: expoToken 
         });
@@ -127,21 +120,16 @@ export default function App() {
   useEffect(() => {
     const auth = getAuth();
 
-    // --- UPDATED AUTH CHECK LOGIC ---
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // 1. User is logged in (Firebase)
         setInitialRoute('HomeScreen');
         registerForPushNotificationsAsync(user.uid);
       } else {
-        // 2. User is NOT logged in - Check if they are a returning GUEST
         try {
           const guestAddress = await AsyncStorage.getItem('guestAddress');
           if (guestAddress) {
-            // Guest data found -> Go straight to Home
             setInitialRoute('HomeScreen');
           } else {
-            // No data -> Go to Login
             setInitialRoute('Login');
           }
         } catch (e) {
@@ -151,7 +139,6 @@ export default function App() {
       setCheckingAuth(false);
     });
 
-    // Handle Notification Response
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
       try {
         const content = response.notification.request.content;
@@ -182,7 +169,6 @@ export default function App() {
   return (
     <RootSiblingParent>
       <View style={styles.container} onLayout={onLayoutRootView}>
-          <CartProvider>
             <AdminProvider>
               <UserProvider>
                 <CouponProvider>
@@ -197,7 +183,6 @@ export default function App() {
                         <Stack.Screen name="TrackOrder" component={TrackOrder} />
                         <Stack.Screen name="Addresses" component={AddressesScreen} />
                         <Stack.Screen name="Profile" component={Profile} />
-                        <Stack.Screen name="CheckoutScreentwo" component={CheckoutScreentwo} />
                         <Stack.Screen name="EditProfile" component={EditProfile} />
                         <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }} />
                         <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
@@ -206,10 +191,9 @@ export default function App() {
                         <Stack.Screen name="Settings" component={Settings} />
                       </Stack.Navigator>
                     </NavigationContainer>
-                </CouponProvider>
+                    </CouponProvider>
               </UserProvider>
             </AdminProvider>
-          </CartProvider>
       </View>
     </RootSiblingParent>
   );

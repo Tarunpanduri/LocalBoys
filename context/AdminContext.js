@@ -24,7 +24,8 @@ export const AdminProvider = ({ children }) => {
     deliveryChargePerKm: 5,
     shopVisibilityRadiusKm: 8,
     minOrderValue: 100,
-    maintenanceMode: false
+    maintenanceMode: false,
+    qr: null // <-- Added default qr state
   });
   const [branchCoupons, setBranchCoupons] = useState({});
 
@@ -58,7 +59,7 @@ export const AdminProvider = ({ children }) => {
     setEventUrl(data.eventUrl || "");
     setHeaderAnimationUrl(data.headerAnimationUrl || null); 
     setAppVersion(data.appVersion || {});
-    setAllBranches(data.branchIndex || []); // Loads branches and their configUrl (kkdconfig.json)
+    setAllBranches(data.branchIndex || []);
   };
 
   // Distance Calculator
@@ -128,13 +129,14 @@ export const AdminProvider = ({ children }) => {
     }
   }, [allBranches, getDistance]); 
 
-  // Safely sets state and COUPONS
+  // Safely sets state, COUPONS, and QR
   const applyBranchConfig = (data, radius) => {
     setBranchConfig({
       deliveryChargePerKm: data.deliveryChargePerKm || 5,
       shopVisibilityRadiusKm: radius,
       minOrderValue: data.minOrderValue || 100,
-      maintenanceMode: data.maintenanceMode || false
+      maintenanceMode: data.maintenanceMode || false,
+      qr: data.qr || null // <-- Maps the QR URL from your JSON
     });
     
     // 🔥 THIS RESTORES YOUR COUPONS! 🔥

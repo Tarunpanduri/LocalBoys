@@ -21,11 +21,6 @@ export const CouponProvider = ({ children }) => {
 
       const shopCoupon = branchCoupons[shopId];
 
-      // Debugging logs for your terminal
-      console.log(`Checking coupon for Shop: ${shopId}`);
-      console.log(`User entered: ${code}`);
-      console.log(`System found:`, shopCoupon);
-
       // 2. Check if this specific shop has a coupon
       if (!shopCoupon) {
         reject("This shop does not have any active coupons.");

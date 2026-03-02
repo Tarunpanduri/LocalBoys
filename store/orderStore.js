@@ -10,7 +10,6 @@ export const useOrderStore = create((set, getStore) => ({
   selectedOrderId: null,
   loadingOrders: true,
 
-  // 1. One efficient listener for ALL currently active orders
   startListening: () => {
     const user = auth.currentUser;
     if (!user) {
@@ -20,7 +19,6 @@ export const useOrderStore = create((set, getStore) => ({
 
     set({ loadingOrders: true });
 
-    // 🔥 Query ONLY active statuses to prevent downloading years of order history
     const activeStatuses = [
       "pending", 
       "accepted_restaurent", 
@@ -35,16 +33,18 @@ export const useOrderStore = create((set, getStore) => ({
       where('status', 'in', activeStatuses)
     );
 
-    // Open real-time connection for just these 1 or 2 documents
+    // 🔥 FINAL FIX: Kill any existing ghost listener before starting a new one!
+    if (activeOrdersUnsubscribe) {
+      activeOrdersUnsubscribe();
+    }
+
+    // Open real-time connection
     activeOrdersUnsubscribe = onSnapshot(q, (snapshot) => {
       const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       
-      // Sort newest first
       orders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
       set((state) => {
-        // Auto-select the first order if none is selected, 
-        // OR if the currently selected order was just completed/removed
         let newSelectedId = state.selectedOrderId;
         if (!newSelectedId || !orders.find(o => o.id === newSelectedId)) {
           newSelectedId = orders.length > 0 ? orders[0].id : null;
@@ -62,12 +62,10 @@ export const useOrderStore = create((set, getStore) => ({
     });
   },
 
-  // 2. Just update local state, the listener handles the data!
   selectOrder: (orderId) => {
     set({ selectedOrderId: orderId });
   },
 
-  // 3. Clean up when leaving screen
   stopListening: () => {
     if (activeOrdersUnsubscribe) {
       activeOrdersUnsubscribe();

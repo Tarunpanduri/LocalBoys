@@ -126,7 +126,47 @@ export const useCartStore = create(
       clearCart: () => {
         set({ cartData: {} });
         Toast.show("Cart cleared.", { duration: Toast.durations.SHORT });
+      },
+
+      // 🔥 NEW: Explicitly clear cart for ONE shop when menu changes
+      clearShopCart: (shopId) => {
+        const currentData = getStore().cartData;
+        if (currentData[shopId]) {
+          const updatedCart = { ...currentData };
+          delete updatedCart[shopId];
+          set({ cartData: updatedCart, updatedAt: Date.now() });
+        }
+      },
+
+      syncCartPrices: (shopId, freshProducts) => {
+        const currentData = getStore().cartData;
+        const shopCart = currentData[shopId];
+        if (!shopCart || !freshProducts) return;
+
+        let updatedShopCart = { ...shopCart };
+        let hasChanges = false;
+
+        Object.keys(shopCart).forEach(productId => {
+          if (["shopname", "shopimage", "shopphone"].includes(productId)) return;
+
+          const freshItem = freshProducts[productId];
+          if (freshItem) {
+            if (updatedShopCart[productId].price !== freshItem.price || updatedShopCart[productId].productname !== freshItem.name) {
+              updatedShopCart[productId] = { 
+                ...updatedShopCart[productId], 
+                price: freshItem.price,
+                productname: freshItem.name
+              };
+              hasChanges = true;
+            }
+          }
+        });
+
+        if (hasChanges) {
+          set({ cartData: { ...currentData, [shopId]: updatedShopCart, updatedAt: Date.now() } });
+        }
       }
+
     }),
     {
       name: 'localboys-cart', 

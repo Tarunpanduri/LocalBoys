@@ -3,11 +3,12 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db } from '../firebase';
-// --- FIRESTORE IMPORTS ---
-import { doc, updateDoc, deleteField, getDocs, collection } from 'firebase/firestore';
+// 🔥 STRICT FIRESTORE IMPORTS. NO getDocs! 🔥
+import { doc, updateDoc, deleteField } from 'firebase/firestore';
 
-// --- IMPORT USER CONTEXT ---
+// --- IMPORT CONTEXTS ---
 import { useUser } from '../context/UserContext';
+import { useAdmin } from '../context/AdminContext'; // 🔥 Imported to use local branch array
 
 // --- ROBUST DISTANCE CALCULATION ---
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
@@ -26,6 +27,7 @@ const haversineDistance = (lat1, lon1, lat2, lon2) => {
 
 export default function AddressesScreen({ navigation }) {
   const { userData, loading } = useUser();
+  const { allBranches } = useAdmin(); // 🔥 Grab the free, local array of branches!
 
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [warningModalVisible, setWarningModalVisible] = useState(false);
@@ -76,33 +78,28 @@ export default function AddressesScreen({ navigation }) {
           
           updates['mainAddressId'] = nextId;
 
-          // Recalculate nearest branch support contact for the new main address
-          if (nextAddress.lat && nextAddress.lng) {
-            const branchesSnap = await getDocs(collection(db, 'branches'));
+          // 🔥 FREE LOCAL DISTANCE CALCULATION 🔥
+          if (nextAddress.lat && nextAddress.lng && allBranches && allBranches.length > 0) {
+            let minDist = Infinity;
+            let nearestContact = null;
             
-            if (!branchesSnap.empty) {
-              let minDist = Infinity;
-              let nearestContact = null;
-              
-              branchesSnap.forEach(docSnap => {
-                const branch = docSnap.data();
-                if (branch.location && branch.contactNumber) {
-                  const dist = haversineDistance(
-                    parseFloat(nextAddress.lat), 
-                    parseFloat(nextAddress.lng), 
-                    branch.location.latitude, 
-                    branch.location.longitude
-                  );
-                  if (dist < minDist) {
-                    minDist = dist;
-                    nearestContact = branch.contactNumber;
-                  }
+            allBranches.forEach(branch => {
+              if (branch.lat && branch.lng && branch.contactNumber) {
+                const dist = haversineDistance(
+                  parseFloat(nextAddress.lat), 
+                  parseFloat(nextAddress.lng), 
+                  parseFloat(branch.lat), 
+                  parseFloat(branch.lng)
+                );
+                if (dist < minDist) {
+                  minDist = dist;
+                  nearestContact = branch.contactNumber;
                 }
-              });
-              
-              if (nearestContact) {
-                updates['supportcontact'] = nearestContact;
               }
+            });
+            
+            if (nearestContact) {
+              updates['supportcontact'] = nearestContact;
             }
           }
         }
@@ -129,33 +126,31 @@ export default function AddressesScreen({ navigation }) {
       const updates = {};
       updates['mainAddressId'] = id;
 
-      if (selectedAddress.lat && selectedAddress.lng) {
-        const branchesSnap = await getDocs(collection(db, 'branches'));
+      // 🔥 FREE LOCAL DISTANCE CALCULATION 🔥
+      if (selectedAddress.lat && selectedAddress.lng && allBranches && allBranches.length > 0) {
+        let minDist = Infinity;
+        let nearestContact = null;
 
-        if (!branchesSnap.empty) {
-          let minDist = Infinity;
-          let nearestContact = null;
-
-          branchesSnap.forEach(docSnap => {
-            const branch = docSnap.data();
-            if (branch.location && branch.contactNumber) {
-              const dist = haversineDistance(
-                parseFloat(selectedAddress.lat), 
-                parseFloat(selectedAddress.lng), 
-                branch.location.latitude, 
-                branch.location.longitude
-              );
-              if (dist < minDist) {
-                minDist = dist;
-                nearestContact = branch.contactNumber;
-              }
+        allBranches.forEach(branch => {
+          if (branch.lat && branch.lng && branch.contactNumber) {
+            const dist = haversineDistance(
+              parseFloat(selectedAddress.lat), 
+              parseFloat(selectedAddress.lng), 
+              parseFloat(branch.lat), 
+              parseFloat(branch.lng)
+            );
+            if (dist < minDist) {
+              minDist = dist;
+              nearestContact = branch.contactNumber; // Relies on contactNumber existing in your global index JSON
             }
-          });
-          if (nearestContact) {
-            updates['supportcontact'] = nearestContact;
           }
+        });
+
+        if (nearestContact) {
+          updates['supportcontact'] = nearestContact;
         }
       }
+
       await updateDoc(doc(db, "users", uid), updates);
       navigation.navigate('HomeScreen'); 
     } catch (e) {
@@ -174,9 +169,9 @@ export default function AddressesScreen({ navigation }) {
     if (!mainAddressId) {
       const firstAddressId = entries[0][0];
       await onSetMain(firstAddressId);
+    } else {
+      navigation.navigate('HomeScreen');
     }
-
-    navigation.navigate('HomeScreen');
   };
 
   const renderItem = ({ item }) => {

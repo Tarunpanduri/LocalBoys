@@ -109,7 +109,7 @@ export default function CheckoutScreen() {
     shop: paramShop,
     cart: paramCart, 
     isBuyNow = false,
-    orderType = "delivery" // 🔥 CORE MERGE LOGIC: defaults to delivery, handles 'parcel' if passed
+    orderType = "delivery" 
   } = route.params || {};
 
   // --- CONTEXTS & STORES ---
@@ -147,9 +147,16 @@ export default function CheckoutScreen() {
   const [couponCode, setCouponCode] = useState("");
   const [paymentMode, setPaymentMode] = useState("COD");
   const [transactionId, setTransactionId] = useState("");
-  const [qrImage, setQrImage] = useState("");
   const [placingOrder, setPlacingOrder] = useState(false);
   const [loadingCart, setLoadingCart] = useState(true);
+
+  // 🔥 QR Code States 🔥
+  const [qrImage, setQrImage] = useState("");
+  const [qrImageFailed, setQrImageFailed] = useState(false);
+  const [qrRetryCount, setQrRetryCount] = useState(0);
+
+  // Track if we already fetched the fallback to absolutely guarantee 0 billing traps
+  const fallbackFetchedRef = useRef(false);
 
   // Derived
   const isPremiumOrder = subtotal > 10000;
@@ -172,7 +179,9 @@ export default function CheckoutScreen() {
         setQrImage(foundShop.qr || branchConfig?.qr || "");
         setShopCommission(Number(foundShop.commission) || 15);
       } 
-      else {
+      // 🔥 TRAP KILLED: We use a useRef to ensure this getDoc is ONLY called ONCE per mount!
+      else if (!fallbackFetchedRef.current) { 
+        fallbackFetchedRef.current = true;
         getDoc(doc(db, "shops", shopId)).then(snap => {
           if(snap.exists()) {
             const val = snap.data();
@@ -180,7 +189,10 @@ export default function CheckoutScreen() {
             setQrImage(val.qr || branchConfig?.qr || "");
             setShopCommission(Number(val.commission) || 15);
           }
-        }).catch(err => console.error("Error fetching shop fallback:", err));
+        }).catch(err => {
+            console.error("Error fetching shop fallback:", err);
+            fallbackFetchedRef.current = false; // Allow retry if network crashed
+        });
       }
     }
 
@@ -431,6 +443,12 @@ export default function CheckoutScreen() {
     </TouchableOpacity>
   );
 
+  // Helper to force image reload cache bypass
+  const getQrUri = () => {
+    if (!qrImage) return null;
+    return `${qrImage}?retry=${qrRetryCount}`;
+  };
+
   if (userLoading || loadingCart) return <CheckoutSkeleton />;
 
   if (!cart || Object.keys(cart).length === 0) return (
@@ -614,13 +632,30 @@ export default function CheckoutScreen() {
                 </View>
                 {paymentMode === "Online" && (
                   <View style={styles.onlineBox}>
-                    {qrImage ? (
-                      <Image source={{ uri: qrImage }} style={styles.qrImage} />
+                    {/* 🔥 NEW QR CODE RENDERING LOGIC WITH RETRY 🔥 */}
+                    {qrImage && !qrImageFailed ? (
+                      <Image 
+                        source={{ uri: getQrUri() }} 
+                        style={styles.qrImage} 
+                        onError={() => setQrImageFailed(true)}
+                      />
+                    ) : qrImageFailed ? (
+                      <TouchableOpacity 
+                        style={[styles.qrImage, styles.qrFallbackBox]} 
+                        onPress={() => {
+                          setQrImageFailed(false);
+                          setQrRetryCount(prev => prev + 1); // Forces Image to re-request
+                        }}
+                      >
+                        <Ionicons name="refresh-circle-outline" size={36} color="#666" />
+                        <Text style={styles.qrFallbackText}>Tap to reload</Text>
+                      </TouchableOpacity>
                     ) : (
-                      <View style={[styles.qrImage, { justifyContent: "center", alignItems: "center", backgroundColor: "#eee" }]}>
-                        <Text style={{ color: "#999" }}>No QR Available</Text>
+                      <View style={[styles.qrImage, styles.qrFallbackBox]}>
+                        <Text style={styles.qrFallbackText}>No QR Available</Text>
                       </View>
                     )}
+
                     <TextInput
                       style={styles.transactionInput}
                       placeholder="Enter Transaction ID"
@@ -748,6 +783,11 @@ const styles = StyleSheet.create({
   activeModeText: { color: "#fff" },
   onlineBox: { alignItems: "center", paddingBottom: 20 },
   qrImage: { width: 140, height: 140, marginBottom: 12, borderRadius: 8 },
+  
+  // 🔥 New QR Fallback styles 🔥
+  qrFallbackBox: { justifyContent: "center", alignItems: "center", backgroundColor: "#f5f5f5", borderWidth: 1, borderColor: "#ddd", borderStyle: "dashed" },
+  qrFallbackText: { color: "#888", marginTop: 4, fontFamily: 'Sen_Medium', fontSize: 12 },
+
   transactionInput: { backgroundColor: "#f0f0f0", color: "#0e0e12", borderRadius: 8, width: "90%", padding: 10, marginBottom: 8, fontFamily: "Sen_Regular", fontSize: Platform.OS === 'ios' ? 12 : 14 },
   qrNote: { fontSize: Platform.OS === 'ios' ? 10 : 12, color: "#555", textAlign: "center", fontFamily: "Sen_Regular" },
   
@@ -759,7 +799,7 @@ const styles = StyleSheet.create({
     right: 0, 
     flexDirection: "row", 
     justifyContent: "space-between", 
-    align机items: "center", 
+    alignItems: "center", 
     backgroundColor: "#fff", 
     padding: 16, 
     paddingBottom: Platform.OS === 'ios' ? 34 : 16, 
@@ -776,7 +816,7 @@ const styles = StyleSheet.create({
   backButton: { backgroundColor: "#ff7a00", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, marginTop: 16 },
   backButtonText: { color: "#fff", fontFamily: "Sen_Medium", fontSize: 14 },
 
-  // MODAL STYLES (From CheckoutTwo)
+  // MODAL STYLES
   modalOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.7)", justifyContent: "flex-end", zIndex: 1000 }, 
   modalContent: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "70%", paddingBottom: Platform.OS === "ios" ? 20 : 20 }, 
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: "#eee" }, 

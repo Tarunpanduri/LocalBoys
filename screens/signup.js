@@ -233,7 +233,7 @@ export default function SignUp({ navigation }) {
               </TouchableOpacity>
             </View>
             <Text style={styles.label}>Mobile Number</Text>
-            <TextInput style={styles.input} placeholder="+91 985*******" placeholderTextColor="#A0A0A0" keyboardType="phone-pad" value={mobile} onChangeText={setMobile} />
+            <TextInput style={styles.input} placeholder="985*******" placeholderTextColor="#A0A0A0" keyboardType="phone-pad" value={mobile} onChangeText={setMobile} />
             
             <TouchableOpacity style={styles.signupButton} onPress={handleSignUp} disabled={loading}>
               {loading ? (

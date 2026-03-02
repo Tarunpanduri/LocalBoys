@@ -1,90 +1,134 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { collection, query, orderBy, startAt, endAt, getDocs } from "firebase/firestore";
-import { db } from "../firebase"; 
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase";
 import * as geofire from 'geofire-common';
+
+// 🔥 IMPORT PRODUCT STORE TO TRIGGER CACHE INVALIDATION
+import { useProductStore } from './productStore';
+
+// Simple flag to prevent concurrent fetches (module-level, because store is a singleton)
+let isFetching = false;
 
 export const useShopStore = create(
   persist(
     (set, getStore) => ({
       shops: [],
       loading: false,
+      lastBranchId: null,
 
-      fetchNearbyShops: async (centerLat, centerLng, radiusInKm, isPullToRefresh = false) => {
-        if (!centerLat || !centerLng) return;
+      fetchNearbyShops: async (userLat, userLng, radiusInKm, branchId, isPullToRefresh = false) => {
+        // Prevent concurrent executions
+        if (isFetching) {
+          console.log('Fetch already in progress, skipping...');
+          return;
+        }
 
-        // Offline-first: Only show loading if we have zero offline shops or user pulled to refresh
-        if (isPullToRefresh || getStore().shops.length === 0) {
+        if (!userLat || !userLng || !branchId) return;
+
+        const state = getStore();
+        const isNewBranch = state.lastBranchId !== branchId;
+        const forceRefresh = isPullToRefresh || isNewBranch;
+
+        // SAFETY LOCK 1: INSTANTLY WIPE OLD SHOPS ON BRANCH CHANGE
+        if (forceRefresh) {
+          set({ shops: [], loading: true, lastBranchId: branchId });
+        } else if (state.shops.length === 0) {
           set({ loading: true });
         }
 
+        isFetching = true;
         try {
-          const center = [parseFloat(centerLat), parseFloat(centerLng)];
-          const radiusInM = radiusInKm * 1000;
-          const bounds = geofire.geohashQueryBounds(center, radiusInM);
-          
-          let tempShopsMap = {}; 
+          const userLocation = [parseFloat(userLat), parseFloat(userLng)];
 
-          // 1. One-time fetch of the bounding boxes
-          const promises = bounds.map(b => {
-            const q = query(
-              collection(db, 'shops'), 
-              orderBy('geohash'),      
-              startAt(b[0]),
-              endAt(b[1])
-            );
-            return getDocs(q); 
+          const indexRef = doc(db, 'branch_indexes', branchId);
+          const indexSnap = await getDoc(indexRef);
+
+          if (!indexSnap.exists()) {
+            set({ shops: [], loading: false });
+            return;
+          }
+
+          const branchIndexData = indexSnap.data();
+          let idsToFetch = [];
+          let validShopIdsInRadius = [];
+
+          Object.keys(branchIndexData).forEach(shopId => {
+            const shopMeta = branchIndexData[shopId];
+
+            if (!shopMeta.lat || !shopMeta.lng || shopMeta.isActive === false) return;
+
+            const distanceInKm = geofire.distanceBetween([shopMeta.lat, shopMeta.lng], userLocation);
+
+            if (distanceInKm <= radiusInKm) {
+              validShopIdsInRadius.push(shopId);
+
+              const localShop = getStore().shops.find(s => s.id === shopId);
+
+              if (!localShop || shopMeta.updatedAt > (localShop.localUpdatedAt || 0)) {
+                idsToFetch.push(shopId);
+              }
+            }
           });
 
-          const snapshots = await Promise.all(promises);
+          let updatedShopsList = [...getStore().shops];
 
-          snapshots.forEach((snapshot) => {
-            snapshot.docs.forEach((docSnap) => {
-              tempShopsMap[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+          if (idsToFetch.length > 0) {
+            console.log(`Syncing ${idsToFetch.length} shops for branch ${branchId}...`);
+            const fetchPromises = idsToFetch.map(id => getDoc(doc(db, "shops", id)));
+            const snapshots = await Promise.all(fetchPromises);
+
+            snapshots.forEach(snap => {
+              if (snap.exists()) {
+                const freshShop = {
+                  id: snap.id,
+                  ...snap.data(),
+                  localUpdatedAt: Date.now()
+                };
+
+                const existingIndex = updatedShopsList.findIndex(s => s.id === snap.id);
+                if (existingIndex !== -1) {
+                  updatedShopsList[existingIndex] = freshShop;
+                } else {
+                  updatedShopsList.push(freshShop);
+                }
+
+                // 🔥 THE MAGIC SAUCE: Automatically wipe the product cache for this updated shop!
+                // Next time the user opens this shop, it will be forced to download the fresh menu.
+                useProductStore.getState().clearShopMenu(snap.id);
+              }
             });
-          });
+          }
 
-          const allShops = Object.values(tempShopsMap);
-          
-          // 2. Client-side math to filter exact radius
-          const filtered = allShops.filter(shop => {
-            if (!shop.location) return false;
-            
-            const shopLat = shop.location.latitude ?? shop.location.lat;
-            const shopLng = shop.location.longitude ?? shop.location.lng;
-            
-            if (shopLat === undefined || shopLng === undefined) return false;
-            
-            const distanceInKm = geofire.distanceBetween([parseFloat(shopLat), parseFloat(shopLng)], center);
-            return distanceInKm <= radiusInKm;
-          });
+          // Clean up old or out-of-range shops
+          updatedShopsList = updatedShopsList.filter(shop => validShopIdsInRadius.includes(shop.id));
 
-          // 3. Sort closest first
-          filtered.sort((a, b) => {
+          // Sort by distance
+          updatedShopsList.sort((a, b) => {
             const latA = a.location?.latitude ?? a.location?.lat;
             const lngA = a.location?.longitude ?? a.location?.lng;
             const latB = b.location?.latitude ?? b.location?.lat;
             const lngB = b.location?.longitude ?? b.location?.lng;
-            
-            const distA = geofire.distanceBetween([parseFloat(latA), parseFloat(lngA)], center);
-            const distB = geofire.distanceBetween([parseFloat(latB), parseFloat(lngB)], center);
-            return distA - distB;
+
+            return geofire.distanceBetween([parseFloat(latA), parseFloat(lngA)], userLocation) -
+                   geofire.distanceBetween([parseFloat(latB), parseFloat(lngB)], userLocation);
           });
 
-          // Update store with fresh data (including their current isActive status)
-          set({ shops: filtered, loading: false });
+          set({ shops: updatedShopsList, loading: false });
 
         } catch (error) {
-          console.error("Error fetching nearby shops:", error);
+          console.error("Smart sync failed:", error);
           set({ loading: false });
+        } finally {
+          isFetching = false;
         }
       }
     }),
     {
-      name: 'localboys-shop-storage', 
-      storage: createJSONStorage(() => AsyncStorage), 
-      partialize: (state) => ({ shops: state.shops }), 
+      name: 'localboys-shop-storage',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({ shops: state.shops, lastBranchId: state.lastBranchId }),
     }
   )
 );

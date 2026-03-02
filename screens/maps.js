@@ -5,13 +5,14 @@ import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { auth, db } from '../firebase';
-// --- FIRESTORE IMPORTS ---
-import { doc, getDoc, updateDoc, collection, getDocs, GeoPoint } from 'firebase/firestore';
+// 🔥 STRICT FIRESTORE IMPORTS. NO getDocs for branches! 🔥
+import { doc, getDoc, updateDoc, collection, GeoPoint } from 'firebase/firestore';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons'; 
 
-// --- IMPORTS FOR GUEST MODE ---
+// --- IMPORTS FOR GUEST MODE & CONTEXTS ---
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUser } from '../context/UserContext';
+import { useAdmin } from '../context/AdminContext'; // 🔥 Imported AdminContext for free branches array
 
 const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -38,8 +39,10 @@ export default function MapScreen({ navigation, route }) {
   
   // --- CHECK IF GUEST ---
   const isGuest = route?.params?.isGuest || false;
+  
   // Get Context Setters to update Home Screen immediately
   const { setMainAddress, setUserLocation } = useUser(); 
+  const { allBranches } = useAdmin(); // 🔥 Get local branches for $0 distance calculation
 
   const [hasPermission, setHasPermission] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -57,7 +60,7 @@ export default function MapScreen({ navigation, route }) {
     visible: false,
     title: '',
     message: '',
-    type: 'error', // 'error', 'validation', 'settings'
+    type: 'error', 
   });
 
   const mapRef = useRef(null);
@@ -336,37 +339,29 @@ export default function MapScreen({ navigation, route }) {
       if (shouldSetAsMain && keyToSet) {
         userUpdates['mainAddressId'] = keyToSet;
 
-        if (selectedPlace.lat && selectedPlace.lng) {
-          try {
-            const branchesSnap = await getDocs(collection(db, 'branches'));
+        // 🔥 KILLING THE BILLING TRAP: Free Local Distance Calc 🔥
+        if (selectedPlace.lat && selectedPlace.lng && allBranches && allBranches.length > 0) {
+          let minDist = Infinity;
+          let nearestContact = null;
 
-            if (!branchesSnap.empty) {
-              let minDist = Infinity;
-              let nearestContact = null;
+          allBranches.forEach(branch => {
+            if (branch.lat && branch.lng && branch.contactNumber) {
+              const dist = haversineDistance(
+                parseFloat(selectedPlace.lat), 
+                parseFloat(selectedPlace.lng), 
+                parseFloat(branch.lat), 
+                parseFloat(branch.lng)
+              );
 
-              branchesSnap.forEach(docSnap => {
-                const branch = docSnap.data();
-                if (branch.location && branch.contactNumber) {
-                  const dist = haversineDistance(
-                    parseFloat(selectedPlace.lat), 
-                    parseFloat(selectedPlace.lng), 
-                    branch.location.latitude, 
-                    branch.location.longitude
-                  );
-
-                  if (dist < minDist) {
-                    minDist = dist;
-                    nearestContact = branch.contactNumber;
-                  }
-                }
-              });
-
-              if (nearestContact) {
-                userUpdates['supportcontact'] = nearestContact;
+              if (dist < minDist) {
+                minDist = dist;
+                nearestContact = branch.contactNumber;
               }
             }
-          } catch (branchError) {
-            console.error("Error fetching branches for support contact:", branchError);
+          });
+
+          if (nearestContact) {
+            userUpdates['supportcontact'] = nearestContact;
           }
         }
       }

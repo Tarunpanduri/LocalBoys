@@ -1,34 +1,33 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  TextInput, 
-  FlatList, 
-  Image, 
-  RefreshControl, 
-  Dimensions, 
-  StatusBar, 
-  Animated, 
-  Platform, 
-  Modal 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  FlatList,
+  Image,
+  RefreshControl,
+  Dimensions,
+  StatusBar,
+  Animated,
+  Platform,
+  Modal
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import { getAuth } from "firebase/auth";
-import UpdateModal from "../components/UpdateModal";
 
 // IMPORT ZUSTAND STORE & CONTEXTS
-import { useShopStore } from "../store/shopStore"; 
-import { useAdmin } from "../context/AdminContext"; 
-import { useUser } from "../context/UserContext"; 
+import { useShopStore } from "../store/shopStore";
+import { useAdmin } from "../context/AdminContext";
+import { useUser } from "../context/UserContext";
 
 const { width } = Dimensions.get("window");
 
-// --- SKELETON COMPONENT ---
+// --- SKELETON COMPONENT (unchanged) ---
 const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   const translateX = useRef(new Animated.Value(-width)).current;
 
@@ -56,7 +55,7 @@ const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   );
 };
 
-// --- LOADING SCREEN ---
+// --- LOADING SCREEN (unchanged) ---
 const SkeletonLoadingScreen = () => {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
@@ -102,7 +101,7 @@ const SkeletonLoadingScreen = () => {
   );
 };
 
-// --- MEMOIZED SHOP CARD (Production Performance Boost) ---
+// --- MEMOIZED SHOP CARD (unchanged) ---
 const ShopCard = React.memo(({ shop, onPress }) => (
   <TouchableOpacity style={styles.shopCard} onPress={() => onPress(shop.id, shop)}>
     <Image source={{ uri: shop.image }} style={styles.shopImage} resizeMode="cover" />
@@ -118,22 +117,18 @@ const ShopCard = React.memo(({ shop, onPress }) => (
 ));
 
 export default function HomeScreen({ navigation }) {
-  // EXTRACT FROM ZUSTAND STORE
   const shops = useShopStore((state) => state.shops);
   const shopsLoading = useShopStore((state) => state.loading);
   const fetchNearbyShops = useShopStore((state) => state.fetchNearbyShops);
 
   const { categoryMeta, eventUrl, headerAnimationUrl, loading: adminLoading, determineBranch, branchConfig, activeBranchId } = useAdmin();
-  const { userLocation, mainAddress, loading: userLoading } = useUser(); 
+  const { userLocation, mainAddress, loading: userLoading } = useUser();
 
-  // UI State
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState("products");
-  
-  const [hasFetchedShops, setHasFetchedShops] = useState(false);
-  
+
   const [loginModalVisible, setLoginModalVisible] = useState(false);
   const [modalFeatureText, setModalFeatureText] = useState("");
 
@@ -142,6 +137,9 @@ export default function HomeScreen({ navigation }) {
     ...FontAwesome5.font,
     ...MaterialIcons.font,
   });
+
+  // Ref to store the debounce timer
+  const fetchDebounceTimer = useRef(null);
 
   const handleLocationPress = () => {
     const auth = getAuth();
@@ -183,27 +181,48 @@ export default function HomeScreen({ navigation }) {
     }
   }, [userLocation?.lat, userLocation?.lng, determineBranch]);
 
-  // --- 2. COORDINATION EFFECT (FETCH SHOPS) ---
+  // --- 2. DEBOUNCED FETCH EFFECT ---
   useEffect(() => {
-    if (userLoading || adminLoading) return; 
+    if (userLoading || adminLoading || !activeBranchId || !userLocation?.lat || !userLocation?.lng) return;
 
-    const radius = branchConfig?.shopVisibilityRadiusKm;
-    if (userLocation?.lat && userLocation?.lng && radius) {
-      fetchNearbyShops(userLocation.lat, userLocation.lng, radius, false);
+    // Clear any pending debounce timer
+    if (fetchDebounceTimer.current) {
+      clearTimeout(fetchDebounceTimer.current);
     }
-    
-    const timer = setTimeout(() => {
-      setHasFetchedShops(true);
-    }, 50);
 
-    return () => clearTimeout(timer);
-  }, [userLocation?.lat, userLocation?.lng, branchConfig?.shopVisibilityRadiusKm, userLoading, adminLoading, fetchNearbyShops]);
+    // Set a new debounced fetch
+    fetchDebounceTimer.current = setTimeout(() => {
+      const radius = branchConfig?.shopVisibilityRadiusKm || 8;
+      fetchNearbyShops(
+        userLocation.lat,
+        userLocation.lng,
+        radius,
+        activeBranchId,
+        false // not a pull-to-refresh
+      );
+    }, 300); // 300ms debounce
 
-  // --- 3. SYNCHRONOUS FILTERING ---
+    return () => {
+      if (fetchDebounceTimer.current) {
+        clearTimeout(fetchDebounceTimer.current);
+      }
+    };
+  }, [
+    userLocation?.lat,
+    userLocation?.lng,
+    activeBranchId,
+    branchConfig?.shopVisibilityRadiusKm,
+    userLoading,
+    adminLoading,
+    fetchNearbyShops
+  ]);
+
+  // --- 3. SYNCHRONOUS FILTERING (unchanged) ---
   const { filteredShops, dynamicCategories } = useMemo(() => {
     if (!shops) return { filteredShops: [], dynamicCategories: [{ id: "all", label: "All" }] };
 
-    let result = shops.filter((s) => s.isActive !== false);
+    // 🔥 SAFETY LOCK 2: STRICTLY FILTER BY CURRENT BRANCH ID 🔥
+    let result = shops.filter((s) => s.isActive !== false && s.parentBranchId === activeBranchId);
 
     result = result.filter((s) =>
       activeTab === "products"
@@ -222,8 +241,8 @@ export default function HomeScreen({ navigation }) {
     if (searchText) {
       const lowerSearch = searchText.toLowerCase();
       shopsForDisplay = shopsForDisplay.filter((s) =>
-          s.name?.toLowerCase().includes(lowerSearch) ||
-          s.type?.toLowerCase().includes(lowerSearch)
+        s.name?.toLowerCase().includes(lowerSearch) ||
+        s.type?.toLowerCase().includes(lowerSearch)
       );
     }
 
@@ -231,33 +250,35 @@ export default function HomeScreen({ navigation }) {
     const finalCats = [{ id: "all", label: "All" }, ...shopTypes];
 
     return { filteredShops: shopsForDisplay, dynamicCategories: finalCats };
-  }, [shops, activeCategory, searchText, activeTab]);
+  }, [shops, activeCategory, searchText, activeTab, activeBranchId]);
 
   const filteredCategories = useMemo(() => {
     return dynamicCategories.filter((c) => {
       if (c.id === "all") {
-        return shops?.some(s => s.isActive !== false && s.category?.toLowerCase() === activeTab);
+        return shops?.some(s => s.isActive !== false && s.parentBranchId === activeBranchId && s.category?.toLowerCase() === activeTab);
       }
-      return shops?.some((s) => 
-        s.isActive !== false && 
+      return shops?.some((s) =>
+        s.isActive !== false &&
+        s.parentBranchId === activeBranchId &&
         s.category?.toLowerCase() === activeTab &&
         s.type?.toLowerCase() === c.label.toLowerCase()
       );
     });
-  }, [dynamicCategories, shops, activeTab]);
+  }, [dynamicCategories, shops, activeTab, activeBranchId]);
 
+  // Pull‑to‑refresh: fetch immediately (no debounce)
   const onRefresh = useCallback(async () => {
-    const radius = branchConfig?.shopVisibilityRadiusKm;
-    if (userLocation?.lat && userLocation?.lng && radius) {
+    const radius = branchConfig?.shopVisibilityRadiusKm || 8;
+    if (userLocation?.lat && userLocation?.lng && activeBranchId) {
       setRefreshing(true);
-      determineBranch(userLocation.lat, userLocation.lng); 
-      await fetchNearbyShops(userLocation.lat, userLocation.lng, radius, true);
+      determineBranch(userLocation.lat, userLocation.lng);
+      await fetchNearbyShops(userLocation.lat, userLocation.lng, radius, activeBranchId, true);
       setRefreshing(false);
     }
-  }, [userLocation?.lat, userLocation?.lng, branchConfig?.shopVisibilityRadiusKm, fetchNearbyShops, determineBranch]);
+  }, [userLocation?.lat, userLocation?.lng, activeBranchId, branchConfig?.shopVisibilityRadiusKm, fetchNearbyShops, determineBranch]);
 
   const activeCategoryColor = categoryMeta[dynamicCategories.find((c) => c.id === activeCategory)?.label]?.Theme || "#66BB6A";
-  
+
   const darkenColor = (hex, percent) => {
     if (!hex) return "#66BB6A";
     const num = parseInt(hex.replace("#", ""), 16);
@@ -284,7 +305,8 @@ export default function HomeScreen({ navigation }) {
     );
   };
 
-  if (shopsLoading || adminLoading || userLoading || !fontsLoaded || !hasFetchedShops) {
+  // If any loading state is true, show skeleton
+  if (shopsLoading || adminLoading || userLoading || !fontsLoaded) {
     return <SkeletonLoadingScreen />;
   }
 
@@ -294,21 +316,21 @@ export default function HomeScreen({ navigation }) {
         <Text style={styles.sectionTitle}>Categories</Text>
       </View>
       <View style={{ height: 60 }}>
-        <FlatList 
-          data={filteredCategories} 
-          horizontal 
-          keyExtractor={(i) => i.id || Math.random().toString()} 
-          renderItem={renderCategory} 
-          showsHorizontalScrollIndicator={false} 
-          contentContainerStyle={{ paddingVertical: 10, paddingHorizontal: 5 }} 
+        <FlatList
+          data={filteredCategories}
+          horizontal
+          keyExtractor={(i) => i.id || Math.random().toString()}
+          renderItem={renderCategory}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingVertical: 10, paddingHorizontal: 5 }}
         />
       </View>
       <FlatList
-        data={filteredShops} 
-        keyExtractor={(item) => item.id || Math.random().toString()} 
-        renderItem={({ item }) => <ShopCard shop={item} onPress={handleShopPress} />} 
-        contentContainerStyle={{ paddingBottom: 90 }} 
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} 
+        data={filteredShops}
+        keyExtractor={(item) => item.id || Math.random().toString()}
+        renderItem={({ item }) => <ShopCard shop={item} onPress={handleShopPress} />}
+        contentContainerStyle={{ paddingBottom: 90 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={() => (
           <View style={styles.emptyState}>
             <Text style={styles.emptytext}>
@@ -328,7 +350,7 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.headerRow}>
           <View style={styles.deliveryCol}>
             <Text style={[styles.deliverLabel, { color: darkenColor(activeCategoryColor, 40) }]}>Deliver To</Text>
-            
+
             <TouchableOpacity style={styles.locationRow} onPress={handleLocationPress}>
               <Text style={styles.locationText}>
                 {mainAddress ? mainAddress.name || mainAddress.city || mainAddress.formattedAddress || "Unnamed address" : userLocation?.city ? `${userLocation.city}, ${userLocation.state}` : "Select Location"}
@@ -339,10 +361,10 @@ export default function HomeScreen({ navigation }) {
 
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <TouchableOpacity style={styles.notifBtn} onPress={handleTrackOrderPress}>
-                <Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} />
-            </TouchableOpacity>  
+              <Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.notifBtn} onPress={handleProfilePress}>
-                <Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} />
+              <Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} />
             </TouchableOpacity>
           </View>
         </View>
@@ -371,23 +393,23 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalIconContainer}>
-                <Ionicons name="person-add-outline" size={36} color="#009688" />
+              <Ionicons name="person-add-outline" size={36} color="#009688" />
             </View>
             <Text style={styles.modalTitle}>Hello There!</Text>
             <Text style={styles.modalMessage}>
               You're currently browsing as a guest. To {modalFeatureText}, please log in or create a free account with us to have hassle-free access.
             </Text>
-            <TouchableOpacity 
-                style={styles.modalLoginBtn} 
-                onPress={() => {
-                    setLoginModalVisible(false);
-                    navigation.navigate("Login");
-                }}
+            <TouchableOpacity
+              style={styles.modalLoginBtn}
+              onPress={() => {
+                setLoginModalVisible(false);
+                navigation.navigate("Login");
+              }}
             >
-                <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
+              <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLoginModalVisible(false)}>
-                <Text style={styles.modalCancelText}>Maybe Later</Text>
+              <Text style={styles.modalCancelText}>Maybe Later</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -397,6 +419,7 @@ export default function HomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  // ... (styles unchanged, exactly as in your original code)
   safe: { flex: 1, backgroundColor: "#19212a" },
   containerCentered: { flex: 1, justifyContent: "center", alignItems: "center" },
   screen: { flex: 1 },

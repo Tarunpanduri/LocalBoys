@@ -164,20 +164,32 @@ const AnimatedTimelineStep = ({ step, index, activeIndex }) => {
 };
 
 export default function TrackOrder({ navigation }) {
-  // Pull from Zustand
-  const { activeOrders, selectedOrder, loadingOrders, fetchActiveOrders, selectAndListenToOrder, stopListening } = useOrderStore(); 
+  // Pull from updated Zustand store
+  const { 
+    activeOrders, 
+    selectedOrderId, 
+    loadingOrders, 
+    startListening, 
+    selectOrder, 
+    stopListening 
+  } = useOrderStore(); 
 
   const [fontsLoaded] = useFonts({
     ...Ionicons.font,
     ...MaterialIcons.font,
   });
 
-  // PRODUCTION PATTERN: Mount-Only Fetch & Cleanup
+  // Derived state: Get the full order object based on the selected ID
+  const selectedOrder = useMemo(() => {
+    return activeOrders.find(o => o.id === selectedOrderId) || activeOrders[0];
+  }, [activeOrders, selectedOrderId]);
+
+  // PRODUCTION PATTERN: Mount-Only Listener & Cleanup
   useEffect(() => {
-    fetchActiveOrders(); // Grabs the list of active orders once
+    startListening(); 
     
     return () => {
-      stopListening(); // Closes Firestore connection when user goes back
+      stopListening(); 
     };
   }, []);
 
@@ -189,6 +201,12 @@ export default function TrackOrder({ navigation }) {
     <SafeAreaView style={styles.center}>
       <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
       <Text style={styles.noOrders}>We are always waiting for your orders.</Text>
+      <TouchableOpacity 
+         style={{ marginTop: 20, padding: 12, backgroundColor: "#4CAF50", borderRadius: 8 }}
+         onPress={() => navigation.navigate("HomeScreen")}
+      >
+        <Text style={{ color: "#fff", fontFamily: "Sen_Bold" }}>Browse Shops</Text>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 
@@ -209,7 +227,7 @@ export default function TrackOrder({ navigation }) {
     <TouchableOpacity 
       key={order.id} 
       style={[styles.orderCard, selectedOrder?.id === order.id && styles.orderCardSelected]} 
-      onPress={() => selectAndListenToOrder(order.id)} // Opens live tunnel for this specific order
+      onPress={() => selectOrder(order.id)} 
       activeOpacity={0.8}
     >
       <Image source={{ uri: order.shopimage }} style={styles.shopImage} resizeMode="cover" />
@@ -241,7 +259,7 @@ export default function TrackOrder({ navigation }) {
     <SafeAreaView style={styles.container}>
       <View style={{ marginTop: 20 }}>
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate("HomeScreen")} hitSlop={{ top: 10, bottom: 10, left: 10 }}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10 }}>
             <Ionicons name="chevron-back" size={20} color="#10202A" />
           </TouchableOpacity>
           <Text style={styles.sectionTitle}>Active Orders</Text>

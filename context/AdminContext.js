@@ -156,6 +156,7 @@ export const AdminProvider = ({ children }) => {
       eventUrl,
       headerAnimationUrl,
       appVersion,
+      allBranches,
       activeBranchId,
       branchConfig,
       branchCoupons,

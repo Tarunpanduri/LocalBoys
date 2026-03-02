@@ -11,6 +11,7 @@ import {
   Modal,
   Animated,
   Platform,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
@@ -49,18 +50,30 @@ const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
 const ShopDetailsSkeleton = () => (
   <SafeAreaView style={styles.safe}>
     <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-    <View style={[styles.headerRow, { marginBottom: 10 }]}><SkeletonItem width={38} height={38} borderRadius={19} /><SkeletonItem width={120} height={20} /><SkeletonItem width={38} height={38} borderRadius={19} /></View>
+    <View style={[styles.headerRow, { marginBottom: 10 }]}>
+      <SkeletonItem width={38} height={38} borderRadius={19} />
+      <SkeletonItem width={120} height={20} />
+      <SkeletonItem width={38} height={38} borderRadius={19} />
+    </View>
     <View style={{ paddingHorizontal: CARD_PADDING }}>
       <SkeletonItem width="100%" height={160} borderRadius={18} style={{ marginBottom: 12 }} />
       <SkeletonItem width={200} height={24} style={{ marginBottom: 8 }} />
       <SkeletonItem width="90%" height={14} style={{ marginBottom: 6 }} />
-      <View style={{ flexDirection: 'row', gap: 15, marginBottom: 20 }}><SkeletonItem width={50} height={16} /><SkeletonItem width={50} height={16} /></View>
-      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>{[1, 2, 3].map(i => <SkeletonItem key={i} width={70} height={32} borderRadius={22} />)}</View>
+      <View style={{ flexDirection: 'row', gap: 15, marginBottom: 20 }}>
+        <SkeletonItem width={50} height={16} />
+        <SkeletonItem width={50} height={16} />
+      </View>
+      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+        {[1, 2, 3].map(i => <SkeletonItem key={i} width={70} height={32} borderRadius={22} />)}
+      </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
         {[1, 2, 3, 4].map(i => (
           <View key={i} style={{ width: CARD_WIDTH, marginBottom: CARD_GUTTER, borderRadius: 14, borderWidth: 1, borderColor: '#eee' }}>
             <SkeletonItem width="100%" height={CARD_WIDTH * 0.6} borderRadius={0} />
-            <View style={{ padding: 10 }}><SkeletonItem width="90%" height={16} style={{ marginBottom: 6 }} /><SkeletonItem width="70%" height={12} style={{ marginBottom: 10 }} /></View>
+            <View style={{ padding: 10 }}>
+              <SkeletonItem width="90%" height={16} style={{ marginBottom: 6 }} />
+              <SkeletonItem width="70%" height={12} style={{ marginBottom: 10 }} />
+            </View>
           </View>
         ))}
       </View>
@@ -71,6 +84,10 @@ const ShopDetailsSkeleton = () => (
 export default function ShopDetails({ route, navigation }) {
   const { shopId, shop } = route.params || {};
   const [activeCategory, setActiveCategory] = useState(null);
+  const [refreshing, setRefreshing] = useState(false); 
+  
+  // 🔥 NEW: Force loading state when resetting cart and fetching
+  const [isForceReloading, setIsForceReloading] = useState(false);
 
   // Modals state
   const [loginModalVisible, setLoginModalVisible] = useState(false);
@@ -78,7 +95,6 @@ export default function ShopDetails({ route, navigation }) {
   const [pendingProduct, setPendingProduct] = useState(null);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // Custom Dynamic Checkout Alert Modal
   const [checkoutAlert, setCheckoutAlert] = useState({
     visible: false,
     title: "",
@@ -95,11 +111,14 @@ export default function ShopDetails({ route, navigation }) {
   const rawProductsObj = useProductStore((state) => state.menus[shopId]);
   const productsObj = rawProductsObj || {};
   const loading = useProductStore((state) => state.loadingStates[shopId]);
+  const lastFetched = useProductStore((state) => state.lastFetchedTimestamps[shopId] || 0);
 
   const cartData = useCartStore((state) => state.cartData);
   const addToCart = useCartStore((state) => state.addToCart);
   const decreaseQty = useCartStore((state) => state.decreaseQty);
-  const clearCart = useCartStore((state) => state.clearCart);
+  
+  // 🔥 NEW: Pull clearShopCart from store
+  const clearShopCart = useCartStore((state) => state.clearShopCart); 
 
   const [fontsLoaded] = useFonts({ ...Ionicons.font, ...MaterialIcons.font });
 
@@ -110,23 +129,40 @@ export default function ShopDetails({ route, navigation }) {
   const cartItems = cartShop ? Object.keys(cartShop).filter(k => !["shopname", "shopimage", "shopphone"].includes(k)).map(key => ({ id: key, ...cartShop[key] })) : [];
   const cartItemCount = cartItems.reduce((count, item) => count + item.qty, 0);
 
-  // --- FETCH DATA (OPTIMIZED) ---
+  // --- FETCH DATA (SMART CACHE INVALIDATION) ---
+  const shopUpdatedAt = shop?.updatedAt || shop?.lastUpdated || 0;
+
   useEffect(() => {
     const hasProducts = rawProductsObj && Object.keys(rawProductsObj).length > 0;
-    if (shopId && !hasProducts) {
+
+    if (shopId && (!hasProducts || shopUpdatedAt > lastFetched)) {
+      console.log("Fetching fresh menu for shop...");
       fetchProducts(shopId);
     }
-  }, [shopId, fetchProducts, rawProductsObj]);
+  }, [shopId, fetchProducts, rawProductsObj, shopUpdatedAt, lastFetched]);
 
   // --- DERIVED MENU DATA ---
   const productsArray = useMemo(() => Object.keys(productsObj).map((pid) => ({ id: pid, ...productsObj[pid] })), [productsObj]);
   const categories = useMemo(() => ["All", ...Array.from(new Set(productsArray.map((p) => p.category || "Other")))], [productsArray]);
 
-  useEffect(() => { if (categories.length && !activeCategory) setActiveCategory("All"); }, [categories, activeCategory]);
+  useEffect(() => {
+    if (categories.length && !activeCategory) setActiveCategory("All");
+  }, [categories, activeCategory]);
 
-  const productsByActiveCategory = useMemo(() => (!activeCategory || activeCategory === "All") ? productsArray : productsArray.filter((p) => (p.category || "Other") === activeCategory), [productsArray, activeCategory]);
+  useEffect(() => {
+    if (activeCategory && activeCategory !== "All" && !categories.includes(activeCategory)) {
+      setActiveCategory("All");
+    }
+  }, [categories, activeCategory]);
 
-  const getCategoryTheme = useCallback((catLabel) => (catLabel === "All" ? "#28A745" : categoryMeta?.[catLabel]?.Theme || "#28A745"), [categoryMeta]);
+  const productsByActiveCategory = useMemo(() => {
+    if (!activeCategory || activeCategory === "All") return productsArray;
+    return productsArray.filter((p) => (p.category || "Other") === activeCategory);
+  }, [productsArray, activeCategory]);
+
+  const getCategoryTheme = useCallback((catLabel) => {
+    return catLabel === "All" ? "#28A745" : categoryMeta?.[catLabel]?.Theme || "#28A745";
+  }, [categoryMeta]);
   const themeColor = getCategoryTheme(activeCategory);
 
   const handleAddToCart = (item) => {
@@ -147,11 +183,49 @@ export default function ShopDetails({ route, navigation }) {
     }
   };
 
-  const handleRefresh = () => {
-    if (shopId) {
-      Toast.show("Refreshing menu...", { duration: Toast.durations.SHORT });
-      fetchProducts(shopId);
+  // Pull‑to‑refresh - Also checks for cart conflicts!
+  const handleRefresh = async () => {
+    if (!shopId) return;
+    setRefreshing(true);
+    await fetchProducts(shopId);
+    
+    if (activeCategory && activeCategory !== "All" && !categories.includes(activeCategory)) {
+      setActiveCategory("All");
     }
+    setRefreshing(false);
+
+    // 🔥 Check if the newly downloaded menu invalidates the user's cart
+    if (cartShopId === shopId && cartItems.length > 0) {
+       let invalid = false;
+       const freshMenu = useProductStore.getState().menus[shopId];
+       if (freshMenu) {
+           cartItems.forEach(item => {
+              const freshItem = freshMenu[item.id];
+              if (!freshItem || freshItem.inStock === false || freshItem.price !== item.price) {
+                 invalid = true;
+              }
+           });
+           
+           if (invalid) {
+              setCheckoutAlert({
+                visible: true,
+                title: "Menu Updated",
+                message: "Some items in your cart had their prices changed or are out of stock. Your cart will be cleared so you can view the fresh menu.",
+                icon: "refresh-circle-outline",
+                btnText: "Update Menu",
+                onAction: async () => {
+                  setCheckoutAlert(prev => ({ ...prev, visible: false }));
+                  setIsForceReloading(true);
+                  clearShopCart(shopId);
+                  await fetchProducts(shopId);
+                  setIsForceReloading(false);
+                }
+              });
+              return;
+           }
+       }
+    }
+    Toast.show("Menu updated", { duration: Toast.durations.SHORT });
   };
 
   const handleProceedCheckout = async () => {
@@ -177,7 +251,6 @@ export default function ShopDetails({ route, navigation }) {
           btnText: "Go to Home",
           onAction: () => {
             setCheckoutAlert(prev => ({ ...prev, visible: false }));
-            // Navigate to home and pass refresh param to trigger update
             navigation.navigate("HomeScreen", { refresh: true });
           }
         });
@@ -186,45 +259,65 @@ export default function ShopDetails({ route, navigation }) {
 
       const liveShopData = shopSnap.data();
 
-      // 2. LIVE CHECK: Are the items still in stock?
+      // 2. LIVE CHECK: Are items in stock AND are prices correct?
       const itemPromises = cartItems.map(item =>
         getDoc(doc(db, `shops/${cartShopId}/products/${item.id}`))
       );
       const itemSnaps = await Promise.all(itemPromises);
 
       let outOfStockItems = [];
+      let priceChanged = false;
 
       itemSnaps.forEach((snap, index) => {
         const cartItem = cartItems[index];
         if (snap.exists()) {
           const liveProductData = snap.data();
+
           if (liveProductData.inStock === false) {
             outOfStockItems.push(cartItem.productname);
           }
+          if (liveProductData.price !== cartItem.price) {
+            priceChanged = true;
+          }
         } else {
+          // Product document no longer exists
           outOfStockItems.push(cartItem.productname);
         }
       });
 
-      // 3. Handle Out of Stock
-      if (outOfStockItems.length > 0) {
+      // 🔥 3. Handle Conflicts: Wipe Cart, Load Skeleton, Re-Fetch!
+      if (outOfStockItems.length > 0 || priceChanged) {
         setIsVerifying(false);
-        fetchProducts(cartShopId);
+        
+        let title = "Cart Update Required";
+        let message = "";
+        
+        if (outOfStockItems.length > 0) {
+          message = `The following items are no longer available:\n\n${outOfStockItems.join(", ")}\n\nYour cart will be cleared so you can view the fresh menu.`;
+        } else {
+          message = "Some items in your cart had their prices changed by the shop. Your cart will be cleared so you can view the fresh menu.";
+        }
+
         setCheckoutAlert({
           visible: true,
-          title: "Items Out of Stock",
-          message: `The following items are not available:\n\n${outOfStockItems.join(", ")}\n\nPlease remove them from your cart to proceed.`,
-          icon: "cart-outline",
-          btnText: "Got it",
-          onAction: () => setCheckoutAlert(prev => ({ ...prev, visible: false }))
+          title: title,
+          message: message,
+          icon: outOfStockItems.length > 0 ? "cart-outline" : "pricetag-outline",
+          btnText: "Update Menu",
+          onAction: async () => {
+            setCheckoutAlert(prev => ({ ...prev, visible: false }));
+            setIsForceReloading(true); // 1. Trigger Skeleton Loader
+            clearShopCart(cartShopId); // 2. Empty the cart immediately
+            await fetchProducts(cartShopId); // 3. Download the newest items
+            setIsForceReloading(false); // 4. Remove Skeleton Loader
+          }
         });
         return;
       }
 
-      // 4. All checks passed! Proceed to Checkout
+      // 4. All checks passed! Proceed to Unified Checkout
       const hasRide = cartItems.some(i => i.serviceType === "ride");
       const hasDelivery = cartItems.some(i => i.serviceType === "delivery");
-
       const shopToPass = { id: cartShopId, ...liveShopData };
 
       if (hasRide && !hasDelivery) {
@@ -251,7 +344,11 @@ export default function ShopDetails({ route, navigation }) {
     }
   };
 
-  if ((loading && productsArray.length === 0) || !fontsLoaded) return <ShopDetailsSkeleton />;
+  // 🔥 Notice the new isForceReloading flag triggers the skeleton instantly
+  if ((loading && productsArray.length === 0) || !fontsLoaded || isForceReloading) {
+    return <ShopDetailsSkeleton />;
+  }
+
   if (!shopId) return <SafeAreaView style={styles.centered}><Text>No shop provided</Text></SafeAreaView>;
 
   const renderHeader = () => (
@@ -265,7 +362,9 @@ export default function ShopDetails({ route, navigation }) {
           <Ionicons name="refresh" size={20} color="#10202A" />
         </TouchableOpacity>
       </View>
-      <View style={styles.bannerWrap}><Image source={shop?.image ? { uri: shop.image } : { uri: "https://www.trueangle.in/public/assets/img/product-default.png" }} style={styles.banner} resizeMode="cover" /></View>
+      <View style={styles.bannerWrap}>
+        <Image source={shop?.image ? { uri: shop.image } : { uri: "https://www.trueangle.in/public/assets/img/product-default.png" }} style={styles.banner} resizeMode="cover" />
+      </View>
       <View style={styles.info}>
         <Text style={styles.shopName}>{shop?.name}</Text>
         <Text style={styles.shopDesc}>{shop?.description || "No description available."}</Text>
@@ -277,17 +376,34 @@ export default function ShopDetails({ route, navigation }) {
       </View>
       <View style={{ marginTop: 18 }}>
         <FlatList
-          horizontal data={categories} keyExtractor={(i, idx) => `${i}-${idx}`} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 6, paddingHorizontal: 12 }}
+          horizontal
+          data={categories}
+          keyExtractor={(i, idx) => `${i}-${idx}`}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingVertical: 6, paddingHorizontal: 12 }}
           renderItem={({ item, index }) => {
-            const active = activeCategory === item, catColor = getCategoryTheme(item);
+            const active = activeCategory === item;
+            const catColor = getCategoryTheme(item);
             return (
-              <TouchableOpacity onPress={() => setActiveCategory(item)} style={[styles.catChip, active && { backgroundColor: catColor, borderColor: catColor }, index === categories.length - 1 && { marginRight: 0 }]}>
+              <TouchableOpacity
+                onPress={() => setActiveCategory(item)}
+                style={[
+                  styles.catChip,
+                  active && { backgroundColor: catColor, borderColor: catColor },
+                  index === categories.length - 1 && { marginRight: 0 }
+                ]}
+              >
                 <Text style={[styles.catLabel, active && { color: "#fff", fontFamily: "Sen_Bold" }]}>{item}</Text>
               </TouchableOpacity>
             );
-          }} />
+          }}
+        />
       </View>
-      <View style={{ marginVertical: 12 }}><Text style={styles.sectionHeading}>{activeCategory} <Text style={styles.sectionCount}>({productsByActiveCategory.length})</Text></Text></View>
+      <View style={{ marginVertical: 12 }}>
+        <Text style={styles.sectionHeading}>
+          {activeCategory} <Text style={styles.sectionCount}>({productsByActiveCategory.length})</Text>
+        </Text>
+      </View>
     </>
   );
 
@@ -302,6 +418,9 @@ export default function ShopDetails({ route, navigation }) {
         columnWrapperStyle={{ justifyContent: "space-between", marginBottom: CARD_GUTTER }}
         contentContainerStyle={{ paddingHorizontal: CARD_PADDING, paddingBottom: 140 }}
         ListHeaderComponent={renderHeader}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={["#28A745"]} tintColor="#28A745" />
+        }
         renderItem={({ item }) => {
           const cartItem = (cartShopId === shopId && cartShop) ? cartShop[item.id] : null;
           return (
@@ -316,20 +435,41 @@ export default function ShopDetails({ route, navigation }) {
                   <Text style={styles.price}>₹{item.price}</Text>
                   {cartItem ? (
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
-                      <TouchableOpacity onPress={() => decreaseQty(shopId, item)} style={[styles.addBtn, { marginRight: 6, backgroundColor: "#ccc" }]}><Ionicons name="remove" size={18} color="#fff" /></TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => decreaseQty(shopId, item)}
+                        style={[styles.addBtn, { marginRight: 6, backgroundColor: "#ccc" }]}
+                      >
+                        <Ionicons name="remove" size={18} color="#fff" />
+                      </TouchableOpacity>
                       <Text style={{ marginHorizontal: 4 }}>{cartItem.qty}</Text>
-                      <TouchableOpacity onPress={() => addToCart(shop, item)} style={[styles.addBtn, { backgroundColor: themeColor }]}><Ionicons name="add" size={18} color="#fff" /></TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => addToCart(shop, item)}
+                        style={[styles.addBtn, { backgroundColor: themeColor }]}
+                      >
+                        <Ionicons name="add" size={18} color="#fff" />
+                      </TouchableOpacity>
                     </View>
                   ) : (
-                    <TouchableOpacity style={[styles.addBtn, { backgroundColor: themeColor }]} onPress={() => handleAddToCart(item)}><Ionicons name="add" size={18} color="#fff" /></TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.addBtn, { backgroundColor: themeColor }]}
+                      onPress={() => handleAddToCart(item)}
+                    >
+                      <Ionicons name="add" size={18} color="#fff" />
+                    </TouchableOpacity>
                   )}
                 </View>
-                {item.inStock === false && <Text style={{ color: "red", fontSize: 12, marginTop: 4, fontFamily: 'Sen_Medium' }}>Out of Stock</Text>}
+                {item.inStock === false && (
+                  <Text style={{ color: "red", fontSize: 12, marginTop: 4, fontFamily: 'Sen_Medium' }}>Out of Stock</Text>
+                )}
               </View>
             </View>
           );
         }}
-        ListEmptyComponent={() => <View style={{ padding: 20 }}><Text style={{ color: "#666", textAlign: "center" }}>No items in this category.</Text></View>}
+        ListEmptyComponent={() => (
+          <View style={{ padding: 20 }}>
+            <Text style={{ color: "#666", textAlign: "center" }}>No items in this category.</Text>
+          </View>
+        )}
       />
 
       {cartShop && cartItemCount > 0 && cartShopId === shopId && (
@@ -341,7 +481,9 @@ export default function ShopDetails({ route, navigation }) {
               <Text style={styles.cartSubText}>from {cartShop.shopname}</Text>
             </View>
             <View style={styles.cartActions}>
-              <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#ccc" }]} onPress={clearCart}><Text style={styles.cartBtnText}>Clear</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.cartBtn, { backgroundColor: "#ccc" }]} onPress={() => clearShopCart(shopId)}>
+                <Text style={styles.cartBtnText}>Clear</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.cartBtn, { backgroundColor: isVerifying ? "#888" : "#28A745" }]}
                 onPress={handleProceedCheckout}
@@ -363,8 +505,12 @@ export default function ShopDetails({ route, navigation }) {
             <View style={styles.modalIconContainer}><Ionicons name="cart-outline" size={40} color="#28A745" /></View>
             <Text style={styles.modalTitle}>Ready to Order?</Text>
             <Text style={styles.modalMessage}>Please log in to add items to your cart and track your order easily.</Text>
-            <TouchableOpacity style={styles.modalLoginBtn} onPress={() => { setLoginModalVisible(false); navigation.navigate("Login"); }}><Text style={styles.modalLoginText}>Log In / Sign Up</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLoginModalVisible(false)}><Text style={styles.modalCancelText}>I'm just browsing</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.modalLoginBtn} onPress={() => { setLoginModalVisible(false); navigation.navigate("Login"); }}>
+              <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLoginModalVisible(false)}>
+              <Text style={styles.modalCancelText}>I'm just browsing</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -388,7 +534,7 @@ export default function ShopDetails({ route, navigation }) {
         </View>
       </Modal>
 
-      {/* Dynamic Checkout Alert Modal (Replaces standard Alert.alert) */}
+      {/* Dynamic Checkout Alert Modal */}
       <Modal animationType="fade" transparent={true} visible={checkoutAlert.visible} onRequestClose={checkoutAlert.onAction}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>

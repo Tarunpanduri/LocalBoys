@@ -88,7 +88,8 @@ export default function App() {
       }
 
       if (finalStatus !== 'granted') {
-        Alert.alert('Permission Denied', 'Enable notifications to receive updates.');
+        // Silently fail on app open so we don't spam the user with alerts every time
+        console.log('Push permission not granted');
         return null;
       }
 
@@ -104,10 +105,18 @@ export default function App() {
 
       const expoToken = tokenData.data;
 
+      // 🔥 KILLING THE APP-OPEN BILLING TRAP 🔥
       if (userId && expoToken) {
-        await updateDoc(doc(db, "users", userId), { 
-          expoPushToken: expoToken 
-        });
+        const cachedToken = await AsyncStorage.getItem(`pushToken_${userId}`);
+        
+        // ONLY write to Firebase if the token has changed or is brand new
+        if (cachedToken !== expoToken) {
+          await updateDoc(doc(db, "users", userId), { 
+            expoPushToken: expoToken 
+          });
+          // Save locally so we don't trigger this write again tomorrow
+          await AsyncStorage.setItem(`pushToken_${userId}`, expoToken);
+        }
       }
 
       return expoToken;

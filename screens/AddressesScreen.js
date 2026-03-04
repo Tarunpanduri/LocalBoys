@@ -117,6 +117,7 @@ export default function AddressesScreen({ navigation }) {
 
   const onSetMain = async (id) => {
     try {
+            navigation.navigate('HomeScreen'); 
       const uid = auth.currentUser?.uid;
       if (!uid) return;
 
@@ -125,7 +126,6 @@ export default function AddressesScreen({ navigation }) {
 
       const updates = {};
       updates['mainAddressId'] = id;
-
       // 🔥 FREE LOCAL DISTANCE CALCULATION 🔥
       if (selectedAddress.lat && selectedAddress.lng && allBranches && allBranches.length > 0) {
         let minDist = Infinity;
@@ -152,7 +152,6 @@ export default function AddressesScreen({ navigation }) {
       }
 
       await updateDoc(doc(db, "users", uid), updates);
-      navigation.navigate('HomeScreen'); 
     } catch (e) {
       console.error('Set main address error:', e);
     }

@@ -6,9 +6,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
-// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
-import { db, auth } from "../firebase";
-import { collection, doc, getDoc, addDoc, GeoPoint } from "firebase/firestore";
+
+// 🔥 SECURE FIRESTORE & FUNCTIONS IMPORTS 🔥
+import { db, auth, functions } from "../firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+
 import Toast from "react-native-root-toast";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -25,7 +28,7 @@ import { useCartStore } from "../store/cartstore";
 
 const { width, height } = Dimensions.get("window");
 
-// --- UTILS ---
+// --- UTILS (For Display Purposes Only) ---
 const getDistanceInKm = (lat1, lon1, lat2, lon2) => {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -114,7 +117,7 @@ export default function CheckoutScreen() {
 
   // --- CONTEXTS & STORES ---
   const { user, userData, mainAddress, loading: userLoading } = useUser();
-  const { branchConfig, loading: adminLoading } = useAdmin();
+  const { branchConfig, activeBranchId, allBranches, loading: adminLoading } = useAdmin();
   const { validateCoupon } = useCoupon();
   
   // ZUSTAND
@@ -134,7 +137,7 @@ export default function CheckoutScreen() {
   const [userAddresses, setUserAddresses] = useState([]);
   const [showAddressModal, setShowAddressModal] = useState(false);
 
-  // Financials
+  // Financials (For UI calculation only)
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [platformFee, setPlatformFee] = useState(10);
   const [subtotal, setSubtotal] = useState(0);
@@ -150,12 +153,11 @@ export default function CheckoutScreen() {
   const [placingOrder, setPlacingOrder] = useState(false);
   const [loadingCart, setLoadingCart] = useState(true);
 
-  // 🔥 QR Code States 🔥
+  // QR Code States
   const [qrImage, setQrImage] = useState("");
   const [qrImageFailed, setQrImageFailed] = useState(false);
   const [qrRetryCount, setQrRetryCount] = useState(0);
 
-  // Track if we already fetched the fallback to absolutely guarantee 0 billing traps
   const fallbackFetchedRef = useRef(false);
 
   // Derived
@@ -166,7 +168,6 @@ export default function CheckoutScreen() {
   useEffect(() => {
     if (userLoading || shopsLoading || adminLoading || !shopId) return;
 
-    // A. Set Shop Data
     if (paramShop && Object.keys(paramShop).length > 0) {
       setShop(paramShop);
       setQrImage(paramShop.qr || branchConfig?.qr || "");
@@ -179,7 +180,6 @@ export default function CheckoutScreen() {
         setQrImage(foundShop.qr || branchConfig?.qr || "");
         setShopCommission(Number(foundShop.commission) || 15);
       } 
-      // 🔥 TRAP KILLED: We use a useRef to ensure this getDoc is ONLY called ONCE per mount!
       else if (!fallbackFetchedRef.current) { 
         fallbackFetchedRef.current = true;
         getDoc(doc(db, "shops", shopId)).then(snap => {
@@ -191,12 +191,11 @@ export default function CheckoutScreen() {
           }
         }).catch(err => {
             console.error("Error fetching shop fallback:", err);
-            fallbackFetchedRef.current = false; // Allow retry if network crashed
+            fallbackFetchedRef.current = false; 
         });
       }
     }
 
-    // B. Prepare Addresses (for Parcel mode mostly)
     if (userData?.addresses) {
       const addrList = Object.keys(userData.addresses).map(key => ({
         id: key, ...userData.addresses[key]
@@ -213,7 +212,6 @@ export default function CheckoutScreen() {
       }
     }
 
-    // C. Load Cart
     if (cartData && cartData[shopId]) {
       const cleanCart = {};
       const val = cartData[shopId];
@@ -237,7 +235,7 @@ export default function CheckoutScreen() {
     }
   }, [userLoading, shopsLoading, adminLoading, shopId, paramCart, cartData, shops, paramShop, branchConfig, userData, mainAddress, orderType]);
 
-  // --- 2. CALCULATE TOTALS (Dynamic based on Order Type) ---
+  // --- 2. CALCULATE TOTALS (UI Only) ---
   useEffect(() => {
     if (!cart || !shop) return;
 
@@ -251,7 +249,6 @@ export default function CheckoutScreen() {
 
     let calcDeliveryFee = 0;
     
-    // CONDITIONAL DISTANCE CALCULATION
     if (orderType === "parcel" && pickupAddress && dropAddress) {
       const pLat = Number(pickupAddress.lat ?? pickupAddress.location?.latitude);
       const pLng = Number(pickupAddress.lng ?? pickupAddress.location?.longitude);
@@ -307,13 +304,13 @@ export default function CheckoutScreen() {
     setShowAddressModal(false);
   };
 
+  // 🔥 ENTERPRISE SECURE ORDER PLACEMENT 🔥
   const handlePlaceOrder = async () => {
     if (!user) {
       Toast.show("Please login to place order", { duration: Toast.durations.SHORT });
       return;
     }
     
-    // Validate addresses based on type
     if (orderType === "delivery" && !mainAddress) {
       Toast.show("Please add a delivery address", { duration: Toast.durations.SHORT });
       navigation.navigate("Addresses");
@@ -332,100 +329,96 @@ export default function CheckoutScreen() {
     try {
       setPlacingOrder(true);
 
+      // Strip down the cart items to pure JSON for the server
       const cleanItems = {};
       Object.keys(cart).filter(k => k.startsWith("productId")).forEach(pid => {
-         cleanItems[pid] = { ...cart[pid] };
+         cleanItems[pid] = { 
+           id: pid,
+           qty: cart[pid].qty,
+           price: cart[pid].price, // Sent as a reference; Cloud Function will do final verification
+           productname: cart[pid].productname,
+           image: cart[pid].image || "",
+           serviceType: cart[pid].serviceType || "delivery"
+         };
       });
 
-      // Common Base Data
-      const baseOrderData = {
-        userId: user.uid,
-        shopId,
-        shopname: shop?.name || "Unknown Shop",
-        shopimage: shop?.image || "",
-        shopphone: shop?.phone || "",
-        items: cleanItems,
-        subtotal: Math.ceil(subtotal),
-        discount: Math.ceil(discount),
-        deliveryFee: Math.ceil(deliveryFee),
-        platformFee,
-        total: Math.ceil(total),
-        paymentMode,
-        transactionId: paymentMode === "Online" ? transactionId.trim() : null,
-        customerName: userData?.name || userData?.firstName || "Customer",
-        customerPhone: userData?.mobile || "",
-        customerEmail: user.email,
-        status: "pending",
-        createdAt: Date.now(),
-        orderType: orderType, // Conditionally set
-        driverPayout: Math.ceil(deliveryFee),
-        restaurantPayout: {
-          restaurantTotal,
-          platformCommission: Math.ceil(subtotal - restaurantTotal),
-          netPayout: restaurantTotal,
-          calculationBreakdown: {
-            subtotal,
-            shopCommissionRate: shopCommission / 100,
-            isPremiumOrder
-          }
-        }
-      };
+      // Prepare secure coordinates safely (no native GeoPoint objects sent over HTTPS)
+      let deliveryAddressData = null;
+      let parcelPickupData = null;
+      let parcelDropData = null;
 
-      // Append conditional payload logic based on Order Type
       if (orderType === "parcel") {
-        const pLat = Number(pickupAddress.lat ?? pickupAddress.location?.latitude ?? 0);
-        const pLng = Number(pickupAddress.lng ?? pickupAddress.location?.longitude ?? 0);
-        const dLat = Number(dropAddress.lat ?? dropAddress.location?.latitude ?? 0);
-        const dLng = Number(dropAddress.lng ?? dropAddress.location?.longitude ?? 0);
-
-        baseOrderData.pickupAddress = { 
-          ...pickupAddress, 
-          customerName: userData?.name || userData?.firstName, 
-          customerPhone: userData?.mobile,
-          location: new GeoPoint(pLat, pLng)
+        parcelPickupData = {
+          ...pickupAddress,
+          customerName: userData?.name || userData?.firstName || "Customer",
+          customerPhone: userData?.mobile || "",
+          lat: Number(pickupAddress.lat ?? pickupAddress.location?.latitude ?? 0),
+          lng: Number(pickupAddress.lng ?? pickupAddress.location?.longitude ?? 0)
         };
-        baseOrderData.dropAddress = { 
+        parcelDropData = {
           ...dropAddress,
-          location: new GeoPoint(dLat, dLng)
-        };
-        baseOrderData.calculationMetadata = {
-          deliveryChargePerKm, baseDeliveryFee: 20, platformFee, isPremiumOrder, shopCommission,
-          pickupLocation: { lat: pLat, lng: pLng, location: new GeoPoint(pLat, pLng) },
-          dropLocation: { lat: dLat, lng: dLng, location: new GeoPoint(dLat, dLng) }
+          lat: Number(dropAddress.lat ?? dropAddress.location?.latitude ?? 0),
+          lng: Number(dropAddress.lng ?? dropAddress.location?.longitude ?? 0)
         };
       } else {
-        const uLat = Number(mainAddress.lat ?? mainAddress.location?.latitude ?? 0);
-        const uLng = Number(mainAddress.lng ?? mainAddress.location?.longitude ?? 0);
-        const sLat = Number(shop?.location?.latitude ?? shop?.location?.lat ?? 0);
-        const sLng = Number(shop?.location?.longitude ?? shop?.location?.lng ?? 0);
-
-        baseOrderData.address = mainAddress.formattedAddress;
-        baseOrderData.userLocation = { 
-            lat: uLat, lng: uLng, location: new GeoPoint(uLat, uLng), ...mainAddress
-        };
-        baseOrderData.calculationMetadata = {
-          deliveryChargePerKm, baseDeliveryFee: 20, platformFee, isPremiumOrder, shopCommission,
-          shopLocation: { lat: sLat, lng: sLng, location: new GeoPoint(sLat, sLng) }
+        deliveryAddressData = {
+          ...mainAddress,
+          lat: Number(mainAddress.lat ?? mainAddress.location?.latitude ?? 0),
+          lng: Number(mainAddress.lng ?? mainAddress.location?.longitude ?? 0)
         };
       }
 
-      // 🔥 WRITE TO FIRESTORE 🔥
-      const newOrderRef = await addDoc(collection(db, "orders"), baseOrderData);
+      // 🔥 FIND CONFIG URL FOR BACKEND 🔥
+      const currentBranch = allBranches.find(b => b.id === activeBranchId);
+      const branchConfigUrl = currentBranch?.configUrl || null;
+
+      // Construct Secure Payload
+      const securePayload = {
+        shopId: shopId,
+        orderType: orderType,
+        items: cleanItems,
+        couponCode: couponCode.trim() || null,
+        paymentMode: paymentMode,
+        transactionId: paymentMode === "Online" ? transactionId.trim() : null,
+        
+        // Pass branch config safely
+        activeBranchId: activeBranchId,
+        branchConfigUrl: branchConfigUrl, 
+        
+        // Push notification hook injected here
+        expoPushToken: userData?.expoPushToken || null,
+        customerName: userData?.name || userData?.firstName || "Customer",
+        customerPhone: userData?.mobile || "",
+        
+        // Locations
+        deliveryAddress: deliveryAddressData,
+        parcelPickup: parcelPickupData,
+        parcelDrop: parcelDropData,
+      };
+
+      // Call the Firebase Cloud Function
+      const createSecureOrder = httpsCallable(functions, 'createSecureOrder');
       
+      const response = await createSecureOrder(securePayload);
+      
+      // Response contains the server-verified order summary
+      const newOrderId = response.data.orderId;
+      const summary = response.data.orderSummary;
+
       if (!isBuyNow) {
         await clearCart();  
       } 
 
       navigation.replace("OrderConfirmation", { 
         orderData: { 
-          order: { id: newOrderRef.id, ...baseOrderData }, 
+          order: { id: newOrderId, ...summary }, 
           message: orderType === "parcel" ? "Parcel order placed successfully" : "Order placed successfully" 
         } 
       });
 
     } catch (e) {
-      console.error(e);
-      Toast.show("Failed to place order");
+      console.error("Order Placement Error:", e);
+      Toast.show("Failed to place order. Check your internet connection.");
     } finally {
       setPlacingOrder(false);
     }
@@ -443,7 +436,6 @@ export default function CheckoutScreen() {
     </TouchableOpacity>
   );
 
-  // Helper to force image reload cache bypass
   const getQrUri = () => {
     if (!qrImage) return null;
     return `${qrImage}?retry=${qrRetryCount}`;
@@ -632,7 +624,6 @@ export default function CheckoutScreen() {
                 </View>
                 {paymentMode === "Online" && (
                   <View style={styles.onlineBox}>
-                    {/* 🔥 NEW QR CODE RENDERING LOGIC WITH RETRY 🔥 */}
                     {qrImage && !qrImageFailed ? (
                       <Image 
                         source={{ uri: getQrUri() }} 
@@ -644,7 +635,7 @@ export default function CheckoutScreen() {
                         style={[styles.qrImage, styles.qrFallbackBox]} 
                         onPress={() => {
                           setQrImageFailed(false);
-                          setQrRetryCount(prev => prev + 1); // Forces Image to re-request
+                          setQrRetryCount(prev => prev + 1);
                         }}
                       >
                         <Ionicons name="refresh-circle-outline" size={36} color="#666" />
@@ -670,7 +661,7 @@ export default function CheckoutScreen() {
             </BottomSheetScrollView>
           </BottomSheet>
 
-          {/* Sticky Bottom Bar - FIXED ABSOLUTELY AT THE BOTTOM OF THE SCREEN */}
+          {/* Sticky Bottom Bar */}
           <View style={styles.bottomBar}>
             <View>
               <Text style={styles.totalLabel}>TOTAL</Text>
@@ -749,7 +740,6 @@ const styles = StyleSheet.create({
   addressText: { color: "#fff", fontSize: Platform.OS === 'ios' ? 12 : 14, fontFamily: "Sen_Regular" },
   addressSub: { color: "#888", fontSize: Platform.OS === 'ios' ? 11 : 13, marginTop: 4, fontFamily: "Sen_Regular" },
   
-  // New Bottom Sheet Styles for Gorhom
   bottomSheetBackground: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   bottomSheetIndicator: { backgroundColor: "#ccc", width: 40, height: 4 },
   skeletonBottomSheet: { position: "absolute", bottom: 0, width: "100%", backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
@@ -784,14 +774,12 @@ const styles = StyleSheet.create({
   onlineBox: { alignItems: "center", paddingBottom: 20 },
   qrImage: { width: 140, height: 140, marginBottom: 12, borderRadius: 8 },
   
-  // 🔥 New QR Fallback styles 🔥
   qrFallbackBox: { justifyContent: "center", alignItems: "center", backgroundColor: "#f5f5f5", borderWidth: 1, borderColor: "#ddd", borderStyle: "dashed" },
   qrFallbackText: { color: "#888", marginTop: 4, fontFamily: 'Sen_Medium', fontSize: 12 },
 
   transactionInput: { backgroundColor: "#f0f0f0", color: "#0e0e12", borderRadius: 8, width: "90%", padding: 10, marginBottom: 8, fontFamily: "Sen_Regular", fontSize: Platform.OS === 'ios' ? 12 : 14 },
   qrNote: { fontSize: Platform.OS === 'ios' ? 10 : 12, color: "#555", textAlign: "center", fontFamily: "Sen_Regular" },
   
-  // FIXED BOTTOM BAR STYLES
   bottomBar: { 
     position: "absolute", 
     bottom: 0, 
@@ -816,7 +804,6 @@ const styles = StyleSheet.create({
   backButton: { backgroundColor: "#ff7a00", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, marginTop: 16 },
   backButtonText: { color: "#fff", fontFamily: "Sen_Medium", fontSize: 14 },
 
-  // MODAL STYLES
   modalOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.7)", justifyContent: "flex-end", zIndex: 1000 }, 
   modalContent: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "70%", paddingBottom: Platform.OS === "ios" ? 20 : 20 }, 
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: "#eee" }, 

@@ -1,8 +1,10 @@
 import { initializeApp } from "firebase/app";
 import { initializeAuth, getReactNativePersistence } from "firebase/auth";
 import ReactNativeAsyncStorage from "@react-native-async-storage/async-storage";
-// --- CHANGED: Use standard getFirestore ---
 import { getFirestore } from "firebase/firestore";
+
+// 🔥 ADD CLOUD FUNCTIONS IMPORT 🔥
+import { getFunctions } from "firebase/functions";
 import Constants from "expo-constants";
 
 const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
@@ -26,8 +28,10 @@ export const auth = initializeAuth(app, {
   persistence: getReactNativePersistence(ReactNativeAsyncStorage),
 });
 
-// --- CHANGED: Initialize standard Firestore ---
-// (Zustand + AsyncStorage handles all our offline capabilities flawlessly)
+// Initialize standard Firestore
 export const db = getFirestore(app);
+
+// 🔥 INITIALIZE AND EXPORT CLOUD FUNCTIONS 🔥
+export const functions = getFunctions(app);
 
 export default app;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { 
   View, 
   Text, 
@@ -16,9 +16,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font";
 
-// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
-import { auth, db } from "../firebase";
-import { doc, onSnapshot } from "firebase/firestore";
+// 🔥 IMPORT ZUSTAND STORE INSTEAD OF FIRESTORE 🔥
+import { useOrderStore } from "../store/orderStore";
 
 const { width, height } = Dimensions.get("window");
 
@@ -37,25 +36,8 @@ const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   }, [width]);
 
   return (
-    <View
-      style={[
-        {
-          width: width,
-          height: height,
-          backgroundColor: "#E1E9EE",
-          borderRadius: borderRadius,
-          overflow: "hidden",
-        },
-        style,
-      ]}
-    >
-      <Animated.View
-        style={{
-          width: "100%",
-          height: "100%",
-          transform: [{ translateX }],
-        }}
-      >
+    <View style={[{ width: width, height: height, backgroundColor: "#E1E9EE", borderRadius: borderRadius, overflow: "hidden" }, style]}>
+      <Animated.View style={{ width: "100%", height: "100%", transform: [{ translateX }] }}>
         <LinearGradient
           colors={["transparent", "rgba(255, 255, 255, 0.6)", "transparent"]}
           start={{ x: 0, y: 0 }}
@@ -122,47 +104,41 @@ const OrderConfirmationSkeleton = () => {
 
 export default function OrderConfirmation({ route, navigation }) {
     const { orderData } = route.params;
-    const { order } = orderData; // Contains the initial data from Checkout
+    const { order: initialOrder } = orderData; // Contains the secure data from Checkout
     
-    // State
-    const [currentOrder, setCurrentOrder] = useState(order);
-    const [loading, setLoading] = useState(true);
     const [fadeAnim] = useState(new Animated.Value(0));
+
+    // 🔥 ZERO READ SYNC: Pull active orders from Zustand store
+    const { activeOrders, startListening, selectOrder, stopListening } = useOrderStore();
+
+    // Find our live order in the store, otherwise fallback to the initial secure payload
+    const liveOrder = activeOrders.find(o => o.id === initialOrder.id) || initialOrder;
 
     const [fontsLoaded] = useFonts({
       ...Ionicons.font,
     });
 
     useEffect(() => {
-        if (!auth.currentUser || !order?.id) { 
-          setLoading(false); 
-          return; 
-        }
+        // Start the global store listener (cost is shared with TrackOrder)
+        startListening();
 
-        // 🔥 NATIVE FIRESTORE LISTENER 🔥
-        // Opens a tunnel to the flattened orders collection for this specific ID
-        const unsubscribe = onSnapshot(doc(db, "orders", order.id), (docSnap) => {
-            if (docSnap.exists()) {
-              setCurrentOrder({ id: docSnap.id, ...docSnap.data() });
-            }
-            setLoading(false);
-        }, (error) => {
-            console.error("Confirmation Screen Error:", error);
-            setLoading(false);
-        });
-
-        // Trigger Fade In Animation
         Animated.timing(fadeAnim, { 
           toValue: 1, 
           duration: 800, 
           useNativeDriver: true 
         }).start();
 
-        // Cleanup listener on unmount
-        return () => unsubscribe();
-    }, [order.id]);
+        // Optional: Cleanup if they go to a completely different stack
+        return () => {
+          stopListening();
+        };
+    }, []);
 
-    const handleContactSupport = () => Linking.openURL(`tel:+919876543210`);
+    const handleTrackOrder = () => {
+      // Pre-select this order so TrackOrder.js opens it instantly
+      selectOrder(liveOrder.id);
+      navigation.navigate("TrackOrder");
+    };
     
     const getStatusColor = (status) => {
         switch (status) {
@@ -183,7 +159,7 @@ export default function OrderConfirmation({ route, navigation }) {
       return `#${shortId.toUpperCase()}`; 
     };
 
-    if (loading || !fontsLoaded) {
+    if (!fontsLoaded) {
         return <OrderConfirmationSkeleton />;
     }
     
@@ -198,11 +174,11 @@ export default function OrderConfirmation({ route, navigation }) {
                         </View>
                         <Text style={styles.successTitle}>Order Confirmed!</Text>
                         <Text style={styles.successSubtitle}>
-                          Your order {formatOrderId(currentOrder.id)} has been placed successfully. We'll notify you once it's on the way.
+                          Your order {formatOrderId(liveOrder.id)} has been placed successfully. We'll notify you once it's on the way.
                         </Text>
-                        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(currentOrder.status) }]}>
+                        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(liveOrder.status) }]}>
                           <Text style={styles.statusText}>
-                            {currentOrder.status?.replace(/_/g, ' ').toUpperCase() || "PENDING"}
+                            {liveOrder.status?.replace(/_/g, ' ').toUpperCase() || "PENDING"}
                           </Text>
                         </View>
                     </View>
@@ -212,20 +188,20 @@ export default function OrderConfirmation({ route, navigation }) {
                         <View style={styles.detailsGrid}>
                             <View style={styles.detailItem}>
                               <Text style={styles.detailLabel}>Order ID</Text>
-                              <Text style={styles.detailValue}>{formatOrderId(currentOrder.id)}</Text>
+                              <Text style={styles.detailValue}>{formatOrderId(liveOrder.id)}</Text>
                             </View>
                             <View style={styles.detailItem}>
                               <Text style={styles.detailLabel}>Shop</Text>
-                              <Text style={styles.detailValue}>{currentOrder.shopname || "Unknown Shop"}</Text>
+                              <Text style={styles.detailValue}>{liveOrder.shopname || "Unknown Shop"}</Text>
                             </View>
                             <View style={styles.detailItem}>
                               <Text style={styles.detailLabel}>Payment</Text>
-                              <Text style={styles.detailValue}>{currentOrder.paymentMode || "COD"}</Text>
+                              <Text style={styles.detailValue}>{liveOrder.paymentMode || "COD"}</Text>
                             </View>
                             <View style={styles.detailItem}>
                               <Text style={styles.detailLabel}>Order Time</Text>
                               <Text style={styles.detailValue}>
-                                {new Date(currentOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {new Date(liveOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </Text>
                             </View>
                         </View>
@@ -236,34 +212,34 @@ export default function OrderConfirmation({ route, navigation }) {
                         <View style={styles.summaryGrid}>
                             <View style={styles.summaryItem}>
                               <Text style={styles.summaryLabel}>Items Total</Text>
-                              <Text style={styles.summaryValue}>₹{currentOrder.subtotal || 0}</Text>
+                              <Text style={styles.summaryValue}>₹{liveOrder.subtotal || 0}</Text>
                             </View>
                             <View style={styles.summaryItem}>
                               <Text style={styles.summaryLabel}>Delivery</Text>
-                              <Text style={styles.summaryValue}>₹{currentOrder.deliveryFee || 0}</Text>
+                              <Text style={styles.summaryValue}>₹{liveOrder.deliveryFee || 0}</Text>
                             </View>
                             <View style={styles.summaryItem}>
                               <Text style={styles.summaryLabel}>Platform Fee</Text>
-                              <Text style={styles.summaryValue}>₹{currentOrder.platformFee || 0}</Text>
+                              <Text style={styles.summaryValue}>₹{liveOrder.platformFee || 0}</Text>
                             </View>
-                            {currentOrder.discount > 0 && (
+                            {liveOrder.discount > 0 && (
                               <View style={styles.summaryItem}>
                                 <Text style={styles.summaryLabel}>Discount</Text>
-                                <Text style={[styles.summaryValue, styles.discountValue]}>-₹{currentOrder.discount || 0}</Text>
+                                <Text style={[styles.summaryValue, styles.discountValue]}>-₹{liveOrder.discount || 0}</Text>
                               </View>
                             )}
                             <View style={[styles.summaryItem, styles.totalItem]}>
                               <Text style={styles.totalLabel}>Total Amount</Text>
-                              <Text style={styles.totalValue}>₹{currentOrder.total || 0}</Text>
+                              <Text style={styles.totalValue}>₹{liveOrder.total || 0}</Text>
                             </View>
                         </View>
                     </View>
 
-                    {currentOrder.items && (
+                    {liveOrder.items && (
                         <View style={styles.section}>
                             <Text style={styles.sectionTitle}>Order Items</Text>
-                            {Object.keys(currentOrder.items).filter(key => key.startsWith("productId")).map((itemKey, index) => {
-                                const item = currentOrder.items[itemKey];
+                            {Object.keys(liveOrder.items).filter(key => key.startsWith("productId") || key.length > 5).map((itemKey, index) => {
+                                const item = liveOrder.items[itemKey];
                                 return (
                                     <View key={index} style={styles.orderItem}>
                                         <View style={styles.itemDetails}>
@@ -289,7 +265,7 @@ export default function OrderConfirmation({ route, navigation }) {
                 </ScrollView>
 
                 <View style={styles.footer}>
-                    <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate("TrackOrder")}>
+                    <TouchableOpacity style={styles.primaryButton} onPress={handleTrackOrder}>
                         <Ionicons name="location-outline" size={20} color="#fff" />
                         <Text style={styles.primaryButtonText}>Track Your Order</Text>
                     </TouchableOpacity>

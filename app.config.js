@@ -42,7 +42,6 @@ export default {
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "POST_NOTIFICATIONS",
-        "FOREGROUND_SERVICE",
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE"
       ],

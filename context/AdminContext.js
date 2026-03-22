@@ -8,6 +8,50 @@ export const useAdmin = () => useContext(AdminContext);
 // Points to your GLOBAL INDEX file on Firebase Hosting
 const GLOBAL_CONFIG_URL = Constants.expoConfig?.extra?.configUrl; 
 
+// =========================================================================
+// HOSTED JSON MANAGEMENT (NATIVE OS ETAG CACHE)
+// =========================================================================
+const fetchWithNativeCache = async (url, cacheKey, onDataRetrieved) => {
+  let cachedDataStr = null;
+
+  // 1. INSTANT UI RENDER: Load from AsyncStorage
+  try {
+    cachedDataStr = await AsyncStorage.getItem(cacheKey);
+    if (cachedDataStr) {
+      onDataRetrieved(JSON.parse(cachedDataStr));
+    }
+  } catch (e) {
+    console.warn(`Failed to load local config cache for ${cacheKey}`, e);
+  }
+
+  // 2. THE NATIVE OS CACHE PING
+  try {
+    // By using { cache: 'no-cache' }, we force iOS/Android to automatically 
+    // send the 'If-None-Match' ETag for us behind the scenes!
+    const response = await fetch(url, { cache: 'no-cache' });
+
+    if (response.ok) {
+      const freshData = await response.json();
+      const freshDataStr = JSON.stringify(freshData);
+      
+      // THE NATIVE ILLUSION: If Firebase returns 304 Not Modified (0 bytes transferred),
+      // the OS intercepts it and hands JS a 200 OK with the local disk cache.
+      // We use this exact string check to realize nothing actually changed.
+      if (cachedDataStr === freshDataStr) {
+         console.log(`[Cache Hit] Verified with Server ETag for ${cacheKey}. Zero bytes downloaded.`);
+         return; 
+      }
+
+      // Only runs if the server actually sent brand new data
+      await AsyncStorage.setItem(cacheKey, freshDataStr);
+      onDataRetrieved(freshData);
+      console.log(`[Cache Miss] Server pushed new config data for ${cacheKey}. UI Updated.`);
+    }
+  } catch (err) {
+    console.error(`Error fetching hosted config for ${cacheKey}:`, err);
+  }
+};
+
 export const AdminProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [allBranches, setAllBranches] = useState([]);
@@ -25,32 +69,24 @@ export const AdminProvider = ({ children }) => {
     shopVisibilityRadiusKm: 8,
     minOrderValue: 100,
     maintenanceMode: false,
-    qr: null // <-- Added default qr state
+    qr: null
   });
   const [branchCoupons, setBranchCoupons] = useState({});
 
-  // 1. FETCH GLOBAL INDEX ON STARTUP (Zero Firestore Cost)
+  // 1. FETCH GLOBAL INDEX ON STARTUP
   useEffect(() => {
-    const fetchGlobalConfig = async () => {
-      try {
-        if (!GLOBAL_CONFIG_URL) return;
-
-        const cachedData = await AsyncStorage.getItem('localboys_global_index');
-        if (cachedData) applyGlobalConfig(JSON.parse(cachedData));
-
-        const response = await fetch(GLOBAL_CONFIG_URL, { cache: 'no-store' }); 
-        const freshData = await response.json();
-
-        applyGlobalConfig(freshData);
-        await AsyncStorage.setItem('localboys_global_index', JSON.stringify(freshData));
-      } catch (error) {
-        console.error("Admin Config Sync Error:", error);
-      } finally {
+    const initGlobalConfig = async () => {
+      if (!GLOBAL_CONFIG_URL) {
         setLoading(false);
+        return;
       }
+      
+      // Use our native cache helper
+      await fetchWithNativeCache(GLOBAL_CONFIG_URL, 'localboys_global_index', applyGlobalConfig);
+      setLoading(false);
     };
 
-    fetchGlobalConfig();
+    initGlobalConfig();
   }, []);
 
   const applyGlobalConfig = (data) => {
@@ -77,7 +113,7 @@ export const AdminProvider = ({ children }) => {
     return R * c; 
   }, []);
 
-  // 2. DETERMINE BRANCH & FETCH COUPONS FROM SPECIFIC CONFIG URL
+  // 2. DETERMINE BRANCH & FETCH SPECIFIC CONFIG
   const determineBranch = useCallback(async (userLat, userLng) => {
     if (!allBranches.length || !userLat || !userLng) return;
 
@@ -103,19 +139,13 @@ export const AdminProvider = ({ children }) => {
           setActiveBranchId(closestBranch.id);
           
           try {
-            // Fetch heavy config for this specific city (e.g. kkdconfig.json)
             if (closestBranch.configUrl) {
-              const res = await fetch(closestBranch.configUrl, { cache: 'no-store' });
-              const detailedData = await res.json();
-              
-              applyBranchConfig(detailedData, branchRadius);
-              
-              // Cache it so it loads instantly next time
-              await AsyncStorage.setItem(`branch_detail_${closestBranch.id}`, JSON.stringify(detailedData));
-            } else {
-              // Fallback to cache if offline
-              const cachedCity = await AsyncStorage.getItem(`branch_detail_${closestBranch.id}`);
-              if (cachedCity) applyBranchConfig(JSON.parse(cachedCity), branchRadius);
+              // Use our native cache helper for the branch config
+              await fetchWithNativeCache(
+                closestBranch.configUrl, 
+                `branch_detail_${closestBranch.id}`, 
+                (data) => applyBranchConfig(data, branchRadius)
+              );
             }
           } catch (err) {
             console.error(`Failed to fetch specific config for ${closestBranch.name}`, err);
@@ -136,10 +166,9 @@ export const AdminProvider = ({ children }) => {
       shopVisibilityRadiusKm: radius,
       minOrderValue: data.minOrderValue || 100,
       maintenanceMode: data.maintenanceMode || false,
-      qr: data.qr || null // <-- Maps the QR URL from your JSON
+      qr: data.qr || null
     });
     
-    // 🔥 THIS RESTORES YOUR COUPONS! 🔥
     setBranchCoupons(data.coupons || {});
 
     // Set animation if available

@@ -30,7 +30,7 @@ export const UserProvider = ({ children }) => {
           formattedAddress: parsedAddress.formattedAddress,
           city: parsedAddress.city,
           state: parsedAddress.state,
-          pincode: parsedAddress.pincode
+          pincode: parsedAddress.pincode // Crucial for hybrid logic
         });
       }
     } catch (e) {
@@ -95,7 +95,7 @@ export const UserProvider = ({ children }) => {
                 formattedAddress: loc.formattedAddress || '',
                 city: loc.city || '',
                 state: loc.state || '',
-                pincode: loc.pincode || ''
+                pincode: loc.pincode || '' // Crucial for hybrid logic
               });
             } else {
               setUserLocation(null);

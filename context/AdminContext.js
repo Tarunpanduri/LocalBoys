@@ -60,17 +60,12 @@ export const AdminProvider = ({ children }) => {
   const [headerAnimationUrl, setHeaderAnimationUrl] = useState(null);
   const [appVersion, setAppVersion] = useState(null);
 
-  // Branch Specific State
-  const [activeBranchId, setActiveBranchId] = useState(null);
-  const activeBranchIdRef = useRef(null); 
+  // 🔥 HYBRID UPDATES: Branch Specific State Arrays and Maps
+  const [activeBranchIds, setActiveBranchIds] = useState([]);
+  const activeBranchIdsRef = useRef([]); 
 
-  const [branchConfig, setBranchConfig] = useState({
-    deliveryChargePerKm: 5,
-    shopVisibilityRadiusKm: 8,
-    minOrderValue: 100,
-    maintenanceMode: false,
-    qr: null
-  });
+  // Store configs mapped by branch ID (e.g., { 'branchA': { deliveryCharge... }, 'branchB': { ... } })
+  const [branchConfigs, setBranchConfigs] = useState({});
   const [branchCoupons, setBranchCoupons] = useState({});
 
   // 1. FETCH GLOBAL INDEX ON STARTUP
@@ -113,63 +108,91 @@ export const AdminProvider = ({ children }) => {
     return R * c; 
   }, []);
 
-  // 2. DETERMINE BRANCH & FETCH SPECIFIC CONFIG
-  const determineBranch = useCallback(async (userLat, userLng) => {
+  // 🔥 2. HYBRID: DETERMINE BRANCHES VIA PINCODE -> FALLBACK TO GPS
+  const determineBranches = useCallback(async (userLat, userLng, userPincode) => {
     if (!allBranches.length || !userLat || !userLng) return;
 
-    let closestBranch = null;
-    let minDistance = Infinity;
+    let matchedBranches = [];
 
-    allBranches.forEach((branch) => {
-      if (branch.lat && branch.lng) {
-        const dist = getDistance(parseFloat(userLat), parseFloat(userLng), parseFloat(branch.lat), parseFloat(branch.lng));
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestBranch = branch;
-        }
-      }
-    });
+    // STEP 1: FAST PINCODE FILTER
+    if (userPincode) {
+      const searchPin = String(userPincode).trim();
+      matchedBranches = allBranches.filter(b => {
+        const pins = b.serviceable_pincodes || [];
+        return pins.map(p => String(p).trim()).includes(searchPin);
+      });
+    }
 
-    if (closestBranch) {
-      const branchRadius = closestBranch.radius || 15;
+    // STEP 2: DISTANCE FALLBACK (If Pincode not found or user lacks pincode)
+    if (matchedBranches.length === 0) {
+      let closestBranch = null;
+      let minDistance = Infinity;
 
-      if (minDistance <= branchRadius) {
-        if (activeBranchIdRef.current !== closestBranch.id) {
-          activeBranchIdRef.current = closestBranch.id;
-          setActiveBranchId(closestBranch.id);
-          
-          try {
-            if (closestBranch.configUrl) {
-              // Use our native cache helper for the branch config
-              await fetchWithNativeCache(
-                closestBranch.configUrl, 
-                `branch_detail_${closestBranch.id}`, 
-                (data) => applyBranchConfig(data, branchRadius)
-              );
-            }
-          } catch (err) {
-            console.error(`Failed to fetch specific config for ${closestBranch.name}`, err);
+      allBranches.forEach((branch) => {
+        if (branch.lat && branch.lng) {
+          const dist = getDistance(parseFloat(userLat), parseFloat(userLng), parseFloat(branch.lat), parseFloat(branch.lng));
+          if (dist < minDistance) {
+            minDistance = dist;
+            closestBranch = branch;
           }
         }
-      } else {
-        // User is outside delivery zone
-        activeBranchIdRef.current = null;
-        setActiveBranchId(null);
+      });
+
+      if (closestBranch) {
+        const branchRadius = closestBranch.radius || 15;
+        if (minDistance <= branchRadius) {
+          matchedBranches = [closestBranch];
+        }
       }
+    }
+
+    const newBranchIds = matchedBranches.map(b => b.id).sort();
+    
+    // Only fetch configs if the active branches actually changed
+    if (JSON.stringify(activeBranchIdsRef.current) !== JSON.stringify(newBranchIds)) {
+      activeBranchIdsRef.current = newBranchIds;
+      setActiveBranchIds(newBranchIds);
+      
+      if (newBranchIds.length === 0) {
+          setBranchConfigs({});
+          setBranchCoupons({});
+          return;
+      }
+
+      // Fetch configs for ALL matched branches in parallel
+      matchedBranches.forEach(async (branch) => {
+        if (branch.configUrl) {
+          try {
+            await fetchWithNativeCache(
+              branch.configUrl, 
+              `branch_detail_${branch.id}`, 
+              (data) => applyBranchSpecifics(branch.id, data, branch.radius || 15)
+            );
+          } catch (err) {
+            console.error(`Failed to fetch specific config for ${branch.name}`, err);
+          }
+        }
+      });
     }
   }, [allBranches, getDistance]); 
 
-  // Safely sets state, COUPONS, and QR
-  const applyBranchConfig = (data, radius) => {
-    setBranchConfig({
-      deliveryChargePerKm: data.deliveryChargePerKm || 5,
-      shopVisibilityRadiusKm: radius,
-      minOrderValue: data.minOrderValue || 100,
-      maintenanceMode: data.maintenanceMode || false,
-      qr: data.qr || null
-    });
+  // Safely sets maps of configs, COUPONS, and QR
+  const applyBranchSpecifics = (branchId, data, radius) => {
+    setBranchConfigs(prev => ({
+      ...prev,
+      [branchId]: {
+        deliveryChargePerKm: data.deliveryChargePerKm || 5,
+        shopVisibilityRadiusKm: radius,
+        minOrderValue: data.minOrderValue || 100,
+        maintenanceMode: data.maintenanceMode || false,
+        qr: data.qr || null
+      }
+    }));
     
-    setBranchCoupons(data.coupons || {});
+    setBranchCoupons(prev => ({
+      ...prev,
+      [branchId]: data.coupons || {}
+    }));
 
     // Set animation if available
     setHeaderAnimationUrl((prev) => {
@@ -186,10 +209,10 @@ export const AdminProvider = ({ children }) => {
       headerAnimationUrl,
       appVersion,
       allBranches,
-      activeBranchId,
-      branchConfig,
+      activeBranchIds, // EXPOSED: Array of IDs
+      branchConfigs,   // EXPOSED: Map of Configs
       branchCoupons,
-      determineBranch
+      determineBranches // EXPOSED: New Function signature
     }}>
       {children}
     </AdminContext.Provider>

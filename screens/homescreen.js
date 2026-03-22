@@ -19,15 +19,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import { getAuth } from "firebase/auth";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 // IMPORT ZUSTAND STORE & CONTEXTS
 import { useShopStore } from "../store/shopStore";
 import { useAdmin } from "../context/AdminContext";
 import { useUser } from "../context/UserContext";
 
+// IMPORT NEW BOTTOM SHEET
+import AddressesBottomSheet from "../components/AddressesBottomSheet"; 
+
 const { width } = Dimensions.get("window");
 
-// --- SKELETON COMPONENT (unchanged) ---
+// --- SKELETON COMPONENT ---
 const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   const translateX = useRef(new Animated.Value(-width)).current;
 
@@ -55,7 +59,7 @@ const SkeletonItem = ({ width, height, style, borderRadius = 4 }) => {
   );
 };
 
-// --- LOADING SCREEN (unchanged) ---
+// --- LOADING SCREEN ---
 const SkeletonLoadingScreen = () => {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
@@ -101,7 +105,7 @@ const SkeletonLoadingScreen = () => {
   );
 };
 
-// --- MEMOIZED SHOP CARD (unchanged) ---
+// --- MEMOIZED SHOP CARD ---
 const ShopCard = React.memo(({ shop, onPress }) => (
   <TouchableOpacity style={styles.shopCard} onPress={() => onPress(shop.id, shop)}>
     <Image source={{ uri: shop.image }} style={styles.shopImage} resizeMode="cover" />
@@ -121,7 +125,7 @@ export default function HomeScreen({ navigation }) {
   const shopsLoading = useShopStore((state) => state.loading);
   const fetchNearbyShops = useShopStore((state) => state.fetchNearbyShops);
 
-  const { categoryMeta, eventUrl, headerAnimationUrl, loading: adminLoading, determineBranch, branchConfig, activeBranchId } = useAdmin();
+  const { categoryMeta, eventUrl, headerAnimationUrl, loading: adminLoading, determineBranches, branchConfigs, activeBranchIds } = useAdmin();
   const { userLocation, mainAddress, loading: userLoading } = useUser();
 
   const [searchText, setSearchText] = useState("");
@@ -138,13 +142,15 @@ export default function HomeScreen({ navigation }) {
     ...MaterialIcons.font,
   });
 
-  // Ref to store the debounce timer
+  // REFS
   const fetchDebounceTimer = useRef(null);
+  const addressesSheetRef = useRef(null); 
 
+  // --- TRIGGER BOTTOM SHEET ---
   const handleLocationPress = () => {
     const auth = getAuth();
     if (auth.currentUser) {
-      navigation.navigate("Addresses");
+      addressesSheetRef.current?.expand();
     } else {
       navigation.navigate("MapScreen", { isGuest: true, mode: 'edit', initial: userLocation });
     }
@@ -174,55 +180,55 @@ export default function HomeScreen({ navigation }) {
     navigation.navigate("ShopDetails", { shopId, shop });
   }, [navigation]);
 
-  // --- 1. COORDINATION EFFECT (BRANCH) ---
+  // --- Auto-open bottom sheet if no address ---
+  const hasValidLocation = useMemo(() => {
+    return userLocation && userLocation.lat && userLocation.lng;
+  }, [userLocation]);
+
+  useEffect(() => {
+    if (!hasValidLocation && !userLoading) {
+      // If no location, open the bottom sheet after a short delay
+      const timer = setTimeout(() => {
+        addressesSheetRef.current?.expand();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [hasValidLocation, userLoading]);
+
   useEffect(() => {
     if (userLocation?.lat && userLocation?.lng) {
-      determineBranch(userLocation.lat, userLocation.lng);
+      determineBranches(userLocation.lat, userLocation.lng, userLocation.pincode);
     }
-  }, [userLocation?.lat, userLocation?.lng, determineBranch]);
+  }, [userLocation?.lat, userLocation?.lng, userLocation?.pincode, determineBranches]);
 
-  // --- 2. DEBOUNCED FETCH EFFECT ---
   useEffect(() => {
-    if (userLoading || adminLoading || !activeBranchId || !userLocation?.lat || !userLocation?.lng) return;
+    if (userLoading || adminLoading || activeBranchIds.length === 0 || !userLocation?.lat || !userLocation?.lng) return;
 
-    // Clear any pending debounce timer
     if (fetchDebounceTimer.current) {
       clearTimeout(fetchDebounceTimer.current);
     }
 
-    // Set a new debounced fetch
     fetchDebounceTimer.current = setTimeout(() => {
-      const radius = branchConfig?.shopVisibilityRadiusKm || 8;
       fetchNearbyShops(
         userLocation.lat,
         userLocation.lng,
-        radius,
-        activeBranchId,
-        false // not a pull-to-refresh
+        activeBranchIds,
+        branchConfigs,
+        false
       );
-    }, 300); // 300ms debounce
+    }, 300);
 
     return () => {
       if (fetchDebounceTimer.current) {
         clearTimeout(fetchDebounceTimer.current);
       }
     };
-  }, [
-    userLocation?.lat,
-    userLocation?.lng,
-    activeBranchId,
-    branchConfig?.shopVisibilityRadiusKm,
-    userLoading,
-    adminLoading,
-    fetchNearbyShops
-  ]);
+  }, [userLocation?.lat, userLocation?.lng, activeBranchIds, branchConfigs, userLoading, adminLoading, fetchNearbyShops]);
 
-  // --- 3. SYNCHRONOUS FILTERING (unchanged) ---
   const { filteredShops, dynamicCategories } = useMemo(() => {
     if (!shops) return { filteredShops: [], dynamicCategories: [{ id: "all", label: "All" }] };
 
-    // 🔥 SAFETY LOCK 2: STRICTLY FILTER BY CURRENT BRANCH ID 🔥
-    let result = shops.filter((s) => s.isActive !== false && s.parentBranchId === activeBranchId);
+    let result = shops.filter((s) => s.isActive !== false && activeBranchIds.includes(s.parentBranchId));
 
     result = result.filter((s) =>
       activeTab === "products"
@@ -250,32 +256,30 @@ export default function HomeScreen({ navigation }) {
     const finalCats = [{ id: "all", label: "All" }, ...shopTypes];
 
     return { filteredShops: shopsForDisplay, dynamicCategories: finalCats };
-  }, [shops, activeCategory, searchText, activeTab, activeBranchId]);
+  }, [shops, activeCategory, searchText, activeTab, activeBranchIds]);
 
   const filteredCategories = useMemo(() => {
     return dynamicCategories.filter((c) => {
       if (c.id === "all") {
-        return shops?.some(s => s.isActive !== false && s.parentBranchId === activeBranchId && s.category?.toLowerCase() === activeTab);
+        return shops?.some(s => s.isActive !== false && activeBranchIds.includes(s.parentBranchId) && s.category?.toLowerCase() === activeTab);
       }
       return shops?.some((s) =>
         s.isActive !== false &&
-        s.parentBranchId === activeBranchId &&
+        activeBranchIds.includes(s.parentBranchId) &&
         s.category?.toLowerCase() === activeTab &&
         s.type?.toLowerCase() === c.label.toLowerCase()
       );
     });
-  }, [dynamicCategories, shops, activeTab, activeBranchId]);
+  }, [dynamicCategories, shops, activeTab, activeBranchIds]);
 
-  // Pull‑to‑refresh: fetch immediately (no debounce)
   const onRefresh = useCallback(async () => {
-    const radius = branchConfig?.shopVisibilityRadiusKm || 8;
-    if (userLocation?.lat && userLocation?.lng && activeBranchId) {
+    if (userLocation?.lat && userLocation?.lng && activeBranchIds.length > 0) {
       setRefreshing(true);
-      determineBranch(userLocation.lat, userLocation.lng);
-      await fetchNearbyShops(userLocation.lat, userLocation.lng, radius, activeBranchId, true);
+      determineBranches(userLocation.lat, userLocation.lng, userLocation.pincode);
+      await fetchNearbyShops(userLocation.lat, userLocation.lng, activeBranchIds, branchConfigs, true);
       setRefreshing(false);
     }
-  }, [userLocation?.lat, userLocation?.lng, activeBranchId, branchConfig?.shopVisibilityRadiusKm, fetchNearbyShops, determineBranch]);
+  }, [userLocation?.lat, userLocation?.lng, userLocation?.pincode, activeBranchIds, branchConfigs, fetchNearbyShops, determineBranches]);
 
   const activeCategoryColor = categoryMeta[dynamicCategories.find((c) => c.id === activeCategory)?.label]?.Theme || "#66BB6A";
 
@@ -305,11 +309,33 @@ export default function HomeScreen({ navigation }) {
     );
   };
 
-  // If any loading state is true, show skeleton
+  // --- Show loading states ---
   if (shopsLoading || adminLoading || userLoading || !fontsLoaded) {
     return <SkeletonLoadingScreen />;
   }
 
+  // --- No Address View ---
+  if (!hasValidLocation) {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
+          <StatusBar barStyle="dark-content" backgroundColor="#fff" translucent={false} />
+          <LinearGradient colors={["#66BB6A", "#ffffff"]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 180 }} />
+          <View style={styles.noAddressContainer}>
+            <Ionicons name="location-outline" size={80} color="#ccc" />
+            <Text style={styles.noAddressTitle}>No delivery address set</Text>
+            <Text style={styles.noAddressSub}>Please add an address to see shops and services near you.</Text>
+            <TouchableOpacity style={styles.addAddressButton} onPress={() => navigation.navigate("MapScreen" )}>
+              <Text style={styles.addAddressButtonText}>Add Address</Text>
+            </TouchableOpacity>
+          </View>
+          <AddressesBottomSheet bottomSheetRef={addressesSheetRef} navigation={navigation} />
+        </SafeAreaView>
+      </GestureHandlerRootView>
+    );
+  }
+
+  // --- Normal content when address exists ---
   const renderContent = () => (
     <>
       <View style={styles.sectionHeader}>
@@ -334,7 +360,9 @@ export default function HomeScreen({ navigation }) {
         ListEmptyComponent={() => (
           <View style={styles.emptyState}>
             <Text style={styles.emptytext}>
-              {activeBranchId ? `No ${activeTab === "products" ? "products" : "services"} available in this area.` : "Service not available at your location yet."}
+              {activeBranchIds.length > 0
+                ? `No ${activeTab === "products" ? "products" : "services"} available in this area.`
+                : "Service not available at your location yet."}
             </Text>
           </View>
         )}
@@ -343,91 +371,84 @@ export default function HomeScreen({ navigation }) {
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
-      <StatusBar barStyle="dark-content" backgroundColor="#19212a" translucent={false} />
-      <LinearGradient colors={[activeCategoryColor || "#66BB6A", "#ffffff"]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 180 }} />
-      <View style={styles.screen}>
-        <View style={styles.headerRow}>
-          <View style={styles.deliveryCol}>
-            <Text style={[styles.deliverLabel, { color: darkenColor(activeCategoryColor, 40) }]}>Deliver To</Text>
-
-            <TouchableOpacity style={styles.locationRow} onPress={handleLocationPress}>
-              <Text style={styles.locationText}>
-                {mainAddress ? mainAddress.name || mainAddress.city || mainAddress.formattedAddress || "Unnamed address" : userLocation?.city ? `${userLocation.city}, ${userLocation.state}` : "Select Location"}
-              </Text>
-              <Ionicons name="chevron-down" size={12} color="#000" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <TouchableOpacity style={styles.notifBtn} onPress={handleTrackOrderPress}>
-              <Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.notifBtn} onPress={handleProfilePress}>
-              <Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.mediumcontent}>
-          <View style={styles.searchBox}>
-            <Ionicons name="search" size={18} style={{ marginRight: 8 }} />
-            <TextInput placeholder="Search products or services" placeholderTextColor="#666" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
-          </View>
-
-          {renderContent()}
-        </View>
-
-        <View style={[styles.bottomNav, { backgroundColor: activeCategoryColor }]}>
-          <TouchableOpacity style={[styles.navButton, activeTab === "products" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("products"); setActiveCategory("all"); }}><Text style={styles.navText}>Products</Text></TouchableOpacity>
-          <TouchableOpacity style={[styles.navButton, activeTab === "services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("services"); setActiveCategory("all"); }}><Text style={styles.navText}>Services</Text></TouchableOpacity>
-        </View>
-      </View>
-
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={loginModalVisible}
-        onRequestClose={() => setLoginModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalIconContainer}>
-              <Ionicons name="person-add-outline" size={36} color="#009688" />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#fff" }}>
+        <StatusBar barStyle="dark-content" backgroundColor="#19212a" translucent={false} />
+        <LinearGradient colors={[activeCategoryColor || "#66BB6A", "#ffffff"]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 180 }} />
+        
+        <View style={styles.screen}>
+          <View style={styles.headerRow}>
+            <View style={styles.deliveryCol}>
+              <Text style={[styles.deliverLabel, { color: darkenColor(activeCategoryColor, 40) }]}>Deliver To</Text>
+              <TouchableOpacity style={styles.locationRow} onPress={handleLocationPress}>
+                <Text style={styles.locationText} numberOfLines={1}>
+                  {mainAddress ? mainAddress.name || mainAddress.city || mainAddress.formattedAddress || "Unnamed address" : userLocation?.city ? `${userLocation.city}, ${userLocation.state}` : "Select Location"}
+                </Text>
+                <Ionicons name="chevron-down" size={14} color="#000" />
+              </TouchableOpacity>
             </View>
-            <Text style={styles.modalTitle}>Hello There!</Text>
-            <Text style={styles.modalMessage}>
-              You're currently browsing as a guest. To {modalFeatureText}, please log in or create a free account with us to have hassle-free access.
-            </Text>
-            <TouchableOpacity
-              style={styles.modalLoginBtn}
-              onPress={() => {
-                setLoginModalVisible(false);
-                navigation.navigate("Login");
-              }}
-            >
-              <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLoginModalVisible(false)}>
-              <Text style={styles.modalCancelText}>Maybe Later</Text>
-            </TouchableOpacity>
+
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <TouchableOpacity style={styles.notifBtn} onPress={handleTrackOrderPress}>
+                <Ionicons name="cart" size={28} color={darkenColor(activeCategoryColor, 50)} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.notifBtn} onPress={handleProfilePress}>
+                <Ionicons name="person-circle-outline" size={28} color={darkenColor(activeCategoryColor, 50)} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.mediumcontent}>
+            <View style={styles.searchBox}>
+              <Ionicons name="search" size={18} style={{ marginRight: 8 }} />
+              <TextInput placeholder="Search products or services" placeholderTextColor="#666" style={styles.searchInput} value={searchText} onChangeText={setSearchText} returnKeyType="search" />
+            </View>
+
+            {renderContent()}
+          </View>
+
+          <View style={[styles.bottomNav, { backgroundColor: activeCategoryColor }]}>
+            <TouchableOpacity style={[styles.navButton, activeTab === "products" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("products"); setActiveCategory("all"); }}><Text style={styles.navText}>Products</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.navButton, activeTab === "services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("services"); setActiveCategory("all"); }}><Text style={styles.navText}>Services</Text></TouchableOpacity>
           </View>
         </View>
-      </Modal>
-    </SafeAreaView>
+
+        {/* MODAL ALWAYS RENDERS ABOVE EVERYTHING */}
+        <Modal animationType="fade" transparent={true} visible={loginModalVisible} onRequestClose={() => setLoginModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalIconContainer}>
+                <Ionicons name="person-add-outline" size={36} color="#009688" />
+              </View>
+              <Text style={styles.modalTitle}>Hello There!</Text>
+              <Text style={styles.modalMessage}>You're currently browsing as a guest. To {modalFeatureText}, please log in or create a free account with us to have hassle-free access.</Text>
+              <TouchableOpacity style={styles.modalLoginBtn} onPress={() => { setLoginModalVisible(false); navigation.navigate("Login"); }}>
+                <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLoginModalVisible(false)}>
+                <Text style={styles.modalCancelText}>Maybe Later</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+      </SafeAreaView>
+
+      {/* RENDER BOTTOM SHEET OUTSIDE MAIN SAFE AREA TO ENSURE IT OVERLAYS EVERYTHING */}
+      <AddressesBottomSheet bottomSheetRef={addressesSheetRef} navigation={navigation} />
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  // ... (styles unchanged, exactly as in your original code)
   safe: { flex: 1, backgroundColor: "#19212a" },
   containerCentered: { flex: 1, justifyContent: "center", alignItems: "center" },
   screen: { flex: 1 },
   headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 14 },
-  deliveryCol: { flex: 1 },
+  deliveryCol: { flex: 1, paddingRight: 10 },
   deliverLabel: { fontSize: Platform.OS === 'ios' ? 12 : 13, fontFamily: "Sen_Bold", letterSpacing: 0.5 },
   locationRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
-  locationText: { fontSize: Platform.OS === 'ios' ? 13 : 14, color: "#000", marginRight: 6, fontFamily: "Sen_Medium" },
+  locationText: { fontSize: Platform.OS === 'ios' ? 13 : 14, color: "#000", marginRight: 6, fontFamily: "Sen_Medium", flexShrink: 1 },
   notifBtn: { width: 36, height: 36, borderRadius: 5, justifyContent: "center", alignItems: "center" },
   mediumcontent: { flex: 1, paddingHorizontal: 18, paddingTop: 12 },
   searchBox: { height: 50, backgroundColor: "#fff", borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, borderWidth: 1, borderColor: "#ddd" },
@@ -447,7 +468,7 @@ const styles = StyleSheet.create({
   metaText: { fontSize: Platform.OS === 'ios' ? 11 : 13, color: "#444", fontFamily: "Sen_Regular" },
   emptyState: { marginTop: 40, alignItems: "center", justifyContent: "center" },
   emptytext: { fontSize: Platform.OS === 'ios' ? 12 : 15, color: "#555", textAlign: "center", paddingHorizontal: 20, fontFamily: "Sen_Regular" },
-  bottomNav: { position: "absolute", bottom: 20, left: 20, right: 20, flexDirection: "row", borderRadius: 30, overflow: "hidden", zIndex: 999, elevation: 12, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, height: 50 },
+  bottomNav: { position: "absolute", bottom: 20, left: 20, right: 20, flexDirection: "row", borderRadius: 30, overflow: "hidden", zIndex: 10, elevation: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 6, height: 50 },
   navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
   navText: { fontSize: Platform.OS === 'ios' ? 14 : 16, fontFamily: "Sen_Bold", color: "#fff" },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
@@ -459,4 +480,38 @@ const styles = StyleSheet.create({
   modalLoginText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 16 },
   modalCancelBtn: { paddingVertical: 10 },
   modalCancelText: { fontFamily: 'Sen_Medium', color: '#888', fontSize: 14 },
+  noAddressContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 30,
+    marginTop: -50,
+  },
+  noAddressTitle: {
+    fontSize: 22,
+    fontFamily: "Sen_Bold",
+    marginTop: 20,
+    color: "#111",
+    textAlign: "center",
+  },
+  noAddressSub: {
+    fontSize: 14,
+    fontFamily: "Sen_Medium",
+    color: "#666",
+    textAlign: "center",
+    marginTop: 10,
+    lineHeight: 22,
+  },
+  addAddressButton: {
+    backgroundColor: "#009688",
+    paddingVertical: 14,
+    paddingHorizontal: 30,
+    borderRadius: 30,
+    marginTop: 30,
+  },
+  addAddressButtonText: {
+    color: "#fff",
+    fontFamily: "Sen_Bold",
+    fontSize: 16,
+  },
 });

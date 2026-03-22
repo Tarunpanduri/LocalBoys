@@ -255,7 +255,7 @@ export default function Login({ navigation }) {
 
       navigation.reset({
         index: 0,
-        routes: [{ name: "Addresses" }],
+        routes: [{ name: "HomeScreen" }],
       });
     } catch (error) {
       console.log("Login Error Code:", error.code); 

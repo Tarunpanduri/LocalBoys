@@ -152,7 +152,7 @@ const handleLogout = async () => {
 
   const menuItems = [
     { title: "Edit Profile", icon: <Ionicons name="person-circle-outline" size={22} color="#FF6B6B" />, route: "EditProfile", params: { userData } },
-    { title: "Addresses", icon: <Ionicons name="home-outline" size={22} color="#6C63FF" />, route: "Addresses" },
+    { title: "Previous Orders", icon: <Ionicons name="time-outline" size={22} color="#6C63FF" />, route: "PreviousOrders" },
     { title: "Privacy Policy", icon: <FontAwesome5 name="user-shield" size={18} color="#FFAA00" />, route: "PrivacyPolicy" },
     { title: "Terms & Conditions", icon: <MaterialIcons name="gavel" size={22} color="#4ECDC4" />, route: "Terms" },
     { title: "Contact Us", icon: <Ionicons name="information-circle-outline" size={22} color="#1DD1A1" />, route: "ContactUs" },

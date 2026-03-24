@@ -278,7 +278,7 @@ export default function CustomOrderBottomSheet({
               {mainAddress?.name ? `Delivery Address` : 'Delivery Address'}
             </Text>
             <Text style={styles.customAddressLabelName}>
-              • {mainAddress.name}
+               {mainAddress.name}
             </Text>
             <Text style={styles.customAddressText} numberOfLines={2}>
               {mainAddress ? mainAddress.formattedAddress : "No address selected"}

@@ -31,6 +31,7 @@ import PrivacyPolicyScreen from './screens/privacypolicy';
 import TermsAndConditionsScreen from './screens/Terms';
 import ContactUs from './screens/contact';
 import Settings from './screens/settings';
+import PreviousOrders from './screens/PreviousOrders';
 
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebase';
@@ -198,6 +199,7 @@ export default function App() {
                         <Stack.Screen name="Terms" component={TermsAndConditionsScreen} />
                         <Stack.Screen name="ContactUs" component={ContactUs} />
                         <Stack.Screen name="Settings" component={Settings} />
+                        <Stack.Screen name="PreviousOrders" component={PreviousOrders} />
                       </Stack.Navigator>
                     </NavigationContainer>
                     </CouponProvider>

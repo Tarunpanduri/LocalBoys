@@ -123,6 +123,8 @@ const styles = StyleSheet.create({
     shadowRadius: 6, 
     height: 56, // Slightly taller to fit the nice pill shape 
     padding: 6, // Internal padding creates a floating pill effect for the active tab
+    borderWidth: 1.5,
+    borderColor: "rgba(85, 134, 85, 0.3)", // Subtle border for better visibility on light backgrounds
   },
   navItemContainer: {
     height: '100%',

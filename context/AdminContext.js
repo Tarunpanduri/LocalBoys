@@ -185,7 +185,8 @@ export const AdminProvider = ({ children }) => {
         shopVisibilityRadiusKm: radius,
         minOrderValue: data.minOrderValue || 100,
         maintenanceMode: data.maintenanceMode || false,
-        qr: data.qr || null
+        qr: data.qr || null,
+        qrId: data.qrId || null // 🔥 FIX: Extract and save the qrId from the fetched JSON
       }
     }));
     

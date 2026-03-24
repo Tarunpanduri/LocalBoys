@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from 'expo-image-picker';
 import Toast from "react-native-root-toast";
 import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from "@gorhom/bottom-sheet";
+import { ScrollView as GHScrollView } from "react-native-gesture-handler"; // 🔥 Added for horizontal time slot scrolling
 import { getAuth } from "firebase/auth";
 import { useNavigation } from "@react-navigation/native";
 
@@ -21,9 +22,12 @@ import { db } from "../firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 
-// IMPORT CONTEXTS
+// IMPORT CONTEXTS & UTILS
 import { useUser } from "../context/UserContext";
 import { useAdmin } from "../context/AdminContext";
+
+// IMPORT COMPRESSION UTILITY
+import { compressImageToWebP } from "../utils/compressImageToWebP"; 
 
 export default function CustomOrderBottomSheet({ 
   bottomSheetRef, 
@@ -43,6 +47,12 @@ export default function CustomOrderBottomSheet({
   // orderState: 'idle' | 'submitting' | 'success' | 'failed_no_area' | 'error'
   const [orderState, setOrderState] = useState("idle");
 
+  // 🔥 SCHEDULE ORDER STATE 🔥
+  const [deliveryPreference, setDeliveryPreference] = useState("now"); // 'now' | 'schedule'
+  const [scheduledDay, setScheduledDay] = useState("Today"); // 'Today' | 'Tomorrow'
+  const [scheduledTime, setScheduledTime] = useState(""); 
+  const TIME_SLOTS = ["10:00 AM - 12:00 PM", "12:00 PM - 02:00 PM", "02:00 PM - 04:00 PM", "04:00 PM - 06:00 PM", "06:00 PM - 08:00 PM", "08:00 PM - 10:00 PM"];
+
   const customSnapPoints = useMemo(() => ["90%"], []);
   
   const renderCustomBackdrop = useCallback(
@@ -58,6 +68,10 @@ export default function CustomOrderBottomSheet({
       setOrderState("idle");
       setCustomNote("");
       setCustomImage(null);
+      // Reset schedule states
+      setDeliveryPreference("now");
+      setScheduledDay("Today");
+      setScheduledTime("");
     }, 300);
   };
 
@@ -65,7 +79,7 @@ export default function CustomOrderBottomSheet({
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'], 
       allowsEditing: true,
-      quality: 0.7,
+      quality: 1, // Let the camera/gallery give us the best quality first, we'll compress it later
     });
     if (!result.canceled) {
       setCustomImage(result.assets[0].uri);
@@ -117,6 +131,12 @@ export default function CustomOrderBottomSheet({
       return;
     }
 
+    // Schedule Check
+    if (deliveryPreference === "schedule" && !scheduledTime) {
+      Toast.show("Please select a time slot for your scheduled order.", { duration: Toast.durations.SHORT });
+      return;
+    }
+
     setOrderState("submitting");
     Keyboard.dismiss(); 
 
@@ -133,10 +153,12 @@ export default function CustomOrderBottomSheet({
       
       // Upload image to Storage if exists
       if (customImage) {
-        const response = await fetch(customImage);
+        const compressedUri = await compressImageToWebP(customImage);
+        const response = await fetch(compressedUri);
         const blob = await response.blob();
         const storage = getStorage();
-        const filename = `custom_orders/${authUser.uid}_${Date.now()}.jpg`;
+        
+        const filename = `custom_orders/${authUser.uid}_${Date.now()}.webp`;
         const storageRef = ref(storage, filename);
         
         const uploadTask = await uploadBytesResumable(storageRef, blob);
@@ -151,6 +173,8 @@ export default function CustomOrderBottomSheet({
         imageUrl: uploadedImageUrl,
         deliveryAddress: mainAddress,
         status: "pending",
+        isScheduled: deliveryPreference === "schedule",
+        scheduledAt: deliveryPreference === "schedule" ? `${scheduledDay}, ${scheduledTime}` : null,
         createdAt: serverTimestamp(),
       });
 
@@ -251,7 +275,10 @@ export default function CustomOrderBottomSheet({
           </View>
           <View style={{ flex: 1, paddingRight: 10 }}>
             <Text style={styles.customAddressLabel}>
-              {mainAddress?.name ? `Delivery Address • ${mainAddress.name}` : 'Delivery Address'}
+              {mainAddress?.name ? `Delivery Address` : 'Delivery Address'}
+            </Text>
+            <Text style={styles.customAddressLabelName}>
+              • {mainAddress.name}
             </Text>
             <Text style={styles.customAddressText} numberOfLines={2}>
               {mainAddress ? mainAddress.formattedAddress : "No address selected"}
@@ -312,6 +339,63 @@ export default function CustomOrderBottomSheet({
           </TouchableOpacity>
         </View>
 
+        {/* 🔥 NEW SCHEDULE PREFERENCE UI 🔥 */}
+        <View style={styles.inputContainer}>
+          <Text style={styles.inputLabel}>Delivery Time *</Text>
+          <View style={styles.paymentRow}>
+            <TouchableOpacity
+              style={[styles.modeBtn, deliveryPreference === "now" && { backgroundColor: activeCategoryColor }]}
+              onPress={() => setDeliveryPreference("now")}
+              disabled={orderState === "submitting"}
+            >
+              <Text style={[styles.modeText, deliveryPreference === "now" && styles.activeModeText]}>Deliver Now</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeBtn, deliveryPreference === "schedule" && { backgroundColor: activeCategoryColor }]}
+              onPress={() => setDeliveryPreference("schedule")}
+              disabled={orderState === "submitting"}
+            >
+              <Text style={[styles.modeText, deliveryPreference === "schedule" && styles.activeModeText]}>Schedule Later</Text>
+            </TouchableOpacity>
+          </View>
+
+          {deliveryPreference === "schedule" && (
+            <View style={styles.scheduleContainer}>
+              <Text style={styles.scheduleLabel}>Select Day</Text>
+              <View style={styles.dayRow}>
+                <TouchableOpacity 
+                  style={[styles.dayBtn, scheduledDay === "Today" && { borderColor: activeCategoryColor, backgroundColor: activeCategoryColor + '1A' }]} 
+                  onPress={() => { setScheduledDay("Today"); setScheduledTime(""); }}
+                  disabled={orderState === "submitting"}
+                >
+                  <Text style={[styles.dayText, scheduledDay === "Today" && { color: activeCategoryColor, fontFamily: 'Sen_Bold' }]}>Today</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.dayBtn, scheduledDay === "Tomorrow" && { borderColor: activeCategoryColor, backgroundColor: activeCategoryColor + '1A' }]} 
+                  onPress={() => { setScheduledDay("Tomorrow"); setScheduledTime(""); }}
+                  disabled={orderState === "submitting"}
+                >
+                  <Text style={[styles.dayText, scheduledDay === "Tomorrow" && { color: activeCategoryColor, fontFamily: 'Sen_Bold' }]}>Tomorrow</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.scheduleLabel}>Select Time Slot</Text>
+              <GHScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeSlotScroll}>
+                {TIME_SLOTS.map((slot, index) => (
+                  <TouchableOpacity 
+                    key={index} 
+                    style={[styles.timeSlotBtn, scheduledTime === slot && { borderColor: activeCategoryColor, backgroundColor: activeCategoryColor }]}
+                    onPress={() => setScheduledTime(slot)}
+                    disabled={orderState === "submitting"}
+                  >
+                    <Text style={[styles.timeSlotText, scheduledTime === slot && styles.activeTimeSlotText]}>{slot}</Text>
+                  </TouchableOpacity>
+                ))}
+              </GHScrollView>
+            </View>
+          )}
+        </View>
+
         <TouchableOpacity 
           style={[styles.submitCustomBtn, { backgroundColor: activeCategoryColor }, orderState === "submitting" && { opacity: 0.7 }]} 
           onPress={handleCustomOrderSubmit}
@@ -358,6 +442,7 @@ const styles = StyleSheet.create({
   customAddressDisplay: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F6FA', padding: 12, borderRadius: 12, marginBottom: 15 },
   customAddressIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0F2F1', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   customAddressLabel: { fontSize: 12, fontFamily: "Sen_Bold", color: "#555", marginBottom: 2 },
+  customAddressLabelName: { fontSize: 13, fontFamily: "Sen_Bold", color: "#0b0a0a", marginBottom: 2 },
   customAddressText: { fontSize: 13, fontFamily: "Sen_Medium", color: "#111" },
   changeAddressBtn: { backgroundColor: '#E0F2F1', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   changeAddressText: { color: '#009688', fontFamily: 'Sen_Bold', fontSize: 12 },
@@ -373,6 +458,21 @@ const styles = StyleSheet.create({
   previewImage: { width: "100%", height: "100%", resizeMode: "cover" },
   removeImageBtn: { position: "absolute", top: 8, right: 8, backgroundColor: "#fff", borderRadius: 14, padding: 2, elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
   
+  // Schedule UI Styles
+  paymentRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 2, marginBottom: 10 },
+  modeBtn: { flex: 1, backgroundColor: "#F3F6FA", borderRadius: 8, padding: 12, alignItems: "center", marginHorizontal: 4, borderWidth: 1, borderColor: "#E5E9F0" },
+  modeText: { color: "#333", fontFamily: "Sen_Medium", fontSize: 13 },
+  activeModeText: { color: "#fff", fontFamily: "Sen_Bold" },
+  scheduleContainer: { backgroundColor: '#F3F6FA', padding: 14, borderRadius: 12, marginTop: 5, borderWidth: 1, borderColor: '#E5E9F0' },
+  scheduleLabel: { fontSize: 12, fontFamily: 'Sen_Bold', color: '#555', marginBottom: 8, marginTop: 4 },
+  dayRow: { flexDirection: 'row', marginBottom: 15 },
+  dayBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, marginHorizontal: 4 },
+  dayText: { fontFamily: 'Sen_Medium', color: '#444', fontSize: 13 },
+  timeSlotScroll: { paddingBottom: 5, paddingRight: 20 },
+  timeSlotBtn: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, marginRight: 8 },
+  timeSlotText: { fontFamily: 'Sen_Medium', color: '#444', fontSize: 12 },
+  activeTimeSlotText: { color: '#fff', fontFamily: 'Sen_Bold' },
+
   submitCustomBtn: { paddingVertical: 16, borderRadius: 12, alignItems: "center", marginTop: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5, elevation: 5 },
   submitCustomText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 16 },
 

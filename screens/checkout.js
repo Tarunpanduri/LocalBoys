@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { 
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, 
-  TextInput, Image, ScrollView, StatusBar, Platform, Modal, 
+  TextInput, Image, StatusBar, Platform, Modal, 
   FlatList, Animated, Dimensions, Alert 
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
+import * as Clipboard from 'expo-clipboard';
 
 // 🔥 SECURE FIRESTORE & FUNCTIONS IMPORTS 🔥
 import { db, auth, functions } from "../firebase";
@@ -15,9 +16,9 @@ import { httpsCallable } from "firebase/functions";
 import Toast from "react-native-root-toast";
 import { LinearGradient } from "expo-linear-gradient";
 
-// --- GORHOM BOTTOM SHEET IMPORTS ---
+// --- GORHOM BOTTOM SHEET & GESTURE IMPORTS ---
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { GestureHandlerRootView, ScrollView as GHScrollView } from "react-native-gesture-handler";
 
 // --- IMPORT CONTEXTS & STORES ---
 import { useUser } from "../context/UserContext";
@@ -25,6 +26,7 @@ import { useAdmin } from "../context/AdminContext";
 import { useCoupon } from "../context/CouponContext";
 import { useShopStore } from "../store/shopStore"; 
 import { useCartStore } from "../store/cartstore"; 
+import { Ionicons } from "@expo/vector-icons";
 
 const { width, height } = Dimensions.get("window");
 
@@ -117,7 +119,8 @@ export default function CheckoutScreen() {
 
   // --- CONTEXTS & STORES ---
   const { user, userData, mainAddress, loading: userLoading } = useUser();
-  const { branchConfig, activeBranchId, allBranches, loading: adminLoading } = useAdmin();
+  // 🔥 HYBRID ADMIN UPDATE: Now using branchConfigs & activeBranchIds
+  const { branchConfigs, activeBranchIds, allBranches, loading: adminLoading } = useAdmin();
   const { validateCoupon } = useCoupon();
   
   // ZUSTAND
@@ -149,6 +152,13 @@ export default function CheckoutScreen() {
   // UI / Logic
   const [couponCode, setCouponCode] = useState("");
   const [paymentMode, setPaymentMode] = useState("COD");
+  
+  // 🔥 SCHEDULE ORDER STATE 🔥
+  const [deliveryPreference, setDeliveryPreference] = useState("now"); // 'now' | 'schedule'
+  const [scheduledDay, setScheduledDay] = useState("Today"); // 'Today' | 'Tomorrow'
+  const [scheduledTime, setScheduledTime] = useState(""); 
+  const TIME_SLOTS = ["10:00 AM - 12:00 PM", "12:00 PM - 02:00 PM", "02:00 PM - 04:00 PM", "04:00 PM - 06:00 PM", "06:00 PM - 08:00 PM", "08:00 PM - 10:00 PM"];
+
   const [transactionId, setTransactionId] = useState("");
   const [placingOrder, setPlacingOrder] = useState(false);
   const [loadingCart, setLoadingCart] = useState(true);
@@ -160,24 +170,34 @@ export default function CheckoutScreen() {
 
   const fallbackFetchedRef = useRef(false);
 
-  // Derived
-  const isPremiumOrder = subtotal > 10000;
-  const deliveryChargePerKm = branchConfig?.deliveryChargePerKm || 6;
+  // --- 🔥 BRANCH RESOLUTION LOGIC 🔥 ---
+  // Accurately determine the config for this specific shop's branch
+  const currentBranchId = useMemo(() => {
+    if (shop?.parentBranchId) return shop.parentBranchId;
+    return activeBranchIds?.[0] || null;
+  }, [shop, activeBranchIds]);
 
-// --- 1. LOAD DATA ---
+  const currentBranchConfig = useMemo(() => {
+    return currentBranchId ? (branchConfigs[currentBranchId] || {}) : {};
+  }, [currentBranchId, branchConfigs]);
+
+  // Derived Configs
+  const isPremiumOrder = subtotal > 10000;
+  const deliveryChargePerKm = currentBranchConfig.deliveryChargePerKm || 6;
+  const qrIdText = currentBranchConfig.qrId || shop?.qrId || "localboys@upi";
+
+  // --- 1. LOAD DATA ---
   useEffect(() => {
     if (userLoading || shopsLoading || adminLoading || !shopId) return;
 
     if (paramShop && Object.keys(paramShop).length > 0) {
       setShop(paramShop);
-      setQrImage(paramShop.qr || branchConfig?.qr || "");
       setShopCommission(Number(paramShop.commission) || 15);
     } 
     else {
       const foundShop = shops.find(s => s.id === shopId);
       if (foundShop) {
         setShop(foundShop);
-        setQrImage(foundShop.qr || branchConfig?.qr || "");
         setShopCommission(Number(foundShop.commission) || 15);
       } 
       else if (!fallbackFetchedRef.current) { 
@@ -186,7 +206,6 @@ export default function CheckoutScreen() {
           if(snap.exists()) {
             const val = snap.data();
             setShop({ id: shopId, ...val });
-            setQrImage(val.qr || branchConfig?.qr || "");
             setShopCommission(Number(val.commission) || 15);
           }
         }).catch(err => {
@@ -233,7 +252,14 @@ export default function CheckoutScreen() {
        setCart({});
        setLoadingCart(false);
     }
-  }, [userLoading, shopsLoading, adminLoading, shopId, paramCart, cartData, shops, paramShop, branchConfig, userData, mainAddress, orderType]);
+  }, [userLoading, shopsLoading, adminLoading, shopId, paramCart, cartData, shops, paramShop, userData, mainAddress, orderType]);
+
+  // Sync Dynamic QR Image safely
+  useEffect(() => {
+    if (shop?.qr || currentBranchConfig?.qr) {
+      setQrImage(shop?.qr || currentBranchConfig?.qr);
+    }
+  }, [shop, currentBranchConfig]);
 
   // --- 2. CALCULATE TOTALS (UI Only) ---
   useEffect(() => {
@@ -304,6 +330,11 @@ export default function CheckoutScreen() {
     setShowAddressModal(false);
   };
 
+  const copyQrIdToClipboard = async () => {
+    await Clipboard.setStringAsync(qrIdText);
+    Toast.show("QR ID Copied to clipboard!", { duration: Toast.durations.SHORT });
+  };
+
   // 🔥 ENTERPRISE SECURE ORDER PLACEMENT 🔥
   const handlePlaceOrder = async () => {
     if (!user) {
@@ -321,6 +352,12 @@ export default function CheckoutScreen() {
       return;
     }
 
+    // Schedule Check
+    if (deliveryPreference === "schedule" && !scheduledTime) {
+      Toast.show("Please select a time slot for your scheduled order.", { duration: Toast.durations.SHORT });
+      return;
+    }
+
     if (paymentMode === "Online" && !transactionId.trim()) {
       Toast.show("Enter transaction ID", { duration: Toast.durations.SHORT });
       return;
@@ -329,20 +366,18 @@ export default function CheckoutScreen() {
     try {
       setPlacingOrder(true);
 
-      // Strip down the cart items to pure JSON for the server
       const cleanItems = {};
       Object.keys(cart).filter(k => k.startsWith("productId")).forEach(pid => {
          cleanItems[pid] = { 
            id: pid,
            qty: cart[pid].qty,
-           price: cart[pid].price, // Sent as a reference; Cloud Function will do final verification
+           price: cart[pid].price,
            productname: cart[pid].productname,
            image: cart[pid].image || "",
            serviceType: cart[pid].serviceType || "delivery"
          };
       });
 
-      // Prepare secure coordinates safely (no native GeoPoint objects sent over HTTPS)
       let deliveryAddressData = null;
       let parcelPickupData = null;
       let parcelDropData = null;
@@ -368,11 +403,8 @@ export default function CheckoutScreen() {
         };
       }
 
-      // 🔥 FIND CONFIG URL FOR BACKEND 🔥
-      const currentBranch = allBranches.find(b => b.id === activeBranchId);
-      const branchConfigUrl = currentBranch?.configUrl || null;
+      const branchConfigUrl = allBranches.find(b => b.id === currentBranchId)?.configUrl || null;
 
-      // Construct Secure Payload
       const securePayload = {
         shopId: shopId,
         orderType: orderType,
@@ -381,27 +413,24 @@ export default function CheckoutScreen() {
         paymentMode: paymentMode,
         transactionId: paymentMode === "Online" ? transactionId.trim() : null,
         
-        // Pass branch config safely
-        activeBranchId: activeBranchId,
+        isScheduled: deliveryPreference === "schedule",
+        scheduledAt: deliveryPreference === "schedule" ? `${scheduledDay}, ${scheduledTime}` : null,
+        
+        activeBranchId: currentBranchId,
         branchConfigUrl: branchConfigUrl, 
         
-        // Push notification hook injected here
         expoPushToken: userData?.expoPushToken || null,
         customerName: userData?.name || userData?.firstName || "Customer",
         customerPhone: userData?.mobile || "",
         
-        // Locations
         deliveryAddress: deliveryAddressData,
         parcelPickup: parcelPickupData,
         parcelDrop: parcelDropData,
       };
 
-      // Call the Firebase Cloud Function
       const createSecureOrder = httpsCallable(functions, 'createSecureOrder');
-      
       const response = await createSecureOrder(securePayload);
       
-      // Response contains the server-verified order summary
       const newOrderId = response.data.orderId;
       const summary = response.data.orderSummary;
 
@@ -412,7 +441,7 @@ export default function CheckoutScreen() {
       navigation.replace("OrderConfirmation", { 
         orderData: { 
           order: { id: newOrderId, ...summary }, 
-          message: orderType === "parcel" ? "Parcel order placed successfully" : "Order placed successfully" 
+          message: deliveryPreference === "schedule" ? "Scheduled order placed successfully" : (orderType === "parcel" ? "Parcel order placed successfully" : "Order placed successfully")
         } 
       });
 
@@ -459,8 +488,7 @@ export default function CheckoutScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.container}>
           
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 180 }}>
-            {/* 🔥 CONDITIONAL ADDRESS UI RENDERING 🔥 */}
+          <GHScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 180 }}>
             {orderType === "parcel" ? (
               <>
                 {/* Parcel: Pickup Address */}
@@ -525,7 +553,7 @@ export default function CheckoutScreen() {
                 )}
               </View>
             )}
-          </ScrollView>
+          </GHScrollView>
 
           {/* GORHOM BOTTOM SHEET */}
           <BottomSheet
@@ -606,6 +634,59 @@ export default function CheckoutScreen() {
                 </View>
               </View>
 
+              {/* 🔥 NEW SCHEDULE PREFERENCE UI 🔥 */}
+              <View style={[styles.sectiontwo, { marginTop: 10, marginBottom: 10 }]}>
+                <Text style={[styles.sectionTitletwo, { color: 'black', fontSize: 14 }]}>DELIVERY TIME</Text>
+                <View style={styles.paymentRow}>
+                  <TouchableOpacity
+                    style={[styles.modeBtn, deliveryPreference === "now" && styles.activeMode]}
+                    onPress={() => setDeliveryPreference("now")}
+                  >
+                    <Text style={[styles.modeText, deliveryPreference === "now" && styles.activeModeText]}>Deliver Now</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modeBtn, deliveryPreference === "schedule" && styles.activeMode]}
+                    onPress={() => setDeliveryPreference("schedule")}
+                  >
+                    <Text style={[styles.modeText, deliveryPreference === "schedule" && styles.activeModeText]}>Schedule Later</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {deliveryPreference === "schedule" && (
+                  <View style={styles.scheduleContainer}>
+                    <Text style={styles.scheduleLabel}>Select Day</Text>
+                    <View style={styles.dayRow}>
+                      <TouchableOpacity 
+                        style={[styles.dayBtn, scheduledDay === "Today" && styles.activeDayBtn]} 
+                        onPress={() => { setScheduledDay("Today"); setScheduledTime(""); }}
+                      >
+                        <Text style={[styles.dayText, scheduledDay === "Today" && styles.activeDayText]}>Today</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.dayBtn, scheduledDay === "Tomorrow" && styles.activeDayBtn]} 
+                        onPress={() => { setScheduledDay("Tomorrow"); setScheduledTime(""); }}
+                      >
+                        <Text style={[styles.dayText, scheduledDay === "Tomorrow" && styles.activeDayText]}>Tomorrow</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={styles.scheduleLabel}>Select Time Slot</Text>
+                    {/* 🔥 FIXED HORIZONTAL SCROLLING 🔥 */}
+                    <GHScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeSlotScroll}>
+                      {TIME_SLOTS.map((slot, index) => (
+                        <TouchableOpacity 
+                          key={index} 
+                          style={[styles.timeSlotBtn, scheduledTime === slot && styles.activeTimeSlotBtn]}
+                          onPress={() => setScheduledTime(slot)}
+                        >
+                          <Text style={[styles.timeSlotText, scheduledTime === slot && styles.activeTimeSlotText]}>{slot}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </GHScrollView>
+                  </View>
+                )}
+              </View>
+
               <View style={styles.sectiontwo}>
                 <Text style={[styles.sectionTitletwo, { color: 'black', fontSize: 14 }]}>PAYMENT MODE</Text>
                 <View style={styles.paymentRow}>
@@ -622,6 +703,7 @@ export default function CheckoutScreen() {
                     <Text style={[styles.modeText, paymentMode === "Online" && styles.activeModeText]}>PAY ONLINE</Text>
                   </TouchableOpacity>
                 </View>
+                
                 {paymentMode === "Online" && (
                   <View style={styles.onlineBox}>
                     {qrImage && !qrImageFailed ? (
@@ -646,6 +728,15 @@ export default function CheckoutScreen() {
                         <Text style={styles.qrFallbackText}>No QR Available</Text>
                       </View>
                     )}
+
+                    {/* 🔥 NEW QR ID & COPY BLOCK 🔥 */}
+                    <View style={styles.qrInfoBox}>
+                      <Text style={styles.qrIdText}>QR ID: <Text style={{fontWeight: 'bold'}}>{qrIdText}</Text></Text>
+                      <TouchableOpacity onPress={copyQrIdToClipboard} style={styles.copyBtn}>
+                        <Ionicons name="copy-outline" size={16} color="#009688" />
+                        <Text style={styles.copyBtnText}>Copy</Text>
+                      </TouchableOpacity>
+                    </View>
 
                     <TextInput
                       style={styles.transactionInput}
@@ -766,16 +857,37 @@ const styles = StyleSheet.create({
   divider: { borderBottomWidth: 1, borderBottomColor: "#ddd", marginVertical: 8 },
   totalText: { color: "#0e0e12", fontFamily: "Sen_Bold", fontSize: 15 },
   totalValue: { color: "#0e0e12", fontFamily: "Sen_Bold", fontSize: 15 },
-  paymentRow: { flexDirection: "row", justifyContent: "space-between", marginTop:2, marginBottom: 20 },
+  
+  paymentRow: { flexDirection: "row", justifyContent: "space-between", marginTop:2, marginBottom: 10 },
   modeBtn: { flex: 1, backgroundColor: "#f0f0f0", borderRadius: 8, padding: 12, alignItems: "center", marginHorizontal: 4 },
   activeMode: { backgroundColor: "#ff7a00" },
   modeText: { color: "#0e0e12", fontFamily: "Sen_Medium", fontSize: Platform.OS === 'ios' ? 10 : 13 },
   activeModeText: { color: "#fff" },
+  
+  // Schedule UI Styles
+  scheduleContainer: { backgroundColor: '#f9f9f9', padding: 14, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#eee' },
+  scheduleLabel: { fontSize: 12, fontFamily: 'Sen_Bold', color: '#555', marginBottom: 8, marginTop: 4 },
+  dayRow: { flexDirection: 'row', marginBottom: 15 },
+  dayBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, marginHorizontal: 4 },
+  activeDayBtn: { borderColor: '#ff7a00', backgroundColor: '#fff3e0' },
+  dayText: { fontFamily: 'Sen_Medium', color: '#444', fontSize: 13 },
+  activeDayText: { color: '#ff7a00', fontFamily: 'Sen_Bold' },
+  timeSlotScroll: { paddingBottom: 5, paddingRight: 20 },
+  timeSlotBtn: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, marginRight: 8 },
+  activeTimeSlotBtn: { borderColor: '#ff7a00', backgroundColor: '#ff7a00' },
+  timeSlotText: { fontFamily: 'Sen_Medium', color: '#444', fontSize: 12 },
+  activeTimeSlotText: { color: '#fff', fontFamily: 'Sen_Bold' },
+
   onlineBox: { alignItems: "center", paddingBottom: 20 },
   qrImage: { width: 140, height: 140, marginBottom: 12, borderRadius: 8 },
-  
   qrFallbackBox: { justifyContent: "center", alignItems: "center", backgroundColor: "#f5f5f5", borderWidth: 1, borderColor: "#ddd", borderStyle: "dashed" },
   qrFallbackText: { color: "#888", marginTop: 4, fontFamily: 'Sen_Medium', fontSize: 12 },
+  
+  // QR Copy Styles
+  qrInfoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E0F2F1', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginBottom: 15 },
+  qrIdText: { color: '#333', fontFamily: 'Sen_Regular', fontSize: 13, marginRight: 10 },
+  copyBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#009688' },
+  copyBtnText: { color: '#009688', fontFamily: 'Sen_Bold', fontSize: 11, marginLeft: 4 },
 
   transactionInput: { backgroundColor: "#f0f0f0", color: "#0e0e12", borderRadius: 8, width: "90%", padding: 10, marginBottom: 8, fontFamily: "Sen_Regular", fontSize: Platform.OS === 'ios' ? 12 : 14 },
   qrNote: { fontSize: Platform.OS === 'ios' ? 10 : 12, color: "#555", textAlign: "center", fontFamily: "Sen_Regular" },
@@ -801,9 +913,7 @@ const styles = StyleSheet.create({
   orderBtn: { backgroundColor: "#ff7a00", borderRadius: 10, paddingVertical: 12, paddingHorizontal: 26 },
   orderBtnDisabled: { backgroundColor: "#ccc" },
   orderText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 14 },
-  backButton: { backgroundColor: "#ff7a00", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, marginTop: 16 },
-  backButtonText: { color: "#fff", fontFamily: "Sen_Medium", fontSize: 14 },
-
+  
   modalOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.7)", justifyContent: "flex-end", zIndex: 1000 }, 
   modalContent: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "70%", paddingBottom: Platform.OS === "ios" ? 20 : 20 }, 
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: "#eee" }, 

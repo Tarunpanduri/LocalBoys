@@ -26,8 +26,10 @@ import { useShopStore } from "../store/shopStore";
 import { useAdmin } from "../context/AdminContext";
 import { useUser } from "../context/UserContext";
 
-// IMPORT NEW BOTTOM SHEET
+// IMPORT COMPONENTS
 import AddressesBottomSheet from "../components/AddressesBottomSheet"; 
+import CustomOrderBottomSheet from "../components/CustomOrderBottomSheet";
+import BottomNav from "../components/BottomNav";
 
 const { width } = Dimensions.get("window");
 
@@ -125,13 +127,13 @@ export default function HomeScreen({ navigation }) {
   const shopsLoading = useShopStore((state) => state.loading);
   const fetchNearbyShops = useShopStore((state) => state.fetchNearbyShops);
 
-  const { categoryMeta, eventUrl, headerAnimationUrl, loading: adminLoading, determineBranches, branchConfigs, activeBranchIds } = useAdmin();
+  const { categoryMeta, loading: adminLoading, determineBranches, branchConfigs, activeBranchIds } = useAdmin();
   const { userLocation, mainAddress, loading: userLoading } = useUser();
 
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState("products");
+  const [activeTab, setActiveTab] = useState("products"); 
 
   const [loginModalVisible, setLoginModalVisible] = useState(false);
   const [modalFeatureText, setModalFeatureText] = useState("");
@@ -145,11 +147,12 @@ export default function HomeScreen({ navigation }) {
   // REFS
   const fetchDebounceTimer = useRef(null);
   const addressesSheetRef = useRef(null); 
+  const customOrderSheetRef = useRef(null); 
 
-  // --- TRIGGER BOTTOM SHEET ---
+  // --- TRIGGERS ---
   const handleLocationPress = () => {
-    const auth = getAuth();
-    if (auth.currentUser) {
+    const authUser = getAuth().currentUser;
+    if (authUser) {
       addressesSheetRef.current?.expand();
     } else {
       navigation.navigate("MapScreen", { isGuest: true, mode: 'edit', initial: userLocation });
@@ -157,8 +160,8 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleProfilePress = () => {
-    const auth = getAuth();
-    if (auth.currentUser) {
+    const authUser = getAuth().currentUser;
+    if (authUser) {
       navigation.navigate("Profile");
     } else {
       setModalFeatureText("access your profile and settings");
@@ -167,8 +170,8 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleTrackOrderPress = () => {
-    const auth = getAuth();
-    if (auth.currentUser) {
+    const authUser = getAuth().currentUser;
+    if (authUser) {
       navigation.navigate("TrackOrder");
     } else {
       setModalFeatureText("track your active orders");
@@ -180,6 +183,10 @@ export default function HomeScreen({ navigation }) {
     navigation.navigate("ShopDetails", { shopId, shop });
   }, [navigation]);
 
+  const openCustomOrderSheet = () => {
+    customOrderSheetRef.current?.expand();
+  };
+
   // --- Auto-open bottom sheet if no address ---
   const hasValidLocation = useMemo(() => {
     return userLocation && userLocation.lat && userLocation.lng;
@@ -187,7 +194,6 @@ export default function HomeScreen({ navigation }) {
 
   useEffect(() => {
     if (!hasValidLocation && !userLoading) {
-      // If no location, open the bottom sheet after a short delay
       const timer = setTimeout(() => {
         addressesSheetRef.current?.expand();
       }, 300);
@@ -407,10 +413,13 @@ export default function HomeScreen({ navigation }) {
             {renderContent()}
           </View>
 
-          <View style={[styles.bottomNav, { backgroundColor: activeCategoryColor }]}>
-            <TouchableOpacity style={[styles.navButton, activeTab === "products" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("products"); setActiveCategory("all"); }}><Text style={styles.navText}>Products</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.navButton, activeTab === "services" && { backgroundColor: darkenColor(activeCategoryColor, 20) }]} onPress={() => { setActiveTab("services"); setActiveCategory("all"); }}><Text style={styles.navText}>Services</Text></TouchableOpacity>
-          </View>
+          <BottomNav 
+            activeTab={activeTab} 
+            setActiveTab={setActiveTab} 
+            setActiveCategory={setActiveCategory}
+            activeCategoryColor={activeCategoryColor}
+            openCustomOrderSheet={openCustomOrderSheet}
+          />
         </View>
 
         {/* MODAL ALWAYS RENDERS ABOVE EVERYTHING */}
@@ -434,8 +443,18 @@ export default function HomeScreen({ navigation }) {
 
       </SafeAreaView>
 
-      {/* RENDER BOTTOM SHEET OUTSIDE MAIN SAFE AREA TO ENSURE IT OVERLAYS EVERYTHING */}
-      <AddressesBottomSheet bottomSheetRef={addressesSheetRef} navigation={navigation} />
+      {/* BOTTOM SHEETS */}
+      <CustomOrderBottomSheet 
+        bottomSheetRef={customOrderSheetRef} 
+        activeCategoryColor={activeCategoryColor} 
+        setModalFeatureText={setModalFeatureText}
+        setLoginModalVisible={setLoginModalVisible}
+        addressesSheetRef={addressesSheetRef}
+      />
+      <AddressesBottomSheet 
+        bottomSheetRef={addressesSheetRef} 
+        navigation={navigation} 
+      />
     </GestureHandlerRootView>
   );
 }
@@ -468,9 +487,8 @@ const styles = StyleSheet.create({
   metaText: { fontSize: Platform.OS === 'ios' ? 11 : 13, color: "#444", fontFamily: "Sen_Regular" },
   emptyState: { marginTop: 40, alignItems: "center", justifyContent: "center" },
   emptytext: { fontSize: Platform.OS === 'ios' ? 12 : 15, color: "#555", textAlign: "center", paddingHorizontal: 20, fontFamily: "Sen_Regular" },
-  bottomNav: { position: "absolute", bottom: 20, left: 20, right: 20, flexDirection: "row", borderRadius: 30, overflow: "hidden", zIndex: 10, elevation: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 6, height: 50 },
-  navButton: { flex: 1, paddingVertical: 12, justifyContent: "center", alignItems: "center" },
-  navText: { fontSize: Platform.OS === 'ios' ? 14 : 16, fontFamily: "Sen_Bold", color: "#fff" },
+
+  // Standard Modals
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },
   modalIconContainer: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#E0F2F1', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
@@ -480,38 +498,11 @@ const styles = StyleSheet.create({
   modalLoginText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 16 },
   modalCancelBtn: { paddingVertical: 10 },
   modalCancelText: { fontFamily: 'Sen_Medium', color: '#888', fontSize: 14 },
-  noAddressContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 30,
-    marginTop: -50,
-  },
-  noAddressTitle: {
-    fontSize: 22,
-    fontFamily: "Sen_Bold",
-    marginTop: 20,
-    color: "#111",
-    textAlign: "center",
-  },
-  noAddressSub: {
-    fontSize: 14,
-    fontFamily: "Sen_Medium",
-    color: "#666",
-    textAlign: "center",
-    marginTop: 10,
-    lineHeight: 22,
-  },
-  addAddressButton: {
-    backgroundColor: "#009688",
-    paddingVertical: 14,
-    paddingHorizontal: 30,
-    borderRadius: 30,
-    marginTop: 30,
-  },
-  addAddressButtonText: {
-    color: "#fff",
-    fontFamily: "Sen_Bold",
-    fontSize: 16,
-  },
+  
+  // No Address State
+  noAddressContainer: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 30, marginTop: -50 },
+  noAddressTitle: { fontSize: 22, fontFamily: "Sen_Bold", marginTop: 20, color: "#111", textAlign: "center" },
+  noAddressSub: { fontSize: 14, fontFamily: "Sen_Medium", color: "#666", textAlign: "center", marginTop: 10, lineHeight: 22 },
+  addAddressButton: { backgroundColor: "#009688", paddingVertical: 14, paddingHorizontal: 30, borderRadius: 30, marginTop: 30 },
+  addAddressButtonText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 16 },
 });

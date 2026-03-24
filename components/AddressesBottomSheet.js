@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db } from '../firebase';
+// 🔥 STRICT FIRESTORE IMPORTS. NO getDocs! 🔥
 import { doc, updateDoc, deleteField } from 'firebase/firestore';
 import { useFocusEffect } from '@react-navigation/native';
 import BottomSheet, { BottomSheetFlatList, BottomSheetBackdrop } from "@gorhom/bottom-sheet";
@@ -17,7 +18,7 @@ import { useAdmin } from '../context/AdminContext';
 
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
   const toRad = (v) => (v * Math.PI) / 180;
-  const R = 6371;
+  const R = 6371; // Earth Radius in km
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -26,7 +27,8 @@ const haversineDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-export default function AddressesBottomSheet({ bottomSheetRef, navigation }) {
+// 🔥 ADDED setActiveTab TO PROPS
+export default function AddressesBottomSheet({ bottomSheetRef, navigation, setActiveTab }) {
   const { userData, loading, mainAddress, setMainAddress } = useUser();
   const { allBranches } = useAdmin();
 
@@ -135,6 +137,12 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation }) {
   const onSetMain = async (id) => {
     try {
       bottomSheetRef.current?.close();
+      
+      // 🔥 CRITICAL ADDITION: Auto-switch back to Products tab on address change
+      if (setActiveTab) {
+        setActiveTab("products");
+      }
+
       const uid = auth.currentUser?.uid;
       if (!uid) return;
 

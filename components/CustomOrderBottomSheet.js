@@ -14,6 +14,7 @@ import * as ImagePicker from 'expo-image-picker';
 import Toast from "react-native-root-toast";
 import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from "@gorhom/bottom-sheet";
 import { getAuth } from "firebase/auth";
+import { useNavigation } from "@react-navigation/native";
 
 // 🔥 FIRESTORE IMPORTS 🔥
 import { db } from "../firebase";
@@ -31,12 +32,16 @@ export default function CustomOrderBottomSheet({
   setLoginModalVisible, 
   addressesSheetRef 
 }) {
+  const navigation = useNavigation();
   const { user, userLocation, mainAddress } = useUser();
   const { allBranches, activeBranchIds } = useAdmin();
 
+  // --- COMPONENT STATE ---
   const [customNote, setCustomNote] = useState("");
   const [customImage, setCustomImage] = useState(null);
-  const [isSubmittingCustom, setIsSubmittingCustom] = useState(false);
+  
+  // orderState: 'idle' | 'submitting' | 'success' | 'failed_no_area' | 'error'
+  const [orderState, setOrderState] = useState("idle");
 
   const customSnapPoints = useMemo(() => ["90%"], []);
   
@@ -44,6 +49,17 @@ export default function CustomOrderBottomSheet({
     (props) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
     []
   );
+
+  // Helper to cleanly close and reset the sheet
+  const handleCloseSheet = () => {
+    bottomSheetRef.current?.close();
+    // Delay resetting state so the user doesn't see the UI flash while it slides down
+    setTimeout(() => {
+      setOrderState("idle");
+      setCustomNote("");
+      setCustomImage(null);
+    }, 300);
+  };
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -90,12 +106,8 @@ export default function CustomOrderBottomSheet({
       return;
     }
     
-    if (!customNote.trim()) {
-      Toast.show("Please add a description for your order.", { duration: Toast.durations.LONG });
-      return;
-    }
-    if (!customImage) {
-      Toast.show("Please upload a reference image.", { duration: Toast.durations.LONG });
+    if (!customNote.trim() && !customImage) {
+      Toast.show("Please add a description or image for your order.", { duration: Toast.durations.LONG });
       return;
     }
     if (!mainAddress) {
@@ -105,23 +117,33 @@ export default function CustomOrderBottomSheet({
       return;
     }
 
-    setIsSubmittingCustom(true);
+    setOrderState("submitting");
     Keyboard.dismiss(); 
 
     try {
+      const nearestBranchId = getNearestBranchId();
+      
+      // Check if branch exists before uploading anything
+      if (!nearestBranchId) {
+        setOrderState("failed_no_area");
+        return;
+      }
+
       let uploadedImageUrl = null;
       
-      const response = await fetch(customImage);
-      const blob = await response.blob();
-      const storage = getStorage();
-      const filename = `custom_orders/${authUser.uid}_${Date.now()}.jpg`;
-      const storageRef = ref(storage, filename);
-      
-      const uploadTask = await uploadBytesResumable(storageRef, blob);
-      uploadedImageUrl = await getDownloadURL(uploadTask.ref);
+      // Upload image to Storage if exists
+      if (customImage) {
+        const response = await fetch(customImage);
+        const blob = await response.blob();
+        const storage = getStorage();
+        const filename = `custom_orders/${authUser.uid}_${Date.now()}.jpg`;
+        const storageRef = ref(storage, filename);
+        
+        const uploadTask = await uploadBytesResumable(storageRef, blob);
+        uploadedImageUrl = await getDownloadURL(uploadTask.ref);
+      }
 
-      const nearestBranchId = getNearestBranchId();
-
+      // Submit to Firestore
       await addDoc(collection(db, "custom_orders"), {
         userId: authUser.uid,
         branchId: nearestBranchId,
@@ -132,53 +154,118 @@ export default function CustomOrderBottomSheet({
         createdAt: serverTimestamp(),
       });
 
-      Toast.show("Order placed successfully! Our delivery partner will contact you shortly.", { 
-        duration: Toast.durations.LONG,
-        backgroundColor: "#28A745"
-      });
-      
-      setCustomNote("");
-      setCustomImage(null);
-      bottomSheetRef.current?.close();
+      setOrderState("success");
       
     } catch (error) {
       console.error("Custom order failed:", error);
-      Toast.show("Failed to place order. Please try again.", { duration: Toast.durations.LONG });
-    } finally {
-      setIsSubmittingCustom(false);
+      setOrderState("error");
     }
   };
 
-  return (
-    <BottomSheet
-      ref={bottomSheetRef}
-      index={-1} 
-      snapPoints={customSnapPoints}
-      backdropComponent={renderCustomBackdrop}
-      enablePanDownToClose={true}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      backgroundStyle={styles.bottomSheetBackground}
-      handleIndicatorStyle={styles.bottomSheetIndicator}
-    >
-      <BottomSheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.customFormContainer}>
+  // --- RENDER CONTENT DYNAMICALLY BASED ON STATE ---
+  const renderSheetContent = () => {
+    if (orderState === "success") {
+      return (
+        <View style={styles.stateContainer}>
+          <Ionicons name="checkmark-circle" size={80} color="#28A745" />
+          <Text style={styles.stateTitle}>Order Successful!</Text>
+          <Text style={styles.stateMessage}>Your custom order has been placed successfully. Our delivery partner will review it and contact you shortly.</Text>
+          
+          <TouchableOpacity 
+            style={[styles.stateBtn, { backgroundColor: activeCategoryColor }]} 
+            onPress={() => {
+              handleCloseSheet();
+              navigation.navigate("TrackOrder");
+            }}
+          >
+            <Text style={styles.stateBtnText}>Track Order</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.stateBtnOutline} onPress={handleCloseSheet}>
+            <Text style={styles.stateBtnOutlineText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (orderState === "failed_no_area") {
+      return (
+        <View style={styles.stateContainer}>
+          <Ionicons name="location-outline" size={80} color="#FF3B30" />
+          <Text style={styles.stateTitle}>Service Unavailable</Text>
+          <Text style={styles.stateMessage}>We're sorry, but there are no delivery branches available for your selected area yet.</Text>
+          
+          <TouchableOpacity 
+            style={[styles.stateBtn, { backgroundColor: activeCategoryColor }]} 
+            onPress={() => {
+              setOrderState("idle");
+              bottomSheetRef.current?.close();
+              addressesSheetRef.current?.expand();
+            }}
+          >
+            <Text style={styles.stateBtnText}>Change Address</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.stateBtnOutline} onPress={handleCloseSheet}>
+            <Text style={styles.stateBtnOutlineText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (orderState === "error") {
+      return (
+        <View style={styles.stateContainer}>
+          <Ionicons name="alert-circle" size={80} color="#FF3B30" />
+          <Text style={styles.stateTitle}>Something went wrong</Text>
+          <Text style={styles.stateMessage}>We couldn't process your request due to a network error. Please try again.</Text>
+          
+          <TouchableOpacity 
+            style={[styles.stateBtn, { backgroundColor: activeCategoryColor }]} 
+            onPress={() => setOrderState("idle")}
+          >
+            <Text style={styles.stateBtnText}>Try Again</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.stateBtnOutline} onPress={handleCloseSheet}>
+            <Text style={styles.stateBtnOutlineText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    // Default form layout for 'idle' and 'submitting'
+    return (
+      <View>
         <View style={styles.customModalHeader}>
           <Text style={styles.customModalTitle}>Anything Delivered</Text>
-          <TouchableOpacity onPress={() => bottomSheetRef.current?.close()} style={{ padding: 4 }}>
+          <TouchableOpacity onPress={handleCloseSheet} style={{ padding: 4 }}>
             <Ionicons name="close" size={26} color="#333" />
           </TouchableOpacity>
         </View>
 
+        {/* Enhanced Address Display with Change Button */}
         <View style={styles.customAddressDisplay}>
           <View style={styles.customAddressIcon}>
             <Ionicons name="location" size={20} color="#009688" />
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.customAddressLabel}>Delivery Address</Text>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={styles.customAddressLabel}>
+              {mainAddress?.name ? `Delivery Address • ${mainAddress.name}` : 'Delivery Address'}
+            </Text>
             <Text style={styles.customAddressText} numberOfLines={2}>
               {mainAddress ? mainAddress.formattedAddress : "No address selected"}
             </Text>
           </View>
+          <TouchableOpacity 
+            style={styles.changeAddressBtn}
+            onPress={() => {
+              bottomSheetRef.current?.close();
+              addressesSheetRef.current?.expand();
+            }}
+          >
+            <Text style={styles.changeAddressText}>Change</Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.customSub}>Tell us what you need, and our nearest delivery partner will fetch it for you.</Text>
@@ -194,16 +281,25 @@ export default function CustomOrderBottomSheet({
             textAlignVertical="top"
             value={customNote}
             onChangeText={setCustomNote}
+            editable={orderState !== "submitting"}
           />
         </View>
 
         <View style={styles.inputContainer}>
           <Text style={styles.inputLabel}>Reference Image *</Text>
-          <TouchableOpacity style={styles.imagePickerBtn} onPress={pickImage}>
+          <TouchableOpacity 
+            style={styles.imagePickerBtn} 
+            onPress={pickImage}
+            disabled={orderState === "submitting"}
+          >
             {customImage ? (
               <View style={{ width: '100%', height: '100%', position: 'relative' }}>
                 <Image source={{ uri: customImage }} style={styles.previewImage} />
-                <TouchableOpacity style={styles.removeImageBtn} onPress={() => setCustomImage(null)}>
+                <TouchableOpacity 
+                  style={styles.removeImageBtn} 
+                  onPress={() => setCustomImage(null)}
+                  disabled={orderState === "submitting"}
+                >
                   <Ionicons name="close-circle" size={28} color="#FF3B30" />
                 </TouchableOpacity>
               </View>
@@ -217,16 +313,34 @@ export default function CustomOrderBottomSheet({
         </View>
 
         <TouchableOpacity 
-          style={[styles.submitCustomBtn, { backgroundColor: activeCategoryColor }, isSubmittingCustom && { opacity: 0.7 }]} 
+          style={[styles.submitCustomBtn, { backgroundColor: activeCategoryColor }, orderState === "submitting" && { opacity: 0.7 }]} 
           onPress={handleCustomOrderSubmit}
-          disabled={isSubmittingCustom}
+          disabled={orderState === "submitting"}
         >
-          {isSubmittingCustom ? (
+          {orderState === "submitting" ? (
             <ActivityIndicator color="#fff" />
           ) : (
             <Text style={styles.submitCustomText}>Place Custom Order</Text>
           )}
         </TouchableOpacity>
+      </View>
+    );
+  };
+
+  return (
+    <BottomSheet
+      ref={bottomSheetRef}
+      index={-1} 
+      snapPoints={customSnapPoints}
+      backdropComponent={renderCustomBackdrop}
+      enablePanDownToClose={orderState !== "submitting"} // Prevent closing while submitting
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      backgroundStyle={styles.bottomSheetBackground}
+      handleIndicatorStyle={styles.bottomSheetIndicator}
+    >
+      <BottomSheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.customFormContainer}>
+        {renderSheetContent()}
       </BottomSheetScrollView>
     </BottomSheet>
   );
@@ -235,22 +349,39 @@ export default function CustomOrderBottomSheet({
 const styles = StyleSheet.create({
   bottomSheetBackground: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   bottomSheetIndicator: { backgroundColor: '#ccc', width: 40, height: 5, marginTop: 10 },
+  
+  customFormContainer: { paddingHorizontal: 20, paddingBottom: 50 },
   customModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#E5E9F0' },
   customModalTitle: { fontSize: 20, fontFamily: "Sen_Bold", color: "#111" },
-  customFormContainer: { paddingHorizontal: 20, paddingBottom: 50 },
+  
+  // Enhanced Address Display
   customAddressDisplay: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F6FA', padding: 12, borderRadius: 12, marginBottom: 15 },
   customAddressIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0F2F1', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   customAddressLabel: { fontSize: 12, fontFamily: "Sen_Bold", color: "#555", marginBottom: 2 },
   customAddressText: { fontSize: 13, fontFamily: "Sen_Medium", color: "#111" },
+  changeAddressBtn: { backgroundColor: '#E0F2F1', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+  changeAddressText: { color: '#009688', fontFamily: 'Sen_Bold', fontSize: 12 },
+
   customSub: { fontSize: 14, fontFamily: "Sen_Regular", color: "#666", marginBottom: 20, lineHeight: 20 },
   inputContainer: { marginBottom: 20 },
   inputLabel: { fontSize: 14, fontFamily: "Sen_Bold", color: "#333", marginBottom: 8, marginLeft: 4 },
   customInput: { backgroundColor: "#F3F6FA", borderRadius: 12, padding: 16, fontSize: 15, fontFamily: "Sen_Regular", color: "#111", minHeight: 100, borderWidth: 1, borderColor: "#E5E9F0" },
+  
   imagePickerBtn: { backgroundColor: "#F3F6FA", borderRadius: 12, borderWidth: 1, borderColor: "#E5E9F0", borderStyle: "dashed", height: 140, justifyContent: "center", alignItems: "center", overflow: "hidden" },
   imagePlaceholder: { alignItems: "center" },
   imagePlaceholderText: { color: "#888", fontFamily: "Sen_Medium", marginTop: 8, fontSize: 13 },
   previewImage: { width: "100%", height: "100%", resizeMode: "cover" },
   removeImageBtn: { position: "absolute", top: 8, right: 8, backgroundColor: "#fff", borderRadius: 14, padding: 2, elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
+  
   submitCustomBtn: { paddingVertical: 16, borderRadius: 12, alignItems: "center", marginTop: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5, elevation: 5 },
   submitCustomText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 16 },
+
+  // State Views (Success, Failed, Error)
+  stateContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, paddingHorizontal: 10 },
+  stateTitle: { fontSize: 24, fontFamily: "Sen_Bold", color: "#111", marginTop: 20, marginBottom: 10, textAlign: 'center' },
+  stateMessage: { fontSize: 15, fontFamily: "Sen_Regular", color: "#666", textAlign: "center", marginBottom: 30, lineHeight: 22 },
+  stateBtn: { width: '100%', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12 },
+  stateBtnText: { color: '#fff', fontFamily: "Sen_Bold", fontSize: 16 },
+  stateBtnOutline: { width: '100%', paddingVertical: 16, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#ddd' },
+  stateBtnOutlineText: { color: '#555', fontFamily: "Sen_Bold", fontSize: 16 },
 });

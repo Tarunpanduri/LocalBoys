@@ -335,7 +335,8 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.addAddressButtonText}>Add Address</Text>
             </TouchableOpacity>
           </View>
-          <AddressesBottomSheet bottomSheetRef={addressesSheetRef} navigation={navigation} />
+          {/* 🔥 PASS SETACTIVETAB HERE */}
+          <AddressesBottomSheet bottomSheetRef={addressesSheetRef} navigation={navigation} setActiveTab={setActiveTab} />
         </SafeAreaView>
       </GestureHandlerRootView>
     );
@@ -451,9 +452,11 @@ export default function HomeScreen({ navigation }) {
         setLoginModalVisible={setLoginModalVisible}
         addressesSheetRef={addressesSheetRef}
       />
+      {/* 🔥 PASS SETACTIVETAB HERE TOO */}
       <AddressesBottomSheet 
         bottomSheetRef={addressesSheetRef} 
         navigation={navigation} 
+        setActiveTab={setActiveTab}
       />
     </GestureHandlerRootView>
   );
@@ -488,7 +491,6 @@ const styles = StyleSheet.create({
   emptyState: { marginTop: 40, alignItems: "center", justifyContent: "center" },
   emptytext: { fontSize: Platform.OS === 'ios' ? 12 : 15, color: "#555", textAlign: "center", paddingHorizontal: 20, fontFamily: "Sen_Regular" },
 
-  // Standard Modals
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },
   modalIconContainer: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#E0F2F1', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },

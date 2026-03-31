@@ -10,12 +10,10 @@ import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// --- CONTEXT PROVIDERS  ---
 import { AdminProvider } from './context/AdminContext';
 import { UserProvider } from './context/UserContext';
 import { CouponProvider } from './context/CouponContext';
 
-// Screens
 import Login from './screens/login';
 import SignUp from './screens/signup';
 import MapScreen from './screens/maps';
@@ -32,10 +30,11 @@ import TermsAndConditionsScreen from './screens/Terms';
 import ContactUs from './screens/contact';
 import Settings from './screens/settings';
 import PreviousOrders from './screens/PreviousOrders';
+import NewLogin from './screens/newlogin';
 
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { db } from './firebase';
-import { doc, updateDoc } from 'firebase/firestore'; 
+import { auth, db } from './firebase';
+import { onAuthStateChanged } from '@react-native-firebase/auth';
+import { doc, setDoc } from '@react-native-firebase/firestore'; // ✅ changed: use setDoc instead of updateDoc
 
 SplashScreen.preventAutoHideAsync();
 
@@ -54,7 +53,7 @@ const allowedRoutes = ['HomeScreen', 'TrackOrder', 'OrderConfirmation', 'Profile
 
 export default function App() {
   const [fontsLoaded] = useFonts({ Sen_Regular: Sen_400Regular, Sen_Medium: Sen_500Medium, Sen_Bold: Sen_700Bold, Sen_ExtraBold: Sen_800ExtraBold });
-  const [initialRoute, setInitialRoute] = useState('Login');
+  const [initialRoute, setInitialRoute] = useState('NewLogin');
   const [checkingAuth, setCheckingAuth] = useState(true);
   const responseListener = useRef(null);
 
@@ -67,7 +66,6 @@ export default function App() {
       console.log('Must use physical device for Push Notifications');
       return null;
     }
-
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('localboys_high_priority_v2', {
         name: 'High Priority Updates',
@@ -78,48 +76,30 @@ export default function App() {
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
     }
-
     try {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
-
       if (existingStatus !== 'granted') {
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
-
       if (finalStatus !== 'granted') {
-        // Silently fail on app open so we don't spam the user with alerts every time
         console.log('Push permission not granted');
         return null;
       }
-
       const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
-
-      if (!projectId) {
-        console.log('Project ID not found in app config');
-      }
-
-      const tokenData = await Notifications.getExpoPushTokenAsync({
-        projectId: projectId,
-      });
-
+      if (!projectId) console.log('Project ID not found in app config');
+      const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
       const expoToken = tokenData.data;
-
-      // 🔥 KILLING THE APP-OPEN BILLING TRAP 🔥
       if (userId && expoToken) {
         const cachedToken = await AsyncStorage.getItem(`pushToken_${userId}`);
-        
-        // ONLY write to Firebase if the token has changed or is brand new
         if (cachedToken !== expoToken) {
-          await updateDoc(doc(db, "users", userId), { 
-            expoPushToken: expoToken 
-          });
-          // Save locally so we don't trigger this write again tomorrow
+          // ✅ FIX: use setDoc with merge to avoid "document not found" error
+          const userDocRef = doc(db, "users", userId);
+          await setDoc(userDocRef, { expoPushToken: expoToken }, { merge: true });
           await AsyncStorage.setItem(`pushToken_${userId}`, expoToken);
         }
       }
-
       return expoToken;
     } catch (err) {
       console.log('❌ Push registration error:', err);
@@ -128,8 +108,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    const auth = getAuth();
-
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setInitialRoute('HomeScreen');
@@ -137,13 +115,9 @@ export default function App() {
       } else {
         try {
           const guestAddress = await AsyncStorage.getItem('guestAddress');
-          if (guestAddress) {
-            setInitialRoute('HomeScreen');
-          } else {
-            setInitialRoute('Login');
-          }
+          setInitialRoute(guestAddress ? 'HomeScreen' : 'NewLogin');
         } catch (e) {
-          setInitialRoute('Login');
+          setInitialRoute('NewLogin');
         }
       }
       setCheckingAuth(false);
@@ -155,13 +129,8 @@ export default function App() {
         const data = content.data || {};
         const route = data.screen;
         const imageUrl = data.image || data.imageUrl;
-
         if (route && allowedRoutes.includes(route) && navigationRef.isReady()) {
-          navigationRef.navigate(route, {
-            ...data,
-            notificationImage: imageUrl,
-            fromNotification: true
-          });
+          navigationRef.navigate(route, { ...data, notificationImage: imageUrl, fromNotification: true });
         }
       } catch (e) {
         console.error("Navigation error:", e);
@@ -179,32 +148,33 @@ export default function App() {
   return (
     <RootSiblingParent>
       <View style={styles.container} onLayout={onLayoutRootView}>
-            <AdminProvider>
-              <UserProvider>
-                <CouponProvider>
-                    <NavigationContainer ref={navigationRef}>
-                      <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
-                        <Stack.Screen name="Login" component={Login} />
-                        <Stack.Screen name="SignUp" component={SignUp} />
-                        <Stack.Screen name="MapScreen" component={MapScreen} />
-                        <Stack.Screen name="HomeScreen" component={HomeScreen} />
-                        <Stack.Screen name="ShopDetails" component={ShopDetails} />
-                        <Stack.Screen name="Checkout" component={CheckoutScreen} />
-                        <Stack.Screen name="TrackOrder" component={TrackOrder} />
-                        <Stack.Screen name="Addresses" component={AddressesScreen} />
-                        <Stack.Screen name="Profile" component={Profile} />
-                        <Stack.Screen name="EditProfile" component={EditProfile} />
-                        <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }} />
-                        <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
-                        <Stack.Screen name="Terms" component={TermsAndConditionsScreen} />
-                        <Stack.Screen name="ContactUs" component={ContactUs} />
-                        <Stack.Screen name="Settings" component={Settings} />
-                        <Stack.Screen name="PreviousOrders" component={PreviousOrders} />
-                      </Stack.Navigator>
-                    </NavigationContainer>
-                    </CouponProvider>
-              </UserProvider>
-            </AdminProvider>
+        <AdminProvider>
+          <UserProvider>
+            <CouponProvider>
+              <NavigationContainer ref={navigationRef}>
+                <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
+                  <Stack.Screen name="Login" component={Login} />
+                  <Stack.Screen name="SignUp" component={SignUp} />
+                  <Stack.Screen name="MapScreen" component={MapScreen} />
+                  <Stack.Screen name="HomeScreen" component={HomeScreen} />
+                  <Stack.Screen name="ShopDetails" component={ShopDetails} />
+                  <Stack.Screen name="Checkout" component={CheckoutScreen} />
+                  <Stack.Screen name="TrackOrder" component={TrackOrder} />
+                  <Stack.Screen name="Addresses" component={AddressesScreen} />
+                  <Stack.Screen name="Profile" component={Profile} />
+                  <Stack.Screen name="EditProfile" component={EditProfile} />
+                  <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }} />
+                  <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+                  <Stack.Screen name="Terms" component={TermsAndConditionsScreen} />
+                  <Stack.Screen name="ContactUs" component={ContactUs} />
+                  <Stack.Screen name="Settings" component={Settings} />
+                  <Stack.Screen name="PreviousOrders" component={PreviousOrders} />
+                  <Stack.Screen name="NewLogin" component={NewLogin} />
+                </Stack.Navigator>
+              </NavigationContainer>
+            </CouponProvider>
+          </UserProvider>
+        </AdminProvider>
       </View>
     </RootSiblingParent>
   );

@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// 🔥 STRICT FIRESTORE IMPORTS 🔥
-import { collection, getDocs } from 'firebase/firestore';
+// 🔥 NATIVE MODULAR IMPORTS 🔥
 import { db } from '../firebase';
+import { collection, getDocs } from '@react-native-firebase/firestore';
 
 export const useProductStore = create(
   persist(
@@ -22,6 +22,7 @@ export const useProductStore = create(
         }
 
         try {
+          // ✅ MODULAR: getDocs(collection(db, ...))
           const productsRef = collection(db, 'shops', shopId, 'products');
           const snap = await getDocs(productsRef);
           
@@ -41,7 +42,6 @@ export const useProductStore = create(
         }
       },
 
-      // 🔥 NEW: Function to forcefully clear a single shop's menu from the cache
       clearShopMenu: (shopId) => {
         set((state) => {
           const newMenus = { ...state.menus };

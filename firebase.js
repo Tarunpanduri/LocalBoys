@@ -1,37 +1,33 @@
-import { initializeApp } from "firebase/app";
-import { initializeAuth, getReactNativePersistence } from "firebase/auth";
-import ReactNativeAsyncStorage from "@react-native-async-storage/async-storage";
-import { getFirestore } from "firebase/firestore";
+import { getApp, getApps } from '@react-native-firebase/app';
+import { getAuth } from '@react-native-firebase/auth';
+import { getFirestore } from '@react-native-firebase/firestore';
+import { getFunctions } from '@react-native-firebase/functions';
 
-// 🔥 ADD CLOUD FUNCTIONS IMPORT 🔥
-import { getFunctions } from "firebase/functions";
-import Constants from "expo-constants";
+// ✅ ADD WEB SDK STORAGE
+import { initializeApp as initializeWebApp } from "firebase/app";
+import { getStorage as getWebStorage } from "firebase/storage";
+import Constants from 'expo-constants'; // 👈 IMPORT CONSTANTS
 
-const extra = Constants.expoConfig?.extra || Constants.manifest?.extra || {};
+// 🔥 Native App
+const app = getApps().length === 0 ? getApp() : getApp();
 
-const firebaseConfig = {
-  apiKey: extra.apiKey,
-  authDomain: extra.authDomain,
-  projectId: extra.projectId,
-  storageBucket: extra.storageBucket,
-  messagingSenderId: extra.messagingSenderId,
-  appId: extra.appId,
-  measurementId: extra.measurementId,
-  databaseURL: extra.databaseURL, 
-};
-
-// Initialize Firebase App
-const app = initializeApp(firebaseConfig);
-
-// Initialize Firebase Auth with React Native Persistence
-export const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(ReactNativeAsyncStorage),
-});
-
-// Initialize standard Firestore
+// 🔥 Native services
+export const auth = getAuth(app);
 export const db = getFirestore(app);
-
-// 🔥 INITIALIZE AND EXPORT CLOUD FUNCTIONS 🔥
 export const functions = getFunctions(app);
 
-export default app;
+// 🔥 Web Firebase config (Fetch from Expo Constants)
+const firebaseConfig = {
+  apiKey: Constants.expoConfig.extra.apiKey,
+  authDomain: Constants.expoConfig.extra.authDomain,
+  projectId: Constants.expoConfig.extra.projectId,
+  storageBucket: Constants.expoConfig.extra.storageBucket, // 👈 Now properly defined
+  messagingSenderId: Constants.expoConfig.extra.messagingSenderId,
+  appId: Constants.expoConfig.extra.appId,
+};
+
+// 🔥 Web app (for storage only)
+const webApp = initializeWebApp(firebaseConfig);
+
+// ✅ EXPORT WEB STORAGE
+export const storage = getWebStorage(webApp);

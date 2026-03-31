@@ -14,8 +14,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
-// 🔥 STRICT FIRESTORE IMPORTS. NO RTDB. 🔥
-import { doc, updateDoc } from "firebase/firestore";
+// 🔥 FIXED: NATIVE FIRESTORE IMPORTS 🔥
+import { doc, updateDoc } from "@react-native-firebase/firestore";
 import { db, auth } from "../firebase";
 
 export default function EditProfile({ navigation, route }) {
@@ -61,6 +61,7 @@ export default function EditProfile({ navigation, route }) {
 
     setLoading(true);
     try {
+      // ✅ MODULAR NATIVE SDK 
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, {
         firstName: firstName.trim(),

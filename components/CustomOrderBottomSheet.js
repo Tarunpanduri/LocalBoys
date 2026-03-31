@@ -13,14 +13,17 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from 'expo-image-picker';
 import Toast from "react-native-root-toast";
 import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from "@gorhom/bottom-sheet";
-import { ScrollView as GHScrollView } from "react-native-gesture-handler"; // 🔥 Added for horizontal time slot scrolling
-import { getAuth } from "firebase/auth";
+import { ScrollView as GHScrollView } from "react-native-gesture-handler"; 
 import { useNavigation } from "@react-navigation/native";
 
-// 🔥 FIRESTORE IMPORTS 🔥
-import { db } from "../firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+// 🔥 FIXED: NATIVE FIREBASE MODULAR IMPORTS 🔥
+import { auth, db } from '../firebase';
+import { collection, addDoc, serverTimestamp } from '@react-native-firebase/firestore';
+
+// 🔥 WEB STORAGE IMPORTS 🔥
+import { storage } from '../firebase';
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+
 
 // IMPORT CONTEXTS & UTILS
 import { useUser } from "../context/UserContext";
@@ -79,7 +82,7 @@ export default function CustomOrderBottomSheet({
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'], 
       allowsEditing: true,
-      quality: 1, // Let the camera/gallery give us the best quality first, we'll compress it later
+      quality: 1, 
     });
     if (!result.canceled) {
       setCustomImage(result.assets[0].uri);
@@ -111,7 +114,8 @@ export default function CustomOrderBottomSheet({
   };
 
   const handleCustomOrderSubmit = async () => {
-    const authUser = getAuth().currentUser; 
+    // ✅ MODULAR: auth instance
+    const authUser = auth.currentUser; 
     
     if (!authUser) {
       bottomSheetRef.current?.close(); 
@@ -131,7 +135,6 @@ export default function CustomOrderBottomSheet({
       return;
     }
 
-    // Schedule Check
     if (deliveryPreference === "schedule" && !scheduledTime) {
       Toast.show("Please select a time slot for your scheduled order.", { duration: Toast.durations.SHORT });
       return;
@@ -143,7 +146,6 @@ export default function CustomOrderBottomSheet({
     try {
       const nearestBranchId = getNearestBranchId();
       
-      // Check if branch exists before uploading anything
       if (!nearestBranchId) {
         setOrderState("failed_no_area");
         return;
@@ -151,21 +153,22 @@ export default function CustomOrderBottomSheet({
 
       let uploadedImageUrl = null;
       
-      // Upload image to Storage if exists
-      if (customImage) {
-        const compressedUri = await compressImageToWebP(customImage);
-        const response = await fetch(compressedUri);
-        const blob = await response.blob();
-        const storage = getStorage();
-        
-        const filename = `custom_orders/${authUser.uid}_${Date.now()}.webp`;
-        const storageRef = ref(storage, filename);
-        
-        const uploadTask = await uploadBytesResumable(storageRef, blob);
-        uploadedImageUrl = await getDownloadURL(uploadTask.ref);
-      }
+if (customImage) {
+  const compressedUri = await compressImageToWebP(customImage);
 
-      // Submit to Firestore
+  // ✅ NEW WEB STORAGE UPLOAD
+  const response = await fetch(compressedUri);
+  const blob = await response.blob();
+
+  const filename = `custom_orders/${authUser.uid}_${Date.now()}.webp`;
+  const storageRef = ref(storage, filename);
+
+  await uploadBytes(storageRef, blob);
+
+  uploadedImageUrl = await getDownloadURL(storageRef);
+}
+
+      // ✅ MODULAR FIRESTORE ADD
       await addDoc(collection(db, "custom_orders"), {
         userId: authUser.uid,
         branchId: nearestBranchId,
@@ -186,7 +189,6 @@ export default function CustomOrderBottomSheet({
     }
   };
 
-  // --- RENDER CONTENT DYNAMICALLY BASED ON STATE ---
   const renderSheetContent = () => {
     if (orderState === "success") {
       return (
@@ -258,7 +260,6 @@ export default function CustomOrderBottomSheet({
       );
     }
 
-    // Default form layout for 'idle' and 'submitting'
     return (
       <View>
         <View style={styles.customModalHeader}>
@@ -268,7 +269,6 @@ export default function CustomOrderBottomSheet({
           </TouchableOpacity>
         </View>
 
-        {/* Enhanced Address Display with Change Button */}
         <View style={styles.customAddressDisplay}>
           <View style={styles.customAddressIcon}>
             <Ionicons name="location" size={20} color="#009688" />
@@ -278,7 +278,7 @@ export default function CustomOrderBottomSheet({
               {mainAddress?.name ? `Delivery Address` : 'Delivery Address'}
             </Text>
             <Text style={styles.customAddressLabelName}>
-               {mainAddress.name}
+               {mainAddress?.name}
             </Text>
             <Text style={styles.customAddressText} numberOfLines={2}>
               {mainAddress ? mainAddress.formattedAddress : "No address selected"}
@@ -339,7 +339,6 @@ export default function CustomOrderBottomSheet({
           </TouchableOpacity>
         </View>
 
-        {/* 🔥 NEW SCHEDULE PREFERENCE UI 🔥 */}
         <View style={styles.inputContainer}>
           <Text style={styles.inputLabel}>Delivery Time *</Text>
           <View style={styles.paymentRow}>
@@ -417,7 +416,7 @@ export default function CustomOrderBottomSheet({
       index={-1} 
       snapPoints={customSnapPoints}
       backdropComponent={renderCustomBackdrop}
-      enablePanDownToClose={orderState !== "submitting"} // Prevent closing while submitting
+      enablePanDownToClose={orderState !== "submitting"} 
       keyboardBehavior="interactive"
       keyboardBlurBehavior="restore"
       backgroundStyle={styles.bottomSheetBackground}
@@ -438,7 +437,6 @@ const styles = StyleSheet.create({
   customModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#E5E9F0' },
   customModalTitle: { fontSize: 20, fontFamily: "Sen_Bold", color: "#111" },
   
-  // Enhanced Address Display
   customAddressDisplay: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F6FA', padding: 12, borderRadius: 12, marginBottom: 15 },
   customAddressIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0F2F1', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   customAddressLabel: { fontSize: 12, fontFamily: "Sen_Bold", color: "#555", marginBottom: 2 },
@@ -458,7 +456,6 @@ const styles = StyleSheet.create({
   previewImage: { width: "100%", height: "100%", resizeMode: "cover" },
   removeImageBtn: { position: "absolute", top: 8, right: 8, backgroundColor: "#fff", borderRadius: 14, padding: 2, elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
   
-  // Schedule UI Styles
   paymentRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 2, marginBottom: 10 },
   modeBtn: { flex: 1, backgroundColor: "#F3F6FA", borderRadius: 8, padding: 12, alignItems: "center", marginHorizontal: 4, borderWidth: 1, borderColor: "#E5E9F0" },
   modeText: { color: "#333", fontFamily: "Sen_Medium", fontSize: 13 },
@@ -476,7 +473,6 @@ const styles = StyleSheet.create({
   submitCustomBtn: { paddingVertical: 16, borderRadius: 12, alignItems: "center", marginTop: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5, elevation: 5 },
   submitCustomText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 16 },
 
-  // State Views (Success, Failed, Error)
   stateContainer: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, paddingHorizontal: 10 },
   stateTitle: { fontSize: 24, fontFamily: "Sen_Bold", color: "#111", marginTop: 20, marginBottom: 10, textAlign: 'center' },
   stateMessage: { fontSize: 15, fontFamily: "Sen_Regular", color: "#666", textAlign: "center", marginBottom: 30, lineHeight: 22 },

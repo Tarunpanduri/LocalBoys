@@ -8,10 +8,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import * as Clipboard from 'expo-clipboard';
 
-// 🔥 SECURE FIRESTORE & FUNCTIONS IMPORTS 🔥
+// 🔥 FIXED: NATIVE FIREBASE MODULAR IMPORTS 🔥
 import { db, auth, functions } from "../firebase";
-import { doc, getDoc } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
+import { doc, getDoc } from "@react-native-firebase/firestore";
+import { httpsCallable } from "@react-native-firebase/functions";
 
 import Toast from "react-native-root-toast";
 import { LinearGradient } from "expo-linear-gradient";
@@ -202,8 +202,9 @@ export default function CheckoutScreen() {
       } 
       else if (!fallbackFetchedRef.current) { 
         fallbackFetchedRef.current = true;
+        // ✅ MODULAR: getDoc(doc(db, ...))
         getDoc(doc(db, "shops", shopId)).then(snap => {
-          if(snap.exists()) {
+          if(snap.exists) {
             const val = snap.data();
             setShop({ id: shopId, ...val });
             setShopCommission(Number(val.commission) || 15);
@@ -428,6 +429,7 @@ export default function CheckoutScreen() {
         parcelDrop: parcelDropData,
       };
 
+      // ✅ MODULAR: httpsCallable(functionsInstance, functionName)
       const createSecureOrder = httpsCallable(functions, 'createSecureOrder');
       const response = await createSecureOrder(securePayload);
       

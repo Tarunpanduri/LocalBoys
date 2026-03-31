@@ -13,12 +13,15 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons, FontAwesome5 } from "@expo/vector-icons";
-import { getAuth, signOut } from "firebase/auth";
+
+// 🔥 FIXED: Use Native Modular Auth 🔥
+import { auth } from '../firebase';
+import { signOut } from '@react-native-firebase/auth';
+
 import { useFonts } from "expo-font";
 import { Sen_400Regular, Sen_500Medium, Sen_700Bold, Sen_800ExtraBold } from "@expo-google-fonts/sen";
 import { LinearGradient } from "expo-linear-gradient";
 import { useCartStore } from '../store/cartstore';
-
 
 // 🔥 IMPORT OUR FIRESTORE-POWERED USER CONTEXT 🔥
 import { useUser } from "../context/UserContext";
@@ -114,7 +117,6 @@ const ProfileSkeleton = () => {
 // --- Main Profile Component ---
 export default function Profile({ navigation, route }) {
   const { greetingName = "User" } = route.params || {};
-  const auth = getAuth();
 
   const { userData, loading } = useUser();
 
@@ -134,8 +136,9 @@ export default function Profile({ navigation, route }) {
 const handleLogout = async () => {
     try {
       clearCart(); 
+      // 🔥 FIXED: Native SDK modular signOut
       await signOut(auth);
-      navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+      navigation.reset({ index: 0, routes: [{ name: "NewLogin" }] });
     } catch (error) {
       Alert.alert("Logout Failed", error.message);
     }

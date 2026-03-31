@@ -1,18 +1,22 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
   TouchableOpacity, 
   StyleSheet, 
   ActivityIndicator, 
-  Modal 
+  Modal,
+  Animated
 } from 'react-native';
 import { Ionicons } from "@expo/vector-icons";
-import { auth, db } from '../firebase';
-// 🔥 STRICT FIRESTORE IMPORTS. NO getDocs! 🔥
-import { doc, updateDoc, deleteField } from 'firebase/firestore';
 import { useFocusEffect } from '@react-navigation/native';
 import BottomSheet, { BottomSheetFlatList, BottomSheetBackdrop } from "@gorhom/bottom-sheet";
+import { LinearGradient } from "expo-linear-gradient";
+
+// 🔥 FIXED: NATIVE FIRESTORE MODULAR IMPORTS 🔥
+import { auth, db } from '../firebase';
+import { doc, updateDoc, deleteField } from '@react-native-firebase/firestore';
+
 import { useUser } from '../context/UserContext';
 import { useAdmin } from '../context/AdminContext';
 
@@ -27,7 +31,6 @@ const haversineDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-// 🔥 ADDED setActiveTab TO PROPS
 export default function AddressesBottomSheet({ bottomSheetRef, navigation, setActiveTab }) {
   const { userData, loading, mainAddress, setMainAddress } = useUser();
   const { allBranches } = useAdmin();
@@ -100,6 +103,7 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
       if (!uid) return;
 
       const updates = {};
+      // ✅ MODULAR: deleteField() 
       updates[`addresses.${addressToDelete}`] = deleteField();
 
       if (userData?.mainAddressId === addressToDelete) {
@@ -126,6 +130,7 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
         }
       }
 
+      // ✅ MODULAR: updateDoc(doc(...), ...)
       await updateDoc(doc(db, "users", uid), updates);
     } catch (e) {
       console.error('Delete address error:', e);
@@ -138,7 +143,7 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
     try {
       bottomSheetRef.current?.close();
       
-      // 🔥 CRITICAL ADDITION: Auto-switch back to Products tab on address change
+      // Auto-switch back to Products tab on address change
       if (setActiveTab) {
         setActiveTab("products");
       }
@@ -166,6 +171,7 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
         if (nearestContact) updates['supportcontact'] = nearestContact;
       }
 
+      // ✅ MODULAR: updateDoc(doc(...), ...)
       await updateDoc(doc(db, "users", uid), updates);
     } catch (e) {
       console.error('Set main address error:', e);

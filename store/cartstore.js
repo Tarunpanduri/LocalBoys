@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// 🔥 NATIVE MODULAR AUTH 🔥
 import { auth } from '../firebase';
 import Toast from 'react-native-root-toast';
 
@@ -10,6 +11,7 @@ export const useCartStore = create(
       cartData: {},
 
       addToCart: (shop, product, quantity = 1, force = false) => {
+        // Safe access via exported modular instance
         const user = auth.currentUser;
         if (!user) {
           Toast.show("Please login to add items.", { duration: Toast.durations.SHORT });
@@ -25,15 +27,12 @@ export const useCartStore = create(
         const cartShopId = keys.length > 0 ? keys[0] : null;
         const targetShopId = shop.id;
 
-        // Shop Conflict Detection
         if (cartShopId && cartShopId !== targetShopId) {
           if (!force) {
-            // Return conflict flag so the UI can handle it with a custom modal
             return { conflict: true, cartShopId };
           }
         }
 
-        // Add or Update (If force is true, we wipe the currentData first to start a new basket)
         let baseData = currentData;
         if (cartShopId && cartShopId !== targetShopId && force) {
           baseData = {};
@@ -128,7 +127,6 @@ export const useCartStore = create(
         Toast.show("Cart cleared.", { duration: Toast.durations.SHORT });
       },
 
-      // 🔥 NEW: Explicitly clear cart for ONE shop when menu changes
       clearShopCart: (shopId) => {
         const currentData = getStore().cartData;
         if (currentData[shopId]) {

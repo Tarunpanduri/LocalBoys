@@ -4,15 +4,18 @@ import MapView from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import * as Device from 'expo-device'; // Updated for better device checking
+
+// 🔥 FIXED: NATIVE FIREBASE IMPORTS 🔥
 import { auth, db } from '../firebase';
-// 🔥 STRICT FIRESTORE IMPORTS. NO getDocs for branches! 🔥
-import { doc, getDoc, updateDoc, collection, GeoPoint } from 'firebase/firestore';
+import firestore from '@react-native-firebase/firestore'; 
+
 import { MaterialIcons, Ionicons } from '@expo/vector-icons'; 
 
 // --- IMPORTS FOR GUEST MODE & CONTEXTS ---
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUser } from '../context/UserContext';
-import { useAdmin } from '../context/AdminContext'; // 🔥 Imported AdminContext for free branches array
+import { useAdmin } from '../context/AdminContext';
 
 const GOOGLE_MAPS_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -37,12 +40,10 @@ export default function MapScreen({ navigation, route }) {
   const editingId = route?.params?.addressId || null;
   const initial = route?.params?.initial || null;
   
-  // --- CHECK IF GUEST ---
   const isGuest = route?.params?.isGuest || false;
   
-  // Get Context Setters to update Home Screen immediately
   const { setMainAddress, setUserLocation } = useUser(); 
-  const { allBranches } = useAdmin(); // 🔥 Get local branches for $0 distance calculation
+  const { allBranches } = useAdmin(); 
 
   const [hasPermission, setHasPermission] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -55,7 +56,6 @@ export default function MapScreen({ navigation, route }) {
   const [phone, setPhone] = useState('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
-  // --- CUSTOM ALERT MODAL STATE ---
   const [alertConfig, setAlertConfig] = useState({
     visible: false,
     title: '',
@@ -255,7 +255,7 @@ export default function MapScreen({ navigation, route }) {
     }
   };
 
-  // --- 2. HANDLE CONFIRM LOCATION (FIRESTORE) ---
+  // --- 2. HANDLE CONFIRM LOCATION (NATIVE FIRESTORE) ---
   const handleConfirmLocation = async () => {
     if (!selectedPlace) return showAlert('Error', 'Please pick a location first.');
     if (!name || name.trim().length < 2) return showAlert('Validation', 'Please enter a name for this address.', 'validation');
@@ -303,16 +303,18 @@ export default function MapScreen({ navigation, route }) {
     try {
       setSaving(true);
       const uid = auth.currentUser.uid;
-      const userRef = doc(db, "users", uid);
-      const userSnap = await getDoc(userRef);
+      
+      // 🔥 FIXED: Using Native Firestore Chaining 🔥
+      const userRef = db.collection("users").doc(uid);
+      const userSnap = await userRef.get();
       const existingData = userSnap.data() || {};
       
-      // We generate a custom ID for the address map or use the existing editing ID
-      let keyToSet = editingId || doc(collection(db, 'dummy')).id;
+      // Generate unique key if not editing
+      let keyToSet = editingId || db.collection('dummy').doc().id;
 
-      // Ensure location is converted to a native Firestore GeoPoint
+      // 🔥 FIXED: Native GeoPoint usage 🔥
       const addressObj = {
-        location: new GeoPoint(selectedPlace.lat, selectedPlace.lng),
+        location: new firestore.GeoPoint(selectedPlace.lat, selectedPlace.lng),
         area: selectedPlace.area || '',
         city: selectedPlace.city || '',
         state: selectedPlace.state || '',
@@ -367,7 +369,8 @@ export default function MapScreen({ navigation, route }) {
       }
 
       if (Object.keys(userUpdates).length > 0) {
-        await updateDoc(userRef, userUpdates);
+        // 🔥 FIXED: Using Native update method 🔥
+        await userRef.update(userUpdates);
       }
 
       navigation.navigate('HomeScreen', { refresh: true });
@@ -386,7 +389,7 @@ export default function MapScreen({ navigation, route }) {
 
   async function registerForPushNotificationsAsync() {
     try {
-      if (!Constants.isDevice) return; 
+      if (!Device.isDevice) return; 
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
       if (existingStatus !== 'granted') { 
@@ -394,7 +397,9 @@ export default function MapScreen({ navigation, route }) {
         finalStatus = status; 
       }
       if (finalStatus !== 'granted') return;
-      const token = (await Notifications.getExpoPushTokenAsync()).data; 
+
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+      const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data; 
       setExpoPushToken(token);
       
       if (Platform.OS === 'android') 

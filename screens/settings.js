@@ -8,31 +8,31 @@ import {
   ScrollView,
   Modal,
   ActivityIndicator,
-  Alert,
   TextInput,
   KeyboardAvoidingView,
   Platform
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons, FontAwesome5 } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 
-// 🔥 FIREBASE AUTH & FIRESTORE IMPORTS 🔥
-import { getAuth, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
-import { doc, updateDoc, deleteDoc } from "firebase/firestore";
-import { db } from "../firebase";
+// 🔥 NATIVE FIREBASE AUTH & FIRESTORE IMPORTS 🔥
+import { auth, db } from "../firebase";
+import { EmailAuthProvider, reauthenticateWithCredential } from "@react-native-firebase/auth";
+import { doc, updateDoc, deleteDoc, setDoc, serverTimestamp } from "@react-native-firebase/firestore";
 
 import { useFonts } from "expo-font";
 import { Sen_400Regular, Sen_500Medium, Sen_700Bold } from "@expo-google-fonts/sen";
 
 // --- IMPORT CONTEXT ---
 import { useUser } from "../context/UserContext";
+import { useAdmin } from "../context/AdminContext";
 
 export default function Settings() {
   const navigation = useNavigation();
-  const auth = getAuth();
   
   const { userData, loading: userLoading } = useUser();
+  const { activeBranchIds } = useAdmin();
 
   // Toggles State
   const [smsEnabled, setSmsEnabled] = useState(true);
@@ -47,6 +47,24 @@ export default function Settings() {
   const [reauthPassword, setReauthPassword] = useState("");
   const [reauthError, setReauthError] = useState("");
 
+  // Delivery Boy Application State
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [deliveryForm, setDeliveryForm] = useState({
+    firstName: "",
+    lastName: "",
+    mobile: ""
+  });
+
+  // --- CUSTOM INFO MODAL STATE (Replaces Alert.alert) ---
+  const [infoModal, setInfoModal] = useState({
+    visible: false,
+    title: "",
+    message: "",
+    type: "info", // "error", "success", "info"
+    onCloseAction: null
+  });
+
   const [fontsLoaded] = useFonts({
     Sen_Regular: Sen_400Regular,
     Sen_Medium: Sen_500Medium,
@@ -58,8 +76,25 @@ export default function Settings() {
       const prefs = userData.preferences || {};
       setSmsEnabled(prefs.smsEnabled !== undefined ? prefs.smsEnabled : true);
       setWhatsappEnabled(prefs.whatsappEnabled !== undefined ? prefs.whatsappEnabled : true);
+      
+      setDeliveryForm({
+        firstName: userData.firstName || "",
+        lastName: userData.lastName || "",
+        mobile: userData.mobile || ""
+      });
     }
   }, [userData]);
+
+  // --- HELPER TO SHOW CUSTOM ALERTS ---
+  const showGlobalModal = (title, message, type = "info", onCloseAction = null) => {
+    setInfoModal({ visible: true, title, message, type, onCloseAction });
+  };
+
+  const handleCloseGlobalModal = () => {
+    const action = infoModal.onCloseAction;
+    setInfoModal({ ...infoModal, visible: false });
+    if (action) action();
+  };
 
   // --- TOGGLES ---
   const handleSmsToggle = async (value) => {
@@ -86,9 +121,60 @@ export default function Settings() {
     }
   };
 
+  // --- JOIN AS DELIVERY BOY ---
+  const handleDeliveryPress = () => {
+    const user = auth.currentUser;
+    if (!user) {
+      showGlobalModal("Authentication Required", "Please log in to apply as a delivery partner.", "error");
+      return;
+    }
+
+    if (!activeBranchIds || activeBranchIds.length === 0) {
+      showGlobalModal(
+        "Not Available",
+        "We currently do not have an active branch in your area. Please check back later!",
+        "info"
+      );
+      return;
+    }
+
+    setShowDeliveryModal(true);
+  };
+
+  const submitDeliveryApplication = async () => {
+    if (!deliveryForm.firstName.trim() || !deliveryForm.mobile.trim()) {
+      showGlobalModal("Required Fields", "Please provide at least your First Name and Mobile Number.", "error");
+      return;
+    }
+
+    setIsApplying(true);
+    try {
+      const user = auth.currentUser;
+      const applicationId = `APP_${user.uid}_${Date.now()}`;
+      const applicationRef = doc(db, "delivery_applications", applicationId);
+      
+      await setDoc(applicationRef, {
+        userId: user.uid,
+        firstName: deliveryForm.firstName.trim(),
+        lastName: deliveryForm.lastName.trim(),
+        mobile: deliveryForm.mobile.trim(),
+        targetBranches: activeBranchIds,
+        status: "pending",
+        createdAt: serverTimestamp()
+      });
+
+      setShowDeliveryModal(false);
+      showGlobalModal("Success", "Your application has been submitted! Our team will contact you soon.", "success");
+      
+    } catch (error) {
+      console.error("Delivery application error:", error);
+      showGlobalModal("Error", "Failed to submit application. Please try again.", "error");
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
   // --- ENTERPRISE DELETION FLOW ---
-  
-  // 1. Initiate Request
   const initiateDeletion = () => {
     const user = auth.currentUser;
     if (!user) return;
@@ -99,7 +185,6 @@ export default function Settings() {
 
     setShowDeleteModal(false);
 
-    // If session is old, prompt in-app password confirmation
     if (timeSinceLogin > REAUTH_THRESHOLD) {
       setReauthPassword("");
       setReauthError("");
@@ -109,7 +194,6 @@ export default function Settings() {
     }
   };
 
-  // 2. Re-Authenticate (If necessary)
   const handleReauthenticate = async () => {
     const user = auth.currentUser;
     if (!user || !reauthPassword.trim()) {
@@ -123,7 +207,6 @@ export default function Settings() {
       const credential = EmailAuthProvider.credential(user.email, reauthPassword);
       await reauthenticateWithCredential(user, credential);
       
-      // Stop local loader, close modal, and proceed to wipe
       setIsAuthenticating(false);
       setShowReauthModal(false);
       await executeDeletion();
@@ -133,12 +216,10 @@ export default function Settings() {
     }
   };
 
-  // 3. Execute Database Wipe
   const executeDeletion = async () => {
     const user = auth.currentUser;
     if (!user) return;
 
-    // Show full screen blocking loader
     setShowDeleteModal(false);
     setShowReauthModal(false);
     setShowFullScreenLoader(true);
@@ -146,22 +227,23 @@ export default function Settings() {
     try {
       const userId = user.uid;
 
-      // 1. MUST wipe Firestore Data FIRST while the user is still Authenticated (to pass security rules)
       await deleteDoc(doc(db, "carts", userId));
       await deleteDoc(doc(db, "users", userId));
 
-      // 2. Delete Firebase Auth Account LAST
-      await deleteUser(user);
+      await user.delete();
 
-      // 3. Clean up and navigate out
       setShowFullScreenLoader(false);
-      Alert.alert("Account Deleted", "Your personal data has been erased. We're sorry to see you go.");
-      navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+      showGlobalModal(
+        "Account Deleted", 
+        "Your personal data has been erased. We're sorry to see you go.", 
+        "success",
+        () => navigation.reset({ index: 0, routes: [{ name: "NewLogin" }] })
+      );
 
     } catch (error) {
       console.error("Deletion Error", error);
       setShowFullScreenLoader(false);
-      Alert.alert("Error", "Could not complete account deletion. Please try again or contact support.");
+      showGlobalModal("Error", "Could not complete account deletion. Please try again or contact support.", "error");
     }
   };
 
@@ -179,6 +261,8 @@ export default function Settings() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
+        
+        {/* --- NOTIFICATIONS SECTION --- */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionHeaderText}>RECOMMENDATIONS & REMINDERS</Text>
         </View>
@@ -217,6 +301,22 @@ export default function Settings() {
           Order related SMS cannot be disabled as they are critical to provide service.
         </Text>
 
+        {/* --- JOIN US SECTION --- */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionHeaderText}>PARTNER WITH US</Text>
+        </View>
+
+        <View style={styles.whiteContainer}>
+          <TouchableOpacity style={[styles.row, { paddingVertical: 18 }]} onPress={handleDeliveryPress}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <FontAwesome5 name="motorcycle" size={18} color="#009688" style={{ marginRight: 15 }} />
+              <Text style={styles.rowLabel}>Join as Delivery Boy</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#ccc" />
+          </TouchableOpacity>
+        </View>
+
+        {/* --- DANGER ZONE SECTION --- */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionHeaderText}>ACCOUNT DELETION</Text>
         </View>
@@ -228,7 +328,113 @@ export default function Settings() {
         </View>
       </ScrollView>
 
-      {/* --- WARNING MODAL --- */}
+      {/* --- GLOBAL INFO/ALERT MODAL --- */}
+      <Modal
+        visible={infoModal.visible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleCloseGlobalModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[
+              styles.warningIcon, 
+              { backgroundColor: infoModal.type === 'success' ? '#E8F5E9' : infoModal.type === 'error' ? '#FFECEC' : '#E0F7FA' }
+            ]}>
+              <Ionicons 
+                name={infoModal.type === 'success' ? "checkmark-circle" : infoModal.type === 'error' ? "warning" : "information-circle"} 
+                size={40} 
+                color={infoModal.type === 'success' ? "#28A745" : infoModal.type === 'error' ? "#E63946" : "#00BCD4"} 
+              />
+            </View>
+            <Text style={styles.modalTitle}>{infoModal.title}</Text>
+            <Text style={styles.modalText}>{infoModal.message}</Text>
+            <TouchableOpacity 
+              style={[
+                styles.deleteBtn, 
+                { width: '100%', backgroundColor: infoModal.type === 'success' ? '#28A745' : infoModal.type === 'error' ? '#E63946' : '#00BCD4' }
+              ]} 
+              onPress={handleCloseGlobalModal}
+            >
+              {/* 🔥 FIXED: Hardcoded color to #fff so it never inherits a dark color */}
+              <Text style={[styles.modaltexttt, { color: '#fff' }]}>Okay</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* --- DELIVERY BOY APPLICATION MODAL --- */}
+      <Modal
+        visible={showDeliveryModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => !isApplying && setShowDeliveryModal(false)}
+      >
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.warningIcon, { backgroundColor: '#E0F2F1' }]}>
+              <FontAwesome5 name="motorcycle" size={32} color="#009688" />
+            </View>
+            <Text style={styles.modalTitle}>Join the Team</Text>
+            <Text style={styles.modalText}>
+              Please confirm your details below to apply as a delivery partner in your area.
+            </Text>
+
+            <View style={styles.inputWrapper}>
+               <TextInput
+                 style={styles.modalInput}
+                 placeholder="First Name"
+                 placeholderTextColor="#aaa"
+                 value={deliveryForm.firstName}
+                 onChangeText={(text) => setDeliveryForm({...deliveryForm, firstName: text})}
+                 editable={!isApplying}
+               />
+            </View>
+
+            <View style={styles.inputWrapper}>
+               <TextInput
+                 style={styles.modalInput}
+                 placeholder="Last Name"
+                 placeholderTextColor="#aaa"
+                 value={deliveryForm.lastName}
+                 onChangeText={(text) => setDeliveryForm({...deliveryForm, lastName: text})}
+                 editable={!isApplying}
+               />
+            </View>
+
+            <View style={styles.inputWrapper}>
+               <TextInput
+                 style={styles.modalInput}
+                 placeholder="Mobile Number"
+                 placeholderTextColor="#aaa"
+                 keyboardType="phone-pad"
+                 value={deliveryForm.mobile}
+                 onChangeText={(text) => setDeliveryForm({...deliveryForm, mobile: text})}
+                 editable={!isApplying}
+               />
+            </View>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={styles.cancelBtn} 
+                onPress={() => setShowDeliveryModal(false)}
+                disabled={isApplying}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.deleteBtn, { backgroundColor: '#009688' }]} 
+                onPress={submitDeliveryApplication}
+                disabled={isApplying}
+              >
+                {isApplying ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.deleteBtnText, { color: '#fff' }]}>Submit</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* --- WARNING MODAL (Account Deletion) --- */}
       <Modal
         visible={showDeleteModal}
         transparent={true}
@@ -250,7 +456,7 @@ export default function Settings() {
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.deleteBtn} onPress={initiateDeletion}>
-                <Text style={styles.deleteBtnText}>Proceed</Text>
+                <Text style={[styles.deleteBtnText, { color: '#fff' }]}>Proceed</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -275,7 +481,7 @@ export default function Settings() {
             </Text>
 
             <TextInput
-              style={styles.passwordInput}
+              style={[styles.passwordInput, { marginBottom: 10 }]}
               placeholder="Enter your password"
               placeholderTextColor="#aaa"
               secureTextEntry
@@ -301,7 +507,7 @@ export default function Settings() {
                 onPress={handleReauthenticate}
                 disabled={isAuthenticating}
               >
-                {isAuthenticating ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.deleteBtnText}>Confirm</Text>}
+                {isAuthenticating ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.deleteBtnText, { color: '#fff' }]}>Confirm</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -313,7 +519,6 @@ export default function Settings() {
         visible={showFullScreenLoader}
         transparent={true}
         animationType="fade"
-        // Prevent closing by tapping back button on Android
         onRequestClose={() => {}} 
       >
         <View style={styles.fullScreenLoaderOverlay}>
@@ -351,15 +556,21 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#fff', borderRadius: 24, padding: 25, width: '100%', alignItems: 'center', elevation: 10 },
   warningIcon: { backgroundColor: '#FFECEC', padding: 15, borderRadius: 50, marginBottom: 15 },
-  modalTitle: { fontSize: 20, fontFamily: "Sen_Bold", color: '#1A1A1A', marginBottom: 10 },
+  modalTitle: { fontSize: 20, fontFamily: "Sen_Bold", color: '#1A1A1A', marginBottom: 10, textAlign: 'center' },
   modalText: { fontSize: 14, fontFamily: "Sen_Regular", color: '#666', textAlign: 'center', lineHeight: 20, marginBottom: 20 },
-  passwordInput: { width: '100%', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 14, fontSize: 15, fontFamily: "Sen_Regular", marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
+  
+  // Form Inputs
+  inputWrapper: { width: '100%', marginBottom: 12 },
+  modalInput: { width: '100%', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 14, fontSize: 15, fontFamily: "Sen_Regular", borderWidth: 1, borderColor: '#E5E7EB', color: '#111' },
+  passwordInput: { width: '100%', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 14, fontSize: 15, fontFamily: "Sen_Regular", borderWidth: 1, borderColor: '#E5E7EB', color: '#111' },
+  
   errorText: { color: '#E63946', fontSize: 12, fontFamily: "Sen_Medium", marginBottom: 15, width: '100%', textAlign: 'left', paddingLeft: 4 },
   modalButtons: { flexDirection: 'row', width: '100%', gap: 12, marginTop: 10 },
   cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#F3F4F6', alignItems: 'center' },
   cancelBtnText: { color: '#666', fontSize: 16, fontFamily: "Sen_Medium" },
   deleteBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#E63946', alignItems: 'center', justifyContent: 'center' },
-  deleteBtnText: { color: '#fff', fontSize: 16, fontFamily: "Sen_Bold" },
+  deleteBtnText: { fontFamily: "Sen_Bold", fontSize: 16, color: '#fff' }, 
+  modaltexttt: { fontFamily: "Sen_Bold", fontSize: 16, color: '#fff' },
 
   // FULL SCREEN LOADER STYLES
   fullScreenLoaderOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },

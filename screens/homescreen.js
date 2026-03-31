@@ -18,8 +18,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
-import { getAuth } from "firebase/auth";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+
+// 🔥 FIXED: NATIVE FIREBASE IMPORT 🔥
+import { auth } from "../firebase";
 
 // IMPORT ZUSTAND STORE & CONTEXTS
 import { useShopStore } from "../store/shopStore";
@@ -151,7 +153,8 @@ export default function HomeScreen({ navigation }) {
 
   // --- TRIGGERS ---
   const handleLocationPress = () => {
-    const authUser = getAuth().currentUser;
+    // 🔥 FIXED: Native Auth Current User
+    const authUser = auth.currentUser;
     if (authUser) {
       addressesSheetRef.current?.expand();
     } else {
@@ -160,7 +163,8 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleProfilePress = () => {
-    const authUser = getAuth().currentUser;
+    // 🔥 FIXED: Native Auth Current User
+    const authUser = auth.currentUser;
     if (authUser) {
       navigation.navigate("Profile");
     } else {
@@ -170,7 +174,8 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleTrackOrderPress = () => {
-    const authUser = getAuth().currentUser;
+    // 🔥 FIXED: Native Auth Current User
+    const authUser = auth.currentUser;
     if (authUser) {
       navigation.navigate("TrackOrder");
     } else {

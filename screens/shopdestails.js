@@ -16,11 +16,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { getAuth } from "firebase/auth";
 import Toast from "react-native-root-toast";
 import { useFonts } from "expo-font";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../firebase";
+
+// 🔥 FIXED: NATIVE MODULAR IMPORTS 🔥
+import { auth, db } from "../firebase";
+import { doc, getDoc } from "@react-native-firebase/firestore";
 
 // --- IMPORT NEW ZUSTAND STORES ---
 import { useCartStore } from "../store/cartstore";
@@ -86,7 +87,6 @@ export default function ShopDetails({ route, navigation }) {
   const [activeCategory, setActiveCategory] = useState(null);
   const [refreshing, setRefreshing] = useState(false); 
   
-  // 🔥 NEW: Force loading state when resetting cart and fetching
   const [isForceReloading, setIsForceReloading] = useState(false);
 
   // Modals state
@@ -117,7 +117,6 @@ export default function ShopDetails({ route, navigation }) {
   const addToCart = useCartStore((state) => state.addToCart);
   const decreaseQty = useCartStore((state) => state.decreaseQty);
   
-  // 🔥 NEW: Pull clearShopCart from store
   const clearShopCart = useCartStore((state) => state.clearShopCart); 
 
   const [fontsLoaded] = useFonts({ ...Ionicons.font, ...MaterialIcons.font });
@@ -166,7 +165,7 @@ export default function ShopDetails({ route, navigation }) {
   const themeColor = getCategoryTheme(activeCategory);
 
   const handleAddToCart = (item) => {
-    if (!getAuth().currentUser) return setLoginModalVisible(true);
+    if (!auth.currentUser) return setLoginModalVisible(true);
 
     const result = addToCart(shop, item);
     if (result && result.conflict) {
@@ -194,7 +193,6 @@ export default function ShopDetails({ route, navigation }) {
     }
     setRefreshing(false);
 
-    // 🔥 Check if the newly downloaded menu invalidates the user's cart
     if (cartShopId === shopId && cartItems.length > 0) {
        let invalid = false;
        const freshMenu = useProductStore.getState().menus[shopId];
@@ -241,7 +239,7 @@ export default function ShopDetails({ route, navigation }) {
       const shopRef = doc(db, "shops", cartShopId);
       const shopSnap = await getDoc(shopRef);
 
-      if (!shopSnap.exists() || shopSnap.data().isActive === false || shopSnap.data().maintenanceMode === true) {
+      if (!shopSnap.exists || shopSnap.data().isActive === false || shopSnap.data().maintenanceMode === true) {
         setIsVerifying(false);
         setCheckoutAlert({
           visible: true,
@@ -270,7 +268,7 @@ export default function ShopDetails({ route, navigation }) {
 
       itemSnaps.forEach((snap, index) => {
         const cartItem = cartItems[index];
-        if (snap.exists()) {
+        if (snap.exists) {
           const liveProductData = snap.data();
 
           if (liveProductData.inStock === false) {
@@ -280,12 +278,10 @@ export default function ShopDetails({ route, navigation }) {
             priceChanged = true;
           }
         } else {
-          // Product document no longer exists
           outOfStockItems.push(cartItem.productname);
         }
       });
 
-      // 🔥 3. Handle Conflicts: Wipe Cart, Load Skeleton, Re-Fetch!
       if (outOfStockItems.length > 0 || priceChanged) {
         setIsVerifying(false);
         
@@ -306,16 +302,15 @@ export default function ShopDetails({ route, navigation }) {
           btnText: "Update Menu",
           onAction: async () => {
             setCheckoutAlert(prev => ({ ...prev, visible: false }));
-            setIsForceReloading(true); // 1. Trigger Skeleton Loader
-            clearShopCart(cartShopId); // 2. Empty the cart immediately
-            await fetchProducts(cartShopId); // 3. Download the newest items
-            setIsForceReloading(false); // 4. Remove Skeleton Loader
+            setIsForceReloading(true); 
+            clearShopCart(cartShopId); 
+            await fetchProducts(cartShopId); 
+            setIsForceReloading(false); 
           }
         });
         return;
       }
 
-      // 4. All checks passed! Proceed to Unified Checkout
       const hasRide = cartItems.some(i => i.serviceType === "ride");
       const hasDelivery = cartItems.some(i => i.serviceType === "delivery");
       const shopToPass = { id: cartShopId, ...liveShopData };
@@ -344,7 +339,6 @@ export default function ShopDetails({ route, navigation }) {
     }
   };
 
-  // 🔥 Notice the new isForceReloading flag triggers the skeleton instantly
   if ((loading && productsArray.length === 0) || !fontsLoaded || isForceReloading) {
     return <ShopDetailsSkeleton />;
   }

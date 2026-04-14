@@ -4,11 +4,12 @@ import MapView from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import * as Device from 'expo-device'; // Updated for better device checking
+import * as Device from 'expo-device'; 
 
 // 🔥 FIXED: NATIVE FIREBASE IMPORTS 🔥
 import { auth, db } from '../firebase';
-import firestore from '@react-native-firebase/firestore'; 
+// Imported the modular functions instead of the default namespace
+import { collection, doc, getDoc, updateDoc, GeoPoint } from '@react-native-firebase/firestore'; 
 
 import { MaterialIcons, Ionicons } from '@expo/vector-icons'; 
 
@@ -255,7 +256,8 @@ export default function MapScreen({ navigation, route }) {
     }
   };
 
-  // --- 2. HANDLE CONFIRM LOCATION (NATIVE FIRESTORE) ---
+
+// --- 2. HANDLE CONFIRM LOCATION (NATIVE FIRESTORE) ---
   const handleConfirmLocation = async () => {
     if (!selectedPlace) return showAlert('Error', 'Please pick a location first.');
     if (!name || name.trim().length < 2) return showAlert('Validation', 'Please enter a name for this address.', 'validation');
@@ -304,17 +306,14 @@ export default function MapScreen({ navigation, route }) {
       setSaving(true);
       const uid = auth.currentUser.uid;
       
-      // 🔥 FIXED: Using Native Firestore Chaining 🔥
-      const userRef = db.collection("users").doc(uid);
-      const userSnap = await userRef.get();
+      const userRef = doc(db, 'users', uid);
+      const userSnap = await getDoc(userRef);
       const existingData = userSnap.data() || {};
       
-      // Generate unique key if not editing
-      let keyToSet = editingId || db.collection('dummy').doc().id;
+      let keyToSet = editingId || doc(collection(db, 'dummy')).id;
 
-      // 🔥 FIXED: Native GeoPoint usage 🔥
       const addressObj = {
-        location: new firestore.GeoPoint(selectedPlace.lat, selectedPlace.lng),
+        location: new GeoPoint(selectedPlace.lat, selectedPlace.lng),
         area: selectedPlace.area || '',
         city: selectedPlace.city || '',
         state: selectedPlace.state || '',
@@ -327,7 +326,6 @@ export default function MapScreen({ navigation, route }) {
 
       const userUpdates = {};
       
-      // Update specific map node dynamically
       userUpdates[`addresses.${keyToSet}`] = addressObj;
 
       if (!existingData.expoPushToken && expoPushToken) {
@@ -341,13 +339,25 @@ export default function MapScreen({ navigation, route }) {
       if (shouldSetAsMain && keyToSet) {
         userUpdates['mainAddressId'] = keyToSet;
 
-        // 🔥 KILLING THE BILLING TRAP: Free Local Distance Calc 🔥
+        // 🔥 GATHER ALL MATCHING BRANCHES INTO AN ARRAY 🔥
         if (selectedPlace.lat && selectedPlace.lng && allBranches && allBranches.length > 0) {
+          let matchedBranchIds = [];
           let minDist = Infinity;
           let nearestContact = null;
 
           allBranches.forEach(branch => {
-            if (branch.lat && branch.lng && branch.contactNumber) {
+            let isMatched = false;
+
+            // 1. Check Pincode Match
+            if (selectedPlace.pincode && branch.serviceable_pincodes) {
+              const pins = branch.serviceable_pincodes.map(p => String(p).trim());
+              if (pins.includes(String(selectedPlace.pincode).trim())) {
+                isMatched = true;
+              }
+            }
+
+            // 2. Check Radius Match & Track Nearest Support Contact
+            if (branch.lat && branch.lng) {
               const dist = haversineDistance(
                 parseFloat(selectedPlace.lat), 
                 parseFloat(selectedPlace.lng), 
@@ -355,22 +365,34 @@ export default function MapScreen({ navigation, route }) {
                 parseFloat(branch.lng)
               );
 
+              const branchRadius = branch.radius || 15;
+              if (dist <= branchRadius) {
+                isMatched = true;
+              }
+
               if (dist < minDist) {
                 minDist = dist;
-                nearestContact = branch.contactNumber;
+                nearestContact = branch.contactNumber || null;
               }
+            }
+
+            // If matched either by pincode or radius, add to the array
+            if (isMatched && branch.id) {
+              matchedBranchIds.push(branch.id);
             }
           });
 
           if (nearestContact) {
             userUpdates['supportcontact'] = nearestContact;
           }
+          
+          // Use Set to remove any duplicate branch IDs
+          userUpdates['belongsTo'] = [...new Set(matchedBranchIds)]; 
         }
       }
 
       if (Object.keys(userUpdates).length > 0) {
-        // 🔥 FIXED: Using Native update method 🔥
-        await userRef.update(userUpdates);
+        await updateDoc(userRef, userUpdates);
       }
 
       navigation.navigate('HomeScreen', { refresh: true });

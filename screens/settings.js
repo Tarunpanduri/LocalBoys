@@ -18,7 +18,11 @@ import { useNavigation } from "@react-navigation/native";
 
 // 🔥 NATIVE FIREBASE AUTH & FIRESTORE IMPORTS 🔥
 import { auth, db } from "../firebase";
-import { EmailAuthProvider, reauthenticateWithCredential } from "@react-native-firebase/auth";
+import { 
+  PhoneAuthProvider, 
+  reauthenticateWithCredential, 
+  signInWithPhoneNumber 
+} from "@react-native-firebase/auth";
 import { doc, updateDoc, deleteDoc, setDoc, serverTimestamp } from "@react-native-firebase/firestore";
 
 import { useFonts } from "expo-font";
@@ -44,7 +48,8 @@ export default function Settings() {
   const [showFullScreenLoader, setShowFullScreenLoader] = useState(false);
   
   const [isAuthenticating, setIsAuthenticating] = useState(false);
-  const [reauthPassword, setReauthPassword] = useState("");
+  const [confirmResult, setConfirmResult] = useState(null);
+  const [otpCode, setOtpCode] = useState("");
   const [reauthError, setReauthError] = useState("");
 
   // Delivery Boy Application State
@@ -174,8 +179,8 @@ export default function Settings() {
     }
   };
 
-  // --- ENTERPRISE DELETION FLOW ---
-  const initiateDeletion = () => {
+  // --- ENTERPRISE DELETION FLOW (UPDATED FOR OTP RE-AUTH) ---
+  const initiateDeletion = async () => {
     const user = auth.currentUser;
     if (!user) return;
 
@@ -186,9 +191,27 @@ export default function Settings() {
     setShowDeleteModal(false);
 
     if (timeSinceLogin > REAUTH_THRESHOLD) {
-      setReauthPassword("");
-      setReauthError("");
-      setShowReauthModal(true);
+      if (!user.phoneNumber) {
+        showGlobalModal("Error", "No registered mobile number found to verify account deletion.", "error");
+        return;
+      }
+      
+      setShowFullScreenLoader(true); // Show loader while sending OTP
+      
+      try {
+        // Send OTP to the user's existing phone number
+        const confirmation = await signInWithPhoneNumber(auth, user.phoneNumber);
+        setConfirmResult(confirmation);
+        setOtpCode("");
+        setReauthError("");
+        
+        setShowFullScreenLoader(false);
+        setShowReauthModal(true); // Show OTP entry modal
+      } catch (error) {
+        console.error("OTP Send Error for Deletion:", error);
+        setShowFullScreenLoader(false);
+        showGlobalModal("Error", "Failed to send verification code. Please try again later.", "error");
+      }
     } else {
       executeDeletion();
     }
@@ -196,23 +219,30 @@ export default function Settings() {
 
   const handleReauthenticate = async () => {
     const user = auth.currentUser;
-    if (!user || !reauthPassword.trim()) {
-      setReauthError("Password is required.");
+    if (!user || !otpCode.trim() || !confirmResult) {
+      setReauthError("Please enter the 6-digit OTP.");
       return;
     }
 
     setIsAuthenticating(true);
     setReauthError("");
+    
     try {
-      const credential = EmailAuthProvider.credential(user.email, reauthPassword);
+      // Create credential using the verification ID and the OTP the user entered
+      const credential = PhoneAuthProvider.credential(confirmResult.verificationId, otpCode);
+      
+      // Re-authenticate
       await reauthenticateWithCredential(user, credential);
       
       setIsAuthenticating(false);
       setShowReauthModal(false);
+      
+      // Proceed to actual deletion
       await executeDeletion();
     } catch (error) {
+      console.log("Re-auth Error:", error);
       setIsAuthenticating(false);
-      setReauthError("Incorrect password. Please try again.");
+      setReauthError("Incorrect OTP or code expired. Please try again.");
     }
   };
 
@@ -227,9 +257,11 @@ export default function Settings() {
     try {
       const userId = user.uid;
 
+      // Delete personal data
       await deleteDoc(doc(db, "carts", userId));
       await deleteDoc(doc(db, "users", userId));
 
+      // Delete Firebase Auth User
       await user.delete();
 
       setShowFullScreenLoader(false);
@@ -237,7 +269,7 @@ export default function Settings() {
         "Account Deleted", 
         "Your personal data has been erased. We're sorry to see you go.", 
         "success",
-        () => navigation.reset({ index: 0, routes: [{ name: "NewLogin" }] })
+        () => navigation.reset({ index: 0, routes: [{ name: "NewLogin" }] }) // Redirect to Login
       );
 
     } catch (error) {
@@ -356,7 +388,6 @@ export default function Settings() {
               ]} 
               onPress={handleCloseGlobalModal}
             >
-              {/* 🔥 FIXED: Hardcoded color to #fff so it never inherits a dark color */}
               <Text style={[styles.modaltexttt, { color: '#fff' }]}>Okay</Text>
             </TouchableOpacity>
           </View>
@@ -463,7 +494,7 @@ export default function Settings() {
         </View>
       </Modal>
 
-      {/* --- IN-APP RE-AUTHENTICATION MODAL --- */}
+      {/* --- IN-APP RE-AUTHENTICATION (OTP) MODAL --- */}
       <Modal
         visible={showReauthModal}
         transparent={true}
@@ -473,21 +504,22 @@ export default function Settings() {
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={[styles.warningIcon, { backgroundColor: '#FFF3E0' }]}>
-              <Ionicons name="lock-closed" size={32} color="#FF9800" />
+              <Ionicons name="phone-portrait-outline" size={32} color="#FF9800" />
             </View>
             <Text style={styles.modalTitle}>Security Verification</Text>
             <Text style={styles.modalText}>
-              For your security, please enter your password to confirm account deletion.
+              For your security, please enter the OTP sent to your registered mobile number to confirm deletion.
             </Text>
 
             <TextInput
-              style={[styles.passwordInput, { marginBottom: 10 }]}
-              placeholder="Enter your password"
-              placeholderTextColor="#aaa"
-              secureTextEntry
-              value={reauthPassword}
+              style={[styles.otpInput, { marginBottom: 10 }]}
+              placeholder="• • • • • •"
+              placeholderTextColor="#ccc"
+              keyboardType="number-pad"
+              maxLength={6}
+              value={otpCode}
               onChangeText={(text) => {
-                setReauthPassword(text);
+                setOtpCode(text);
                 setReauthError("");
               }}
               editable={!isAuthenticating}
@@ -524,7 +556,7 @@ export default function Settings() {
         <View style={styles.fullScreenLoaderOverlay}>
           <View style={styles.fullScreenLoaderContent}>
             <ActivityIndicator size="large" color="#E63946" />
-            <Text style={styles.fullScreenLoaderText}>Deleting account...</Text>
+            <Text style={styles.fullScreenLoaderText}>Processing...</Text>
             <Text style={styles.fullScreenLoaderSubText}>Please do not close the app</Text>
           </View>
         </View>
@@ -562,7 +594,9 @@ const styles = StyleSheet.create({
   // Form Inputs
   inputWrapper: { width: '100%', marginBottom: 12 },
   modalInput: { width: '100%', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 14, fontSize: 15, fontFamily: "Sen_Regular", borderWidth: 1, borderColor: '#E5E7EB', color: '#111' },
-  passwordInput: { width: '100%', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 14, fontSize: 15, fontFamily: "Sen_Regular", borderWidth: 1, borderColor: '#E5E7EB', color: '#111' },
+  
+  // New OTP Input Styles
+  otpInput: { width: '100%', backgroundColor: '#F3F4F6', borderRadius: 12, padding: 16, fontSize: 20, fontFamily: "Sen_Bold", borderWidth: 1, borderColor: '#E5E7EB', color: '#111', textAlign: "center", letterSpacing: 8 },
   
   errorText: { color: '#E63946', fontSize: 12, fontFamily: "Sen_Medium", marginBottom: 15, width: '100%', textAlign: 'left', paddingLeft: 4 },
   modalButtons: { flexDirection: 'row', width: '100%', gap: 12, marginTop: 10 },

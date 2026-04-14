@@ -94,7 +94,7 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
     }
   };
 
-  const confirmDelete = async () => {
+const confirmDelete = async () => {
     setDeleteModalVisible(false);
     if (!addressToDelete) return;
 
@@ -103,34 +103,57 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
       if (!uid) return;
 
       const updates = {};
-      // ✅ MODULAR: deleteField() 
       updates[`addresses.${addressToDelete}`] = deleteField();
 
       if (userData?.mainAddressId === addressToDelete) {
         const nextAddressEntry = entries.find(e => e[0] !== addressToDelete);
+        
         if (nextAddressEntry) {
           const nextId = nextAddressEntry[0];
           const nextAddress = nextAddressEntry[1];
           updates['mainAddressId'] = nextId;
 
+          // 🔥 RECALCULATE BELONGS TO ARRAY 🔥
           if (nextAddress.lat && nextAddress.lng && allBranches?.length) {
+            let matchedBranchIds = [];
             let minDist = Infinity;
             let nearestContact = null;
+
             allBranches.forEach(branch => {
-              if (branch.lat && branch.lng && branch.contactNumber) {
+              let isMatched = false;
+
+              if (nextAddress.pincode && branch.serviceable_pincodes) {
+                const pins = branch.serviceable_pincodes.map(p => String(p).trim());
+                if (pins.includes(String(nextAddress.pincode).trim())) isMatched = true;
+              }
+
+              if (branch.lat && branch.lng) {
                 const dist = haversineDistance(
                   parseFloat(nextAddress.lat), parseFloat(nextAddress.lng),
                   parseFloat(branch.lat), parseFloat(branch.lng)
                 );
-                if (dist < minDist) { minDist = dist; nearestContact = branch.contactNumber; }
+                
+                if (dist <= (branch.radius || 15)) isMatched = true;
+                
+                if (dist < minDist) { 
+                  minDist = dist; 
+                  nearestContact = branch.contactNumber || null; 
+                }
               }
+              
+              if (isMatched && branch.id) matchedBranchIds.push(branch.id);
             });
+
             if (nearestContact) updates['supportcontact'] = nearestContact;
+            updates['belongsTo'] = [...new Set(matchedBranchIds)];
           }
+        } else {
+          // If last address deleted, clear the arrays
+          updates['belongsTo'] = deleteField();
+          updates['supportcontact'] = deleteField();
         }
       }
 
-      // ✅ MODULAR: updateDoc(doc(...), ...)
       await updateDoc(doc(db, "users", uid), updates);
     } catch (e) {
       console.error('Delete address error:', e);
@@ -143,7 +166,6 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
     try {
       bottomSheetRef.current?.close();
       
-      // Auto-switch back to Products tab on address change
       if (setActiveTab) {
         setActiveTab("products");
       }
@@ -156,22 +178,41 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
 
       const updates = { mainAddressId: id };
       
+      // 🔥 RECALCULATE BELONGS TO ARRAY 🔥
       if (selectedAddress.lat && selectedAddress.lng && allBranches?.length) {
+        let matchedBranchIds = [];
         let minDist = Infinity;
         let nearestContact = null;
+
         allBranches.forEach(branch => {
-          if (branch.lat && branch.lng && branch.contactNumber) {
+          let isMatched = false;
+
+          if (selectedAddress.pincode && branch.serviceable_pincodes) {
+            const pins = branch.serviceable_pincodes.map(p => String(p).trim());
+            if (pins.includes(String(selectedAddress.pincode).trim())) isMatched = true;
+          }
+
+          if (branch.lat && branch.lng) {
             const dist = haversineDistance(
               parseFloat(selectedAddress.lat), parseFloat(selectedAddress.lng),
               parseFloat(branch.lat), parseFloat(branch.lng)
             );
-            if (dist < minDist) { minDist = dist; nearestContact = branch.contactNumber; }
+            
+            if (dist <= (branch.radius || 15)) isMatched = true;
+            
+            if (dist < minDist) { 
+              minDist = dist; 
+              nearestContact = branch.contactNumber || null; 
+            }
           }
+          
+          if (isMatched && branch.id) matchedBranchIds.push(branch.id);
         });
+
         if (nearestContact) updates['supportcontact'] = nearestContact;
+        updates['belongsTo'] = [...new Set(matchedBranchIds)];
       }
 
-      // ✅ MODULAR: updateDoc(doc(...), ...)
       await updateDoc(doc(db, "users", uid), updates);
     } catch (e) {
       console.error('Set main address error:', e);

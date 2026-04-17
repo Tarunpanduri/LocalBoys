@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useMemo } from "react";
+import React, { useEffect, useRef, useMemo, useState } from "react";
 import { 
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Animated, Dimensions 
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Animated, Dimensions, Modal 
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -111,9 +111,21 @@ export default function TrackOrder({ navigation }) {
   const { activeOrders, selectedOrderId, loadingOrders, startListening, selectOrder, stopListening } = useOrderStore(); 
   const [fontsLoaded] = useFonts({ ...Ionicons.font, ...MaterialIcons.font });
 
+  // 🔥 Image Viewer Modal State 🔥
+  const [imageModalVisible, setImageModalVisible] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
   const selectedOrder = useMemo(() => {
     return activeOrders.find(o => o.id === selectedOrderId) || activeOrders[0];
   }, [activeOrders, selectedOrderId]);
+
+  // Derived array of images to handle both old single string and new array format
+  const orderImages = useMemo(() => {
+    if (!selectedOrder?.isCustom) return [];
+    if (selectedOrder.imageUrls && selectedOrder.imageUrls.length > 0) return selectedOrder.imageUrls;
+    if (selectedOrder.imageUrl) return [selectedOrder.imageUrl];
+    return [];
+  }, [selectedOrder]);
 
   useEffect(() => {
     startListening(); 
@@ -159,7 +171,6 @@ export default function TrackOrder({ navigation }) {
           <Text style={[styles.cardStatus, { color: getStatusColor(order.status) }]}>
             {order.status.replace(/_/g, " ").toUpperCase()}
           </Text>
-          {/* 🔥 NEW: SCHEDULED INDICATOR 🔥 */}
           {order.isScheduled && (
             <View style={styles.scheduleBadgeSmall}>
               <Ionicons name="time" size={10} color="#ff7a00" />
@@ -196,7 +207,6 @@ export default function TrackOrder({ navigation }) {
           <Text style={styles.shopTitle}>{selectedOrder?.isCustom ? "Custom Request" : selectedOrder?.shopname}</Text>
           <Text style={styles.orderTime}>Ordered At {formattedTime}</Text>
 
-          {/* 🔥 NEW: SCHEDULED ORDER BANNER 🔥 */}
           {selectedOrder?.isScheduled && selectedOrder?.scheduledAt && (
              <View style={styles.scheduleBanner}>
                 <Ionicons name="calendar" size={20} color="#ff7a00" style={{marginRight: 8}}/>
@@ -209,9 +219,24 @@ export default function TrackOrder({ navigation }) {
           
           <View style={styles.itemList}>
             {selectedOrder?.isCustom ? (
-              <Text style={[styles.itemText, { color: '#444', fontStyle: 'italic' }]}>
-                "{selectedOrder.note}"
-              </Text>
+              <View>
+                <Text style={[styles.itemText, { color: '#444', fontStyle: 'italic' }]}>
+                  "{selectedOrder.note}"
+                </Text>
+                
+                {/* 🔥 NEW: View Attachments Button 🔥 */}
+                {orderImages.length > 0 && (
+                  <TouchableOpacity 
+                    style={styles.attachmentBtn} 
+                    onPress={() => { setCurrentImageIndex(0); setImageModalVisible(true); }}
+                  >
+                    <Ionicons name="image-outline" size={16} color="#007BFF" />
+                    <Text style={styles.attachmentBtnText}>
+                      View Attachment{orderImages.length > 1 ? `s (${orderImages.length})` : ''}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             ) : (
               Object.values(selectedOrder?.items || {}).map((itm, idx) => (
                 <Text key={idx} style={styles.itemText}>{itm.qty}x <Text style={styles.itemBold}>{itm.productname}</Text></Text>
@@ -237,6 +262,47 @@ export default function TrackOrder({ navigation }) {
           </View>
         </View>
       </ScrollView>
+
+      {/* 🔥 NEW: IMAGE VIEWER MODAL 🔥 */}
+      <Modal visible={imageModalVisible} transparent={true} animationType="fade" onRequestClose={() => setImageModalVisible(false)}>
+        <View style={styles.imageModalOverlay}>
+          <TouchableOpacity style={styles.imageModalCloseBtn} onPress={() => setImageModalVisible(false)}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+          
+          <View style={styles.imageViewerContainer}>
+            {orderImages.length > 0 && (
+              <Image 
+                source={{ uri: orderImages[currentImageIndex] }} 
+                style={styles.fullScreenImage} 
+                resizeMode="contain" 
+              />
+            )}
+          </View>
+
+          {/* Multi-image navigation controls */}
+          {orderImages.length > 1 && (
+            <View style={styles.imageControls}>
+              <TouchableOpacity 
+                style={[styles.navBtn, currentImageIndex === 0 && { opacity: 0.5 }]} 
+                onPress={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
+                disabled={currentImageIndex === 0}
+              >
+                <Ionicons name="chevron-back" size={24} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.imageCountText}>{currentImageIndex + 1} / {orderImages.length}</Text>
+              <TouchableOpacity 
+                style={[styles.navBtn, currentImageIndex === orderImages.length - 1 && { opacity: 0.5 }]} 
+                onPress={() => setCurrentImageIndex(prev => Math.min(orderImages.length - 1, prev + 1))}
+                disabled={currentImageIndex === orderImages.length - 1}
+              >
+                <Ionicons name="chevron-forward" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -274,6 +340,11 @@ const styles = StyleSheet.create({
   itemList: { marginTop: 12, backgroundColor: '#F3F6FA', padding: 12, borderRadius: 8 },
   itemText: { fontFamily: "Sen_Regular", fontSize: 15, color: "#444", marginTop: 2 },
   itemBold: { fontFamily: "Sen_Bold" },
+  
+  // Custom Order Attachment Styles
+  attachmentBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#E3F2FD', borderRadius: 6, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#BBDEFB' },
+  attachmentBtnText: { color: '#007BFF', fontFamily: 'Sen_Bold', fontSize: 12, marginLeft: 6 },
+
   summaryContainer: { alignItems: "center", marginVertical: 16 },
   summaryLabel: { fontFamily: "Sen_Medium", fontSize: 12, color: "#888", marginTop: 10 },
   summaryValue: { fontFamily: "Sen_Bold", fontSize: 22, color: "#111" },
@@ -284,4 +355,13 @@ const styles = StyleSheet.create({
   stepLabel: { flex: 1, fontFamily: "Sen_Regular", fontSize: 14, lineHeight: 20 },
   stepLineContainer: { width: 2, height: 32, marginTop: 2, backgroundColor: "#ccc", overflow: "hidden" },
   activeStepLine: { width: "100%", backgroundColor: "#4CAF50" },
+
+  // Image Modal Styles
+  imageModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center' },
+  imageModalCloseBtn: { position: 'absolute', top: 40, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 },
+  imageViewerContainer: { width: width, height: height * 0.7, justifyContent: 'center', alignItems: 'center' },
+  fullScreenImage: { width: '100%', height: '100%' },
+  imageControls: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', position: 'absolute', bottom: 40, width: '100%', gap: 20 },
+  navBtn: { padding: 12, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 30 },
+  imageCountText: { color: '#fff', fontFamily: 'Sen_Bold', fontSize: 16 },
 });

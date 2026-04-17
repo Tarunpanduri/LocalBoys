@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { 
   View, Text, StyleSheet, TouchableOpacity, FlatList, Image, ActivityIndicator,
-  Animated, StatusBar, Modal, ScrollView
+  Animated, StatusBar, Modal, ScrollView, Dimensions
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -9,6 +9,8 @@ import { useFonts } from "expo-font";
 import { LinearGradient } from "expo-linear-gradient";
 
 import { useOrderStore } from "../store/orderStore";
+
+const { width, height } = Dimensions.get("window");
 
 const SkeletonItem = ({ width, height, style, borderRadius = 8 }) => {
   const translateX = useRef(new Animated.Value(-width)).current;
@@ -52,6 +54,18 @@ export default function PreviousOrders({ navigation }) {
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [fontsLoaded] = useFonts({ ...Ionicons.font, ...MaterialIcons.font });
 
+  // 🔥 Image Viewer Modal State 🔥
+  const [imageModalVisible, setImageModalVisible] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  // Derived array of images to handle both old single string and new array format
+  const orderImages = useMemo(() => {
+    if (!selectedOrder?.isCustom) return [];
+    if (selectedOrder.imageUrls && selectedOrder.imageUrls.length > 0) return selectedOrder.imageUrls;
+    if (selectedOrder.imageUrl) return [selectedOrder.imageUrl];
+    return [];
+  }, [selectedOrder]);
+
   useEffect(() => { refreshPastOrders(); }, []);
 
   const getStatusColor = (status) => {
@@ -61,7 +75,10 @@ export default function PreviousOrders({ navigation }) {
     return { bg: "#F5F5F5", text: "#616161" }; 
   };
 
-  const openOrderDetails = (order) => { setSelectedOrder(order); setDetailsModalVisible(true); };
+  const openOrderDetails = (order) => { 
+    setSelectedOrder(order); 
+    setDetailsModalVisible(true); 
+  };
 
   const renderOrderCard = ({ item: order }) => {
     const statusColors = getStatusColor(order.status);
@@ -169,8 +186,23 @@ export default function PreviousOrders({ navigation }) {
               <Text style={styles.sectionHeading}>Order Description</Text>
               
               {selectedOrder.isCustom ? (
-                <View style={{ backgroundColor: '#F3F6FA', padding: 15, borderRadius: 10 }}>
-                   <Text style={[styles.receiptItemName, { fontStyle: 'italic', color: '#555' }]}>"{selectedOrder.note}"</Text>
+                <View>
+                  <View style={{ backgroundColor: '#F3F6FA', padding: 15, borderRadius: 10 }}>
+                     <Text style={[styles.receiptItemName, { fontStyle: 'italic', color: '#555' }]}>"{selectedOrder.note}"</Text>
+                  </View>
+
+                  {/* 🔥 NEW: View Attachments Button 🔥 */}
+                  {orderImages.length > 0 && (
+                    <TouchableOpacity 
+                      style={styles.attachmentBtn} 
+                      onPress={() => { setCurrentImageIndex(0); setImageModalVisible(true); }}
+                    >
+                      <Ionicons name="image-outline" size={16} color="#007BFF" />
+                      <Text style={styles.attachmentBtnText}>
+                        View Attachment{orderImages.length > 1 ? `s (${orderImages.length})` : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ) : (
                 selectedOrder.items && Object.values(selectedOrder.items).map((item, index) => (
@@ -190,7 +222,7 @@ export default function PreviousOrders({ navigation }) {
               {selectedOrder.discount > 0 && <View style={styles.billRow}><Text style={styles.billLabel}>Discount</Text><Text style={[styles.billValue, { color: '#2E7D32' }]}>- ₹{selectedOrder.discount}</Text></View>}
               {!selectedOrder.isCustom && <View style={styles.billRow}><Text style={styles.billLabel}>Delivery Fee</Text><Text style={styles.billValue}>₹{selectedOrder.deliveryFee}</Text></View>}
               
-              {/* 🔥 FIXED: ADDED PLATFORM FEE DISPLAY 🔥 */}
+              {/* 🔥 PLATFORM FEE DISPLAY 🔥 */}
               {!selectedOrder.isCustom && selectedOrder.platformFee !== undefined && (
                 <View style={styles.billRow}>
                   <Text style={styles.billLabel}>Platform Fee</Text>
@@ -251,7 +283,49 @@ export default function PreviousOrders({ navigation }) {
           onRefresh={refreshPastOrders}
         />
       )}
+      
       {renderDetailsModal()}
+
+      {/* 🔥 NEW: IMAGE VIEWER MODAL 🔥 */}
+      <Modal visible={imageModalVisible} transparent={true} animationType="fade" onRequestClose={() => setImageModalVisible(false)}>
+        <View style={styles.imageModalOverlay}>
+          <TouchableOpacity style={styles.imageModalCloseBtn} onPress={() => setImageModalVisible(false)}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+          
+          <View style={styles.imageViewerContainer}>
+            {orderImages.length > 0 && (
+              <Image 
+                source={{ uri: orderImages[currentImageIndex] }} 
+                style={styles.fullScreenImage} 
+                resizeMode="contain" 
+              />
+            )}
+          </View>
+
+          {/* Multi-image navigation controls */}
+          {orderImages.length > 1 && (
+            <View style={styles.imageControls}>
+              <TouchableOpacity 
+                style={[styles.navBtn, currentImageIndex === 0 && { opacity: 0.5 }]} 
+                onPress={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
+                disabled={currentImageIndex === 0}
+              >
+                <Ionicons name="chevron-back" size={24} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.imageCountText}>{currentImageIndex + 1} / {orderImages.length}</Text>
+              <TouchableOpacity 
+                style={[styles.navBtn, currentImageIndex === orderImages.length - 1 && { opacity: 0.5 }]} 
+                onPress={() => setCurrentImageIndex(prev => Math.min(orderImages.length - 1, prev + 1))}
+                disabled={currentImageIndex === orderImages.length - 1}
+              >
+                <Ionicons name="chevron-forward" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -302,6 +376,11 @@ const styles = StyleSheet.create({
   modalScheduledDate: { fontSize: 11, fontFamily: 'Sen_Bold', color: '#ff7a00', marginTop: 2 },
   modalDivider: { height: 1, borderBottomWidth: 1, borderBottomColor: '#eee', borderStyle: 'dashed', marginVertical: 20 },
   sectionHeading: { fontSize: 16, fontFamily: 'Sen_Bold', color: '#111', marginBottom: 15 },
+  
+  // Custom Order Attachment Styles
+  attachmentBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#E3F2FD', borderRadius: 6, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#BBDEFB' },
+  attachmentBtnText: { color: '#007BFF', fontFamily: 'Sen_Bold', fontSize: 12, marginLeft: 6 },
+
   receiptItem: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   receiptItemLeft: { flexDirection: 'row', flex: 1, paddingRight: 15 },
   receiptItemQty: { fontSize: 14, fontFamily: 'Sen_Bold', color: '#4CAF50', marginRight: 10, width: 20 },
@@ -316,4 +395,13 @@ const styles = StyleSheet.create({
   addressBox: { flexDirection: 'row', backgroundColor: '#F8F9FA', padding: 15, borderRadius: 12, borderWidth: 1, borderColor: '#eee' },
   addressType: { fontSize: 12, fontFamily: 'Sen_Bold', color: '#555', marginBottom: 4 },
   addressText: { fontSize: 14, fontFamily: 'Sen_Regular', color: '#111', lineHeight: 20 },
+
+  // Image Modal Styles
+  imageModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center' },
+  imageModalCloseBtn: { position: 'absolute', top: 40, right: 20, zIndex: 10, padding: 10, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 },
+  imageViewerContainer: { width: width, height: height * 0.7, justifyContent: 'center', alignItems: 'center' },
+  fullScreenImage: { width: '100%', height: '100%' },
+  imageControls: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', position: 'absolute', bottom: 40, width: '100%', gap: 20 },
+  navBtn: { padding: 12, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 30 },
+  imageCountText: { color: '#fff', fontFamily: 'Sen_Bold', fontSize: 16 },
 });

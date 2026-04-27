@@ -43,7 +43,6 @@ export const useShopStore = create(
           let validShopIdsInRadius = [];
 
           for (const branchId of branchIdsArray) {
-            // ✅ MODULAR: getDoc(doc(db, ...))
             const indexSnap = await getDoc(doc(db, 'branch_indexes', branchId));
 
             if (indexSnap.exists) {
@@ -80,7 +79,6 @@ export const useShopStore = create(
             const chunkSize = 10;
             for (let i = 0; i < idsToFetch.length; i += chunkSize) {
                 const chunk = idsToFetch.slice(i, i + chunkSize);
-                // ✅ MODULAR BATCHED FETCH
                 const fetchPromises = chunk.map(id => getDoc(doc(db, "shops", id)));
                 const snapshots = await Promise.all(fetchPromises);
 
@@ -108,13 +106,13 @@ export const useShopStore = create(
           updatedShopsList = updatedShopsList.filter(shop => validShopIdsInRadius.includes(shop.id));
 
           updatedShopsList.sort((a, b) => {
-            const latA = a.location?.latitude ?? a.location?.lat;
-            const lngA = a.location?.longitude ?? a.location?.lng;
-            const latB = b.location?.latitude ?? b.location?.lat;
-            const lngB = b.location?.longitude ?? b.location?.lng;
+            const latA = parseFloat(a.location?.latitude ?? a.location?.lat) || 0;
+            const lngA = parseFloat(a.location?.longitude ?? a.location?.lng) || 0;
+            const latB = parseFloat(b.location?.latitude ?? b.location?.lat) || 0;
+            const lngB = parseFloat(b.location?.longitude ?? b.location?.lng) || 0;
 
-            return geofire.distanceBetween([parseFloat(latA), parseFloat(lngA)], userLocation) -
-                   geofire.distanceBetween([parseFloat(latB), parseFloat(lngB)], userLocation);
+            return geofire.distanceBetween([latA, lngA], userLocation) -
+                   geofire.distanceBetween([latB, lngB], userLocation);
           });
 
           set({ shops: updatedShopsList, loading: false });

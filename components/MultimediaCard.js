@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Image, Dimensions } from "react-native";
+import { View, Text, StyleSheet, Image, useWindowDimensions } from "react-native";
 import LottieView from 'lottie-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from "@expo/vector-icons";
 
-const { width } = Dimensions.get("window");
-
 const MultimediaCard = React.memo(({ url }) => {
+  // FIXED: Dynamic dimensions updates correctly on orientation/tablet changes!
+  const { width } = useWindowDimensions(); 
   const [lottieData, setLottieData] = useState(null);
   const [mediaType, setMediaType] = useState(null);
 
@@ -18,15 +18,12 @@ const MultimediaCard = React.memo(({ url }) => {
 
     const lowerUrl = url.toLowerCase();
     
-    // Determine Media Type
     if (lowerUrl.includes('.json')) {
       setMediaType('lottie');
       fetchAndCacheLottie(url);
     } else if (lowerUrl.includes('.mp4')) {
-      // Future-proofing for video (requires expo-av)
       setMediaType('video'); 
     } else {
-      // Fallback for .jpg, .png, .webp, etc.
       setMediaType('image');
     }
   }, [url]);
@@ -36,7 +33,6 @@ const MultimediaCard = React.memo(({ url }) => {
     const CACHE_URL_KEY = '@localboys_event_lottie_url';
 
     try {
-      // 1. Check local cache first for instant render
       const savedUrl = await AsyncStorage.getItem(CACHE_URL_KEY);
       const cachedData = await AsyncStorage.getItem(CACHE_DATA_KEY);
 
@@ -44,17 +40,15 @@ const MultimediaCard = React.memo(({ url }) => {
         setLottieData(JSON.parse(cachedData));
       }
 
-      // 2. Ping server with ETag (cache: 'no-cache')
       const response = await fetch(currentUrl, { cache: 'no-cache' });
       
       if (response.ok) {
         const freshData = await response.json();
         const freshDataStr = JSON.stringify(freshData);
 
-        // 3. If URL changed OR server has new data, overwrite old cache!
         if (savedUrl !== currentUrl || cachedData !== freshDataStr) {
           await AsyncStorage.setItem(CACHE_URL_KEY, currentUrl);
-          await AsyncStorage.setItem(CACHE_DATA_KEY, freshDataStr); // Overwrites old cache
+          await AsyncStorage.setItem(CACHE_DATA_KEY, freshDataStr);
           setLottieData(freshData);
           console.log("[MultimediaCard] Downloaded and cached fresh Lottie data.");
         } else {
@@ -66,14 +60,13 @@ const MultimediaCard = React.memo(({ url }) => {
     }
   };
 
-  // If the admin completely clears the eventUrl, hide the container entirely.
   if (!url) return null;
 
   return (
-    <View style={styles.bannerContainer}>
+    <View style={[styles.bannerContainer, { width: width }]}>
       {mediaType === 'lottie' && lottieData && (
         <LottieView
-          source={lottieData} // Passing the raw cached JSON object, NOT the URI!
+          source={lottieData} 
           autoPlay
           loop
           style={styles.mediaFill}
@@ -89,7 +82,6 @@ const MultimediaCard = React.memo(({ url }) => {
         />
       )}
       
-      {/* Video Placeholder for future updates */}
       {mediaType === 'video' && (
         <View style={[styles.mediaFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
           <Ionicons name="play-circle-outline" size={50} color="#fff" />
@@ -102,11 +94,10 @@ const MultimediaCard = React.memo(({ url }) => {
 
 const styles = StyleSheet.create({
   bannerContainer: {
-    width: width, // Natively force exact screen width
     aspectRatio: 2/1,
     marginTop: 15,
     overflow: 'hidden',
-    alignSelf: 'center', // Ensures it stays perfectly centered on larger devices
+    alignSelf: 'center', 
   },
   mediaFill: {
     width: '100%',

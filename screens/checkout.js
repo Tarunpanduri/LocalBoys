@@ -2,13 +2,13 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { 
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, 
   TextInput, Image, StatusBar, Platform, Modal, 
-  FlatList, Animated, Dimensions, Alert 
+  FlatList, Animated, Dimensions 
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import * as Clipboard from 'expo-clipboard';
 
-// 🔥 FIXED: NATIVE FIREBASE MODULAR IMPORTS 🔥
+// 🔥 NATIVE FIREBASE MODULAR IMPORTS 🔥
 import { db, auth, functions } from "../firebase";
 import { doc, getDoc } from "@react-native-firebase/firestore";
 import { httpsCallable } from "@react-native-firebase/functions";
@@ -17,7 +17,7 @@ import Toast from "react-native-root-toast";
 import { LinearGradient } from "expo-linear-gradient";
 
 // --- GORHOM BOTTOM SHEET & GESTURE IMPORTS ---
-import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView, BottomSheetBackdrop } from "@gorhom/bottom-sheet";
 import { GestureHandlerRootView, ScrollView as GHScrollView } from "react-native-gesture-handler";
 
 // --- IMPORT CONTEXTS & STORES ---
@@ -108,6 +108,13 @@ export default function CheckoutScreen() {
   const bottomSheetRef = useRef(null);
   const snapPoints = useMemo(() => ["60%", "92%"], []);
   
+  // DROP ADDRESS BOTTOM SHEET REF
+  const dropAddressSheetRef = useRef(null);
+  const dropSnapPoints = useMemo(() => ["50%", "85%"], []);
+
+  // 🔥 NEW: COUPON BOTTOM SHEET REF 🔥
+  const couponSheetRef = useRef(null);
+
   // --- DESTRUCTURE PARAMS ---
   const { 
     shopId: paramShopId, 
@@ -119,8 +126,7 @@ export default function CheckoutScreen() {
 
   // --- CONTEXTS & STORES ---
   const { user, userData, mainAddress, loading: userLoading } = useUser();
-  // 🔥 HYBRID ADMIN UPDATE: Now using branchConfigs & activeBranchIds
-  const { branchConfigs, activeBranchIds, allBranches, loading: adminLoading } = useAdmin();
+  const { branchConfigs, activeBranchIds, branchCoupons, allBranches, loading: adminLoading } = useAdmin();
   const { validateCoupon } = useCoupon();
   
   // ZUSTAND
@@ -138,9 +144,11 @@ export default function CheckoutScreen() {
   const [pickupAddress, setPickupAddress] = useState(null);
   const [dropAddress, setDropAddress] = useState(null);
   const [userAddresses, setUserAddresses] = useState([]);
-  const [showAddressModal, setShowAddressModal] = useState(false);
+  
+  // CUSTOM MODAL STATE
+  const [showChangeAddressModal, setShowChangeAddressModal] = useState(false);
 
-  // Financials (For UI calculation only)
+  // Financials
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [platformFee, setPlatformFee] = useState(10);
   const [subtotal, setSubtotal] = useState(0);
@@ -153,9 +161,9 @@ export default function CheckoutScreen() {
   const [couponCode, setCouponCode] = useState("");
   const [paymentMode, setPaymentMode] = useState("COD");
   
-  // 🔥 SCHEDULE ORDER STATE 🔥
-  const [deliveryPreference, setDeliveryPreference] = useState("now"); // 'now' | 'schedule'
-  const [scheduledDay, setScheduledDay] = useState("Today"); // 'Today' | 'Tomorrow'
+  // SCHEDULE ORDER STATE
+  const [deliveryPreference, setDeliveryPreference] = useState("now"); 
+  const [scheduledDay, setScheduledDay] = useState("Today"); 
   const [scheduledTime, setScheduledTime] = useState(""); 
   const TIME_SLOTS = ["10:00 AM - 12:00 PM", "12:00 PM - 02:00 PM", "02:00 PM - 04:00 PM", "04:00 PM - 06:00 PM", "06:00 PM - 08:00 PM", "08:00 PM - 10:00 PM"];
 
@@ -170,8 +178,7 @@ export default function CheckoutScreen() {
 
   const fallbackFetchedRef = useRef(false);
 
-  // --- 🔥 BRANCH RESOLUTION LOGIC 🔥 ---
-  // Accurately determine the config for this specific shop's branch
+  // --- BRANCH RESOLUTION LOGIC ---
   const currentBranchId = useMemo(() => {
     if (shop?.parentBranchId) return shop.parentBranchId;
     return activeBranchIds?.[0] || null;
@@ -185,6 +192,14 @@ export default function CheckoutScreen() {
   const isPremiumOrder = subtotal > 10000;
   const deliveryChargePerKm = currentBranchConfig.deliveryChargePerKm || 6;
   const qrIdText = currentBranchConfig.qrId || shop?.qrId || "localboys@upi";
+
+  // 🔥 NEW: EXTRACT AVAILABLE COUPONS FOR THIS SHOP 🔥
+  const availableCoupons = useMemo(() => {
+    if (!currentBranchId || !branchCoupons || !branchCoupons[currentBranchId]) return [];
+    const shopCoupons = branchCoupons[currentBranchId][shopId];
+    if (!shopCoupons) return [];
+    return Array.isArray(shopCoupons) ? shopCoupons : [shopCoupons];
+  }, [branchCoupons, currentBranchId, shopId]);
 
   // --- 1. LOAD DATA ---
   useEffect(() => {
@@ -202,7 +217,6 @@ export default function CheckoutScreen() {
       } 
       else if (!fallbackFetchedRef.current) { 
         fallbackFetchedRef.current = true;
-        // ✅ MODULAR: getDoc(doc(db, ...))
         getDoc(doc(db, "shops", shopId)).then(snap => {
           if(snap.exists) {
             const val = snap.data();
@@ -262,7 +276,7 @@ export default function CheckoutScreen() {
     }
   }, [shop, currentBranchConfig]);
 
-  // --- 2. CALCULATE TOTALS (UI Only) ---
+  // --- 2. CALCULATE TOTALS ---
   useEffect(() => {
     if (!cart || !shop) return;
 
@@ -311,14 +325,19 @@ export default function CheckoutScreen() {
   }, [cart, shop, mainAddress, pickupAddress, dropAddress, discount, deliveryChargePerKm, shopCommission, orderType]);
 
   // --- 3. HANDLERS ---
-  const applyCouponHandler = async () => {
-    if (!couponCode.trim()) {
+  // 🔥 UPDATED: Now supports applying via button OR bottom sheet string 🔥
+  const applyCouponHandler = async (overrideCode) => {
+    // If it's a string, use it. Otherwise, use the state (from the text input)
+    const codeToUse = typeof overrideCode === 'string' ? overrideCode : couponCode;
+    
+    if (!codeToUse.trim()) {
       Toast.show("Enter a coupon code", { duration: Toast.durations.SHORT });
       return;
     }
     try {
-      const discountValue = await validateCoupon(shopId, couponCode, subtotal);
+      const discountValue = await validateCoupon(shopId, codeToUse, subtotal);
       setDiscount(discountValue);
+      setCouponCode(codeToUse); // Instantly fill the input if it came from the sheet
       Toast.show(`Discount applied: ₹${discountValue}`, { duration: Toast.durations.SHORT });
     } catch (error) {
       Toast.show(error || "Invalid coupon", { duration: Toast.durations.SHORT });
@@ -328,7 +347,16 @@ export default function CheckoutScreen() {
 
   const handleSelectDropAddress = (address) => {
     setDropAddress(address);
-    setShowAddressModal(false);
+    dropAddressSheetRef.current?.close(); 
+  };
+
+  const handleChangePrimaryAddress = () => {
+    setShowChangeAddressModal(true);
+  };
+
+  const confirmChangePrimaryAddress = () => {
+    setShowChangeAddressModal(false);
+    navigation.navigate("HomeScreen", { openAddressSheet: true, timestamp: Date.now() });
   };
 
   const copyQrIdToClipboard = async () => {
@@ -336,7 +364,6 @@ export default function CheckoutScreen() {
     Toast.show("QR ID Copied to clipboard!", { duration: Toast.durations.SHORT });
   };
 
-  // 🔥 ENTERPRISE SECURE ORDER PLACEMENT 🔥
   const handlePlaceOrder = async () => {
     if (!user) {
       Toast.show("Please login to place order", { duration: Toast.durations.SHORT });
@@ -345,7 +372,7 @@ export default function CheckoutScreen() {
     
     if (orderType === "delivery" && !mainAddress) {
       Toast.show("Please add a delivery address", { duration: Toast.durations.SHORT });
-      navigation.navigate("Addresses");
+      handleChangePrimaryAddress();
       return;
     }
     if (orderType === "parcel" && !dropAddress) {
@@ -353,7 +380,6 @@ export default function CheckoutScreen() {
       return;
     }
 
-    // Schedule Check
     if (deliveryPreference === "schedule" && !scheduledTime) {
       Toast.show("Please select a time slot for your scheduled order.", { duration: Toast.durations.SHORT });
       return;
@@ -429,7 +455,6 @@ export default function CheckoutScreen() {
         parcelDrop: parcelDropData,
       };
 
-      // ✅ MODULAR: httpsCallable(functionsInstance, functionName)
       const createSecureOrder = httpsCallable(functions, 'createSecureOrder');
       const response = await createSecureOrder(securePayload);
       
@@ -497,7 +522,7 @@ export default function CheckoutScreen() {
                 <View style={[styles.section, { marginTop: 15 }]}>
                   <View style={styles.headerRow}>
                     <Text style={[styles.sectionTitle, { marginBottom: 5 }]}>PICKUP ADDRESS</Text>
-                    <TouchableOpacity onPress={() => navigation.navigate("HomeScreen")}>
+                    <TouchableOpacity onPress={handleChangePrimaryAddress}>
                       <Text style={styles.editText}>EDIT</Text>
                     </TouchableOpacity>
                   </View>
@@ -514,7 +539,7 @@ export default function CheckoutScreen() {
                 <View style={styles.section}>
                   <View style={styles.headerRow}>
                     <Text style={[styles.sectionTitle, { marginBottom: 5, marginTop: 20 }]}>DROP ADDRESS</Text>
-                    <TouchableOpacity onPress={() => setShowAddressModal(true)}>
+                    <TouchableOpacity onPress={() => dropAddressSheetRef.current?.expand()}>
                       <Text style={styles.editText}>SELECT</Text>
                     </TouchableOpacity>
                   </View>
@@ -525,7 +550,7 @@ export default function CheckoutScreen() {
                       <Text style={styles.addressSub}>{dropAddress.city}, {dropAddress.state} - {dropAddress.pincode}</Text>
                     </View>
                   ) : (
-                    <TouchableOpacity style={styles.selectAddressButton} onPress={() => setShowAddressModal(true)}>
+                    <TouchableOpacity style={styles.selectAddressButton} onPress={() => dropAddressSheetRef.current?.expand()}>
                       <Text style={styles.selectAddressText}>+ Select Drop Address</Text>
                     </TouchableOpacity>
                   )}
@@ -536,7 +561,7 @@ export default function CheckoutScreen() {
               <View style={[styles.section, { marginTop: 40 }]}>
                 <View style={styles.headerRow}>
                   <Text style={styles.sectionTitle}>DELIVERY ADDRESS</Text>
-                  <TouchableOpacity onPress={() => navigation.navigate("Addresses")}>
+                  <TouchableOpacity onPress={handleChangePrimaryAddress}>
                     <Text style={styles.editText}>CHANGE</Text>
                   </TouchableOpacity>
                 </View>
@@ -549,7 +574,7 @@ export default function CheckoutScreen() {
                     </Text>
                   </View>
                 ) : (
-                  <TouchableOpacity onPress={() => navigation.navigate("Addresses")} style={styles.noAddressBox}>
+                  <TouchableOpacity onPress={handleChangePrimaryAddress} style={styles.noAddressBox}>
                      <Text style={styles.emptyText}>+ Add Delivery Address</Text>
                   </TouchableOpacity>
                 )}
@@ -557,7 +582,7 @@ export default function CheckoutScreen() {
             )}
           </GHScrollView>
 
-          {/* GORHOM BOTTOM SHEET */}
+          {/* GORHOM BOTTOM SHEET (Main Items) */}
           <BottomSheet
             ref={bottomSheetRef}
             index={0}
@@ -591,7 +616,13 @@ export default function CheckoutScreen() {
               </View>
 
               <View style={styles.sectiontwo}>
-                <Text style={[styles.sectionTitletwo, { color: 'black', fontSize: 14 }]}>COUPON</Text>
+                {/* 🔥 NEW: VIEW OFFERS HEADER 🔥 */}
+                <View style={styles.headerRowtwo}>
+                  <Text style={[styles.sectionTitletwo, { color: 'black', fontSize: 14 }]}>COUPON</Text>
+                  <TouchableOpacity onPress={() => couponSheetRef.current?.expand()}>
+                    <Text style={styles.editText}>VIEW OFFERS</Text>
+                  </TouchableOpacity>
+                </View>
                 <View style={styles.couponRow}>
                   <TextInput
                     style={styles.couponInput}
@@ -636,7 +667,7 @@ export default function CheckoutScreen() {
                 </View>
               </View>
 
-              {/* 🔥 NEW SCHEDULE PREFERENCE UI 🔥 */}
+              {/* SCHEDULE PREFERENCE UI */}
               <View style={[styles.sectiontwo, { marginTop: 10, marginBottom: 10 }]}>
                 <Text style={[styles.sectionTitletwo, { color: 'black', fontSize: 14 }]}>DELIVERY TIME</Text>
                 <View style={styles.paymentRow}>
@@ -673,7 +704,6 @@ export default function CheckoutScreen() {
                     </View>
 
                     <Text style={styles.scheduleLabel}>Select Time Slot</Text>
-                    {/* 🔥 FIXED HORIZONTAL SCROLLING 🔥 */}
                     <GHScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeSlotScroll}>
                       {TIME_SLOTS.map((slot, index) => (
                         <TouchableOpacity 
@@ -731,7 +761,6 @@ export default function CheckoutScreen() {
                       </View>
                     )}
 
-                    {/* 🔥 NEW QR ID & COPY BLOCK 🔥 */}
                     <View style={styles.qrInfoBox}>
                       <Text style={styles.qrIdText}>QR ID: <Text style={{fontWeight: 'bold'}}>{qrIdText}</Text></Text>
                       <TouchableOpacity onPress={copyQrIdToClipboard} style={styles.copyBtn}>
@@ -776,36 +805,104 @@ export default function CheckoutScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Shared Drop Address Modal for Parcel mode */}
-          <Modal 
-            visible={showAddressModal} 
-            animationType="slide" 
-            transparent 
-            onRequestClose={() => setShowAddressModal(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Select Drop Address</Text>
-                  <TouchableOpacity onPress={() => setShowAddressModal(false)}>
-                    <Text style={styles.modalClose}>✕</Text>
+          {/* CUSTOM MODAL: CONFIRM PRIMARY ADDRESS CHANGE */}
+          <Modal animationType="fade" transparent={true} visible={showChangeAddressModal} onRequestClose={() => setShowChangeAddressModal(false)}>
+            <View style={styles.popupOverlay}>
+              <View style={styles.popupContent}>
+                <View style={[styles.modalIconContainer, { backgroundColor: '#fff8e1' }]}>
+                  <Ionicons name="location-outline" size={36} color="#ffb300" />
+                </View>
+                <Text style={styles.modalTitleCentered}>Change Address?</Text>
+                <Text style={styles.modalMessage}>Are you sure you want to change your primary delivery location? You will be redirected to the home screen.</Text>
+                <View style={styles.modalBtnRow}>
+                  <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowChangeAddressModal(false)}>
+                    <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.modalConfirmBtn} onPress={confirmChangePrimaryAddress}>
+                    <Text style={styles.modalConfirmBtnText}>Yes, Change</Text>
                   </TouchableOpacity>
                 </View>
-                <FlatList 
-                  data={userAddresses} 
-                  renderItem={renderAddressItem} 
-                  keyExtractor={item => item.id} 
-                  showsVerticalScrollIndicator={false} 
-                  contentContainerStyle={styles.addressList} 
-                />
-                {userAddresses.length === 0 && (
-                  <View style={styles.noAddresses}>
-                    <Text style={styles.noAddressesText}>No addresses found</Text>
-                  </View>
-                )}
               </View>
             </View>
           </Modal>
+
+          {/* SHARED DROP ADDRESS BOTTOM SHEET */}
+          <BottomSheet
+            ref={dropAddressSheetRef}
+            index={-1}
+            snapPoints={dropSnapPoints}
+            enablePanDownToClose={true}
+            backgroundStyle={styles.bottomSheetBackground}
+            handleIndicatorStyle={styles.bottomSheetIndicator}
+            backdropComponent={(props) => (
+              <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} />
+            )}
+          >
+            <View style={styles.sheetHeaderDrop}>
+              <Text style={styles.sheetTitleDrop}>Select Drop Address</Text>
+              <TouchableOpacity style={styles.closeBtnDrop} onPress={() => dropAddressSheetRef.current?.close()}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            <BottomSheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.addressList}>
+              {userAddresses.map((item) => (
+                <React.Fragment key={item.id}>
+                  {renderAddressItem({ item })}
+                </React.Fragment>
+              ))}
+              {userAddresses.length === 0 && (
+                <View style={styles.noAddresses}>
+                  <Text style={styles.noAddressesText}>No addresses found</Text>
+                </View>
+              )}
+            </BottomSheetScrollView>
+          </BottomSheet>
+
+          {/* 🔥 NEW: COUPONS OFFERS BOTTOM SHEET 🔥 */}
+          <BottomSheet
+            ref={couponSheetRef}
+            index={-1}
+            snapPoints={["50%", "75%"]}
+            enablePanDownToClose={true}
+            backgroundStyle={styles.bottomSheetBackground}
+            handleIndicatorStyle={styles.bottomSheetIndicator}
+            backdropComponent={(props) => (
+              <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} />
+            )}
+          >
+            <View style={styles.sheetHeaderDrop}>
+              <Text style={styles.sheetTitleDrop}>Available Offers</Text>
+              <TouchableOpacity style={styles.closeBtnDrop} onPress={() => couponSheetRef.current?.close()}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            <BottomSheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.addressList}>
+              {availableCoupons.filter(c => c.isActive !== false).map((c, idx) => (
+                <View key={idx} style={styles.couponOfferCard}>
+                  <View style={styles.couponOfferLeft}>
+                    <View style={styles.couponCodePill}><Text style={styles.couponCodeText}>{c.code}</Text></View>
+                    <Text style={styles.couponOfferDesc}>
+                      {c.type === "percentage" ? `Get ${c.discount}% off` : `Flat ₹${c.discount} off`}
+                      {c.maxDiscount ? ` up to ₹${c.maxDiscount}` : ""}
+                    </Text>
+                    {c.minOrder ? <Text style={styles.couponOfferMin}>On orders above ₹{c.minOrder}</Text> : null}
+                  </View>
+                  <TouchableOpacity style={styles.couponOfferApplyBtn} onPress={() => {
+                    couponSheetRef.current?.close();
+                    applyCouponHandler(c.code);
+                  }}>
+                    <Text style={styles.couponOfferApplyText}>APPLY</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {availableCoupons.filter(c => c.isActive !== false).length === 0 && (
+                <View style={styles.noAddresses}>
+                  <Ionicons name="ticket-outline" size={40} color="#ddd" style={{ marginBottom: 10 }} />
+                  <Text style={styles.noAddressesText}>No coupons available for this shop.</Text>
+                </View>
+              )}
+            </BottomSheetScrollView>
+          </BottomSheet>
 
         </View>
       </SafeAreaView>
@@ -836,6 +933,11 @@ const styles = StyleSheet.create({
   bottomSheetBackground: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   bottomSheetIndicator: { backgroundColor: "#ccc", width: 40, height: 4 },
   skeletonBottomSheet: { position: "absolute", bottom: 0, width: "100%", backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+
+  // Drop Address Sheet specific styles
+  sheetHeaderDrop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eaeaea' },
+  sheetTitleDrop: { fontSize: 18, fontFamily: 'Sen_Bold', color: '#111' },
+  closeBtnDrop: { padding: 4 },
 
   premiumBadge: { backgroundColor: "#28a745", padding: 10, alignItems: "center", marginHorizontal: 16, marginTop: 10, borderRadius: 8 },
   premiumBadgeText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 12 },
@@ -916,12 +1018,7 @@ const styles = StyleSheet.create({
   orderBtnDisabled: { backgroundColor: "#ccc" },
   orderText: { color: "#fff", fontFamily: "Sen_Bold", fontSize: 14 },
   
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.7)", justifyContent: "flex-end", zIndex: 1000 }, 
-  modalContent: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "70%", paddingBottom: Platform.OS === "ios" ? 20 : 20 }, 
-  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: "#eee" }, 
-  modalTitle: { fontSize: 18, fontFamily: "Sen_Bold", color: "#0e0e12" }, 
-  modalClose: { fontSize: 20, color: "#666" }, 
-  addressList: { padding: 16 }, 
+  addressList: { padding: 16, paddingBottom: 40 }, 
   addressItem: { backgroundColor: "#f9f9f9", padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: "#eee" }, 
   selectedAddressItem: { backgroundColor: "#fff8f0", borderColor: "#ff7a00", borderWidth: 2 }, 
   addressItemName: { fontSize: 16, fontFamily: "Sen_Bold", color: "#0e0e12", marginBottom: 4 }, 
@@ -929,5 +1026,27 @@ const styles = StyleSheet.create({
   addressItemSub: { fontSize: 12, fontFamily: "Sen_Regular", color: "#666" }, 
   selectedText: { color: "#ff7a00", fontSize: 12, fontFamily: "Sen_Medium", marginTop: 4 }, 
   noAddresses: { padding: 40, alignItems: "center" }, 
-  noAddressesText: { color: "#999", fontSize: 16, fontFamily: "Sen_Regular" }
+  noAddressesText: { color: "#999", fontSize: 16, fontFamily: "Sen_Regular" },
+
+  // CUSTOM MODAL STYLES
+  popupOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20, zIndex: 1000 },
+  popupContent: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center', width: '90%', maxWidth: 400, elevation: 5 },
+  modalIconContainer: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginBottom: 16, alignSelf: 'center' },
+  modalTitleCentered: { fontFamily: 'Sen_Bold', fontSize: 18, color: '#111', marginBottom: 10, textAlign: 'center' },
+  modalMessage: { fontFamily: 'Sen_Regular', fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 24, lineHeight: 22 },
+  modalBtnRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 12 },
+  modalCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#f0f0f0' },
+  modalCancelBtnText: { fontFamily: 'Sen_Medium', color: '#444', fontSize: 15 },
+  modalConfirmBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: '#ff7a00' },
+  modalConfirmBtnText: { fontFamily: 'Sen_Bold', color: '#fff', fontSize: 15 },
+
+  // 🔥 NEW COUPON STYLES 🔥
+  couponOfferCard: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#eee', borderRadius: 12, padding: 16, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowOffset: { width: 0, height: 2 }, shadowRadius: 4 },
+  couponOfferLeft: { flex: 1, paddingRight: 10 },
+  couponCodePill: { backgroundColor: '#fff3e0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, alignSelf: 'flex-start', marginBottom: 8, borderWidth: 1, borderColor: '#ffcc80' },
+  couponCodeText: { color: '#ff7a00', fontFamily: 'Sen_Bold', fontSize: 14, letterSpacing: 1 },
+  couponOfferDesc: { fontFamily: 'Sen_Medium', fontSize: 14, color: '#333', marginBottom: 4 },
+  couponOfferMin: { fontFamily: 'Sen_Regular', fontSize: 12, color: '#777' },
+  couponOfferApplyBtn: { paddingVertical: 8, paddingHorizontal: 16 },
+  couponOfferApplyText: { color: '#ff7a00', fontFamily: 'Sen_Bold', fontSize: 14 },
 });

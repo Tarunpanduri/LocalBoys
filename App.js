@@ -9,6 +9,8 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// 👇 NEW: Import Expo Updates 👇
+import * as Updates from 'expo-updates'; 
 
 import { AdminProvider } from './context/AdminContext';
 import { UserProvider } from './context/UserContext';
@@ -34,7 +36,7 @@ import NewLogin from './screens/newlogin';
 
 import { auth, db } from './firebase';
 import { onAuthStateChanged } from '@react-native-firebase/auth';
-import { doc, setDoc } from '@react-native-firebase/firestore'; // ✅ changed: use setDoc instead of updateDoc
+import { doc, setDoc } from '@react-native-firebase/firestore'; 
 
 SplashScreen.preventAutoHideAsync();
 
@@ -60,6 +62,31 @@ export default function App() {
   const onLayoutRootView = useCallback(async () => {
     if (fontsLoaded && !checkingAuth) await SplashScreen.hideAsync();
   }, [fontsLoaded, checkingAuth]);
+
+  // 🔥 NEW: Check for OTA Updates on App Startup 🔥
+  useEffect(() => {
+    async function onFetchUpdateAsync() {
+      // Don't check for updates in local development
+      if (__DEV__) return; 
+      
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          Alert.alert(
+            "Update Available",
+            "A new version of LocalBoys is ready. The app will quickly restart to apply it.",
+            [{ text: "Update Now", onPress: () => Updates.reloadAsync() }]
+          );
+        }
+      } catch (error) {
+        // You can log this to Crashlytics/Sentry in the future
+        console.log(`Error fetching latest Expo update: ${error}`);
+      }
+    }
+    
+    onFetchUpdateAsync();
+  }, []);
 
   const registerForPushNotificationsAsync = async (userId = null) => {
     if (!Device.isDevice) {
@@ -94,7 +121,6 @@ export default function App() {
       if (userId && expoToken) {
         const cachedToken = await AsyncStorage.getItem(`pushToken_${userId}`);
         if (cachedToken !== expoToken) {
-          // ✅ FIX: use setDoc with merge to avoid "document not found" error
           const userDocRef = doc(db, "users", userId);
           await setDoc(userDocRef, { expoPushToken: expoToken }, { merge: true });
           await AsyncStorage.setItem(`pushToken_${userId}`, expoToken);
@@ -139,7 +165,10 @@ export default function App() {
 
     return () => {
       unsubscribe();
-      if (responseListener.current) Notifications.removeNotificationSubscription(responseListener.current);
+      // FIXED: Call .remove() directly on the subscription object
+      if (responseListener.current) {
+        responseListener.current.remove();
+      }
     };
   }, []);
 
@@ -160,7 +189,7 @@ export default function App() {
                   <Stack.Screen name="ShopDetails" component={ShopDetails} />
                   <Stack.Screen name="Checkout" component={CheckoutScreen} />
                   <Stack.Screen name="TrackOrder" component={TrackOrder} />
-                  <Stack.Screen name="Addresses" component={AddressesScreen} />
+                  {/* <Stack.Screen name="Addresses" component={AddressesScreen} /> */}
                   <Stack.Screen name="Profile" component={Profile} />
                   <Stack.Screen name="EditProfile" component={EditProfile} />
                   <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }} />

@@ -47,3 +47,5 @@ yarn-error.*
 # build output - files starting with name build
 build*.local
 build*/
+
+impcodes.txt

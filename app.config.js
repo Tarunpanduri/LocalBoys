@@ -9,6 +9,13 @@ export default {
     icon: "./assets/icon.png",
     userInterfaceStyle: "light",
     newArchEnabled: true,
+    runtimeVersion: {
+      policy: "appVersion"
+    },
+    updates: {
+      url: "https://u.expo.dev/fcf95556-c415-4a5f-8f64-31a42bbeaa98"
+    },
+
     splash: {
       image: "./assets/splash-icon.png",
       resizeMode: "contain",
@@ -65,6 +72,14 @@ export default {
           color: "#28A745",
           sounds: [],
           defaultChannel: "localboys_high_priority_v2"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          ios: {
+            useFrameworks: "static"
+          }
         }
       ]
     ],

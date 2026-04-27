@@ -27,7 +27,7 @@ import * as Device from 'expo-device';
 
 // 🔥 NATIVE FIREBASE MODULAR IMPORTS 🔥
 import { auth, db } from "../firebase";
-import { signInWithPhoneNumber } from "@react-native-firebase/auth";
+import { signInWithPhoneNumber, onAuthStateChanged } from "@react-native-firebase/auth";
 import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from "@react-native-firebase/firestore";
 
 const { width, height } = Dimensions.get("window");
@@ -68,7 +68,7 @@ const LoginSkeleton = () => {
 };
 
 export default function Login({ navigation }) {
-  const [step, setStep] = useState(0); // 0: Phone, 1: OTP, 2: Name
+  const [step, setStep] = useState(0); 
   const [phoneNumber, setPhoneNumber] = useState("");
   const [confirm, setConfirm] = useState(null); 
   const [verificationCode, setVerificationCode] = useState("");
@@ -76,9 +76,13 @@ export default function Login({ navigation }) {
   const [lastName, setLastName] = useState("");
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  
+  // 🔥 NEW STATE: Auto-detect countdown timer 🔥
+  const [autoDetectTimer, setAutoDetectTimer] = useState(0);
 
   const [fontsLoaded] = useFonts({ ...Ionicons.font });
 
+  // Load remembered phone
   useEffect(() => {
     const loadRememberedUser = async () => {
       try {
@@ -90,6 +94,37 @@ export default function Login({ navigation }) {
     };
     loadRememberedUser();
   }, []);
+
+  // 🔥 ANDROID BACKGROUND AUTO-VERIFY LISTENER 🔥
+  useEffect(() => {
+    const subscriber = onAuthStateChanged(auth, async (user) => {
+      // If Firebase automatically reads the SMS on Android, it logs them in.
+      if (user && step === 1 && !loading) {
+        setAutoDetectTimer(0);
+        await processAuthenticatedUser(user.uid);
+      }
+    });
+    return subscriber; 
+  }, [step]);
+
+  // 🔥 AUTO-VERIFY WHEN 6 DIGITS ARE ENTERED (iOS Autofill / Manual) 🔥
+  useEffect(() => {
+    if (verificationCode.length === 6 && step === 1 && !loading) {
+      handleVerifyOTP();
+    }
+  }, [verificationCode]);
+
+  // 🔥 VISUAL "FREEZE" COUNTDOWN TIMER 🔥
+  useEffect(() => {
+    let interval;
+    if (autoDetectTimer > 0 && step === 1) {
+      interval = setInterval(() => {
+        setAutoDetectTimer((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [autoDetectTimer, step]);
+
 
   if (!fontsLoaded) return <LoginSkeleton />;
 
@@ -112,47 +147,27 @@ export default function Login({ navigation }) {
     }
   };
 
-  // STEP 1: SEND OTP
-  const handleSendOTP = async () => {
-    const pureNumber = phoneNumber.replace(/[^0-9]/g, '');
-    if (pureNumber.length !== 10) {
-      Alert.alert("Invalid Phone", "Please enter a valid 10-digit mobile number.");
-      return;
-    }
-    Keyboard.dismiss();
-    setLoading(true);
-    try {
-      const confirmation = await signInWithPhoneNumber(auth, `+91${pureNumber}`);
-      setConfirm(confirmation);
-      setStep(1);
-    } catch (error) {
-      console.error("Phone Auth Error:", error);
-      let errorMsg = "Failed to send OTP. Please try again.";
-      if (error.code === 'auth/invalid-phone-number') errorMsg = "The phone number format is invalid.";
-      else if (error.code === 'auth/too-many-requests') errorMsg = "Too many requests. Please try again later.";
-      else if (error.code === 'auth/missing-client-identifier') errorMsg = "App integrity check failed. Verify SHA keys in Firebase Console.";
-      Alert.alert("Authentication Error", errorMsg);
-    } finally {
-      setLoading(false);
-    }
+  const handlePhoneChange = (text) => {
+    let cleaned = text.replace(/[\s\-\(\)]/g, '');
+    if (cleaned.startsWith('+91')) cleaned = cleaned.substring(3);
+    else if (cleaned.startsWith('91') && cleaned.length > 10) cleaned = cleaned.substring(2);
+    cleaned = cleaned.replace(/[^0-9]/g, '');
+    if (cleaned.length > 10) cleaned = cleaned.substring(0, 10);
+    setPhoneNumber(cleaned);
   };
 
-  // STEP 2: VERIFY OTP
-  const handleVerifyOTP = async () => {
-    if (!verificationCode || verificationCode.length < 6) {
-      Alert.alert("Invalid OTP", "Please enter the 6-digit code.");
-      return;
-    }
-    Keyboard.dismiss();
+  const handleOTPChange = (text) => {
+    const cleaned = text.replace(/[^0-9]/g, '');
+    setVerificationCode(cleaned);
+  };
+
+  // 🔥 REUSABLE FUNCTION: Check if user exists after Auth 🔥
+  const processAuthenticatedUser = async (userId) => {
     setLoading(true);
     try {
-      const pureNumber = phoneNumber.replace(/[^0-9]/g, '');
-      const userCredential = await confirm.confirm(verificationCode);
-      const userId = userCredential.user.uid;
-
       await AsyncStorage.removeItem('guestAddress');
       if (rememberMe) {
-        await AsyncStorage.setItem("rememberedPhone", pureNumber);
+        await AsyncStorage.setItem("rememberedPhone", phoneNumber);
       } else {
         await AsyncStorage.removeItem("rememberedPhone");
       }
@@ -161,25 +176,65 @@ export default function Login({ navigation }) {
       const userDoc = await getDoc(userDocRef);
       
       if (userDoc.exists && userDoc.data()?.firstName) {
-        // Existing user
         const pushToken = await getPushTokenAsync();
         if (pushToken) {
           await updateDoc(userDocRef, { expoPushToken: pushToken });
         }
         navigation.reset({ index: 0, routes: [{ name: "HomeScreen" }] });
       } else {
-        // New user → ask for name
         setStep(2);
       }
     } catch (error) {
-      console.log("OTP Verification Error:", error); 
-      Alert.alert("Verification Failed", "The OTP is incorrect or expired.");
+      console.log("Error processing user:", error);
+      Alert.alert("Error", "Could not load profile data.");
     } finally {
       setLoading(false);
     }
   };
 
-  // STEP 3: SAVE PROFILE
+  const handleSendOTP = async () => {
+    if (phoneNumber.length !== 10) {
+      Alert.alert("Invalid Phone", "Please enter a valid 10-digit mobile number.");
+      return;
+    }
+    Keyboard.dismiss();
+    setLoading(true);
+    try {
+      const confirmation = await signInWithPhoneNumber(auth, `+91${phoneNumber}`);
+      setConfirm(confirmation);
+      setVerificationCode(""); 
+      setStep(1);
+      setAutoDetectTimer(10); // Start 10-second auto-detect phase
+    } catch (error) {
+      console.error("Phone Auth Error:", error);
+      let errorMsg = "Failed to send OTP. Please try again.";
+      if (error.code === 'auth/invalid-phone-number') errorMsg = "The phone number format is invalid.";
+      else if (error.code === 'auth/too-many-requests') errorMsg = "Too many requests. Please try again later.";
+      else if (error.code === 'auth/missing-client-identifier') errorMsg = "App integrity check failed.";
+      Alert.alert("Authentication Error", errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    if (!verificationCode || verificationCode.length < 6) return;
+    
+    Keyboard.dismiss();
+    setLoading(true);
+    try {
+      const userCredential = await confirm.confirm(verificationCode);
+      setAutoDetectTimer(0);
+      await processAuthenticatedUser(userCredential.user.uid);
+    } catch (error) {
+      console.log("OTP Verification Error:", error); 
+      Alert.alert("Verification Failed", "The OTP is incorrect or expired.");
+      setVerificationCode(""); // Clear invalid code
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveProfile = async () => {
     if (!firstName.trim() || !lastName.trim()) {
       Alert.alert("Missing Details", "Please enter your first and last name.");
@@ -188,13 +243,12 @@ export default function Login({ navigation }) {
     setLoading(true);
     try {
       const userId = auth.currentUser.uid;
-      const pureNumber = phoneNumber.replace(/[^0-9]/g, '');
       const pushToken = await getPushTokenAsync();
 
       const userRef = doc(db, "users", userId);
       await setDoc(userRef, {
         uid: userId,
-        mobile: pureNumber,
+        mobile: phoneNumber,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: "",
@@ -216,6 +270,7 @@ export default function Login({ navigation }) {
 
   const cancelOTP = () => {
     Keyboard.dismiss();
+    setAutoDetectTimer(0);
     setStep(0);
     setVerificationCode("");
   };
@@ -259,8 +314,8 @@ export default function Login({ navigation }) {
                       placeholderTextColor="#A0A0A0"
                       keyboardType="phone-pad"
                       value={phoneNumber}
-                      onChangeText={setPhoneNumber}
-                      maxLength={10}
+                      onChangeText={handlePhoneChange}
+                      maxLength={15}
                       autoComplete="tel"
                       textContentType="telephoneNumber"
                       importantForAutofill="yes"
@@ -282,16 +337,27 @@ export default function Login({ navigation }) {
                   </View>
                 </>
               )}
+              
               {step === 1 && (
                 <>
-                  <Text style={styles.label}>ENTER OTP</Text>
+                  <View style={styles.rowBetween}>
+                     <Text style={[styles.label, {marginTop: 0, marginBottom: 0}]}>ENTER OTP</Text>
+                     {/* 🔥 VISUAL INDICATOR 🔥 */}
+                     {autoDetectTimer > 0 && (
+                        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                           <ActivityIndicator size="small" color="#28A745" style={{marginRight: 6}} />
+                           <Text style={{color: '#28A745', fontSize: 11, fontFamily: "Sen_Bold"}}>Auto-detecting... {autoDetectTimer}s</Text>
+                        </View>
+                     )}
+                  </View>
+                  
                   <TextInput
-                    style={styles.otpInput}
+                    style={[styles.otpInput, autoDetectTimer > 0 && { borderColor: '#B0E57E', backgroundColor: '#F9FCF5' }]}
                     placeholder="• • • • • •"
                     placeholderTextColor="#ccc"
                     keyboardType="number-pad"
                     value={verificationCode}
-                    onChangeText={setVerificationCode}
+                    onChangeText={handleOTPChange}
                     maxLength={6}
                     autoFocus={true}
                     autoComplete="sms-otp"
@@ -302,15 +368,26 @@ export default function Login({ navigation }) {
                     <TouchableOpacity onPress={cancelOTP} disabled={loading}>
                       <Text style={styles.forgotText}>Change Number</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={handleSendOTP} disabled={loading}>
-                      <Text style={[styles.forgotText, {color: '#888'}]}>Resend OTP</Text>
-                    </TouchableOpacity>
+                    
+                    {autoDetectTimer === 0 ? (
+                      <TouchableOpacity onPress={handleSendOTP} disabled={loading}>
+                        <Text style={[styles.forgotText, {color: '#888'}]}>Resend OTP</Text>
+                      </TouchableOpacity>
+                    ) : (
+                       <Text style={[styles.forgotText, {color: '#ccc'}]}>Resend OTP</Text>
+                    )}
                   </View>
-                  <TouchableOpacity style={styles.actionButton} onPress={handleVerifyOTP} disabled={loading}>
+                  
+                  <TouchableOpacity 
+                     style={[styles.actionButton, autoDetectTimer > 0 && {backgroundColor: '#88C895', shadowOpacity: 0}]} 
+                     onPress={handleVerifyOTP} 
+                     disabled={loading || autoDetectTimer > 0}
+                  >
                     {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.actionButtonText}>VERIFY & CONTINUE</Text>}
                   </TouchableOpacity>
                 </>
               )}
+
               {step === 2 && (
                 <>
                   <View style={styles.row}>

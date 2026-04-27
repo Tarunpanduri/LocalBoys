@@ -8,12 +8,17 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:44592964622:android:8039b16f4d903f43c7c85f",
+        "mobilesdk_app_id": "1:44592964622:android:8c43d1c6b322958cc7c85f",
         "android_client_info": {
-          "package_name": "com.tarunpanduri1388.LocalBoys"
+          "package_name": "com.tarunpanduri1388.LBFlashMan"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "44592964622-dbeg2iasaqjjle7bh5gu9lv1qamkhmgc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyB-F0boERbRhfTsiBMycirjSzEZ4mI7lGE"
@@ -21,7 +26,99 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "44592964622-dbeg2iasaqjjle7bh5gu9lv1qamkhmgc.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "44592964622-74p358frdo8tbktk3vhgcfb468vavmom.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tarunpanduri1388.LBPartner"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:44592964622:android:8a0b9b9f14be88c0c7c85f",
+        "android_client_info": {
+          "package_name": "com.tarunpanduri1388.LBPartner"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "44592964622-dbeg2iasaqjjle7bh5gu9lv1qamkhmgc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-F0boERbRhfTsiBMycirjSzEZ4mI7lGE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "44592964622-dbeg2iasaqjjle7bh5gu9lv1qamkhmgc.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "44592964622-74p358frdo8tbktk3vhgcfb468vavmom.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tarunpanduri1388.LBPartner"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:44592964622:android:8039b16f4d903f43c7c85f",
+        "android_client_info": {
+          "package_name": "com.tarunpanduri1388.LocalBoys"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "44592964622-20c944tl0svrp83r4mtm906qcp6p1cp2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tarunpanduri1388.LocalBoys",
+            "certificate_hash": "ae14eb84779e43e773fcdbeea8426e2a721db6d5"
+          }
+        },
+        {
+          "client_id": "44592964622-dbeg2iasaqjjle7bh5gu9lv1qamkhmgc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-F0boERbRhfTsiBMycirjSzEZ4mI7lGE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "44592964622-dbeg2iasaqjjle7bh5gu9lv1qamkhmgc.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "44592964622-74p358frdo8tbktk3vhgcfb468vavmom.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tarunpanduri1388.LBPartner"
+              }
+            }
+          ]
         }
       }
     }

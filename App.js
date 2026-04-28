@@ -24,7 +24,7 @@ import ShopDetails from './screens/shopdestails';
 import CheckoutScreen from './screens/checkout';
 import OrderConfirmation from "./screens/OrderConfirmation";
 import TrackOrder from './screens/trackorder';
-import AddressesScreen from './screens/AddressesScreen';
+// import AddressesScreen from './screens/AddressesScreen';
 import Profile from './screens/profile';
 import EditProfile from './screens/editprofile';
 import PrivacyPolicyScreen from './screens/privacypolicy';
@@ -33,6 +33,9 @@ import ContactUs from './screens/contact';
 import Settings from './screens/settings';
 import PreviousOrders from './screens/PreviousOrders';
 import NewLogin from './screens/newlogin';
+
+import CustomOrderScreen from './components/CustomOrderBottomSheet';
+import AddressesScreen from './components/AddressesBottomSheet';
 
 import { auth, db } from './firebase';
 import { onAuthStateChanged } from '@react-native-firebase/auth';
@@ -199,6 +202,11 @@ export default function App() {
                   <Stack.Screen name="Settings" component={Settings} />
                   <Stack.Screen name="PreviousOrders" component={PreviousOrders} />
                   <Stack.Screen name="NewLogin" component={NewLogin} />
+
+                  <Stack.Group screenOptions={{ presentation: 'formSheet' }}>
+                    <Stack.Screen name="AddressesScreen" component={AddressesScreen} />
+                    <Stack.Screen name="CustomOrderScreen" component={CustomOrderScreen} />
+                  </Stack.Group>
                 </Stack.Navigator>
               </NavigationContainer>
             </CouponProvider>

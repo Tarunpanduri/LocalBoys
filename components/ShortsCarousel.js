@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
   },
   floatingCloseBtn: {
     position: "absolute",
-    top: Platform.OS === 'ios' ? 60 : 40, // Safe area padding
+    top: Platform.OS === 'ios' ? 90 : 70, // Safe area padding
     right: 20,
     flexDirection: "row",
     alignItems: "center",

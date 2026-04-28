@@ -1,19 +1,8 @@
-import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  StyleSheet, 
-  ActivityIndicator, 
-  Modal,
-  Animated
-} from 'react-native';
+import React, { useState, useMemo } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, FlatList } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from '@react-navigation/native';
-import BottomSheet, { BottomSheetFlatList, BottomSheetBackdrop } from "@gorhom/bottom-sheet";
-import { LinearGradient } from "expo-linear-gradient";
 
-// 🔥 FIXED: NATIVE FIRESTORE MODULAR IMPORTS 🔥
 import { auth, db } from '../firebase';
 import { doc, updateDoc, deleteField } from '@react-native-firebase/firestore';
 
@@ -22,18 +11,19 @@ import { useAdmin } from '../context/AdminContext';
 
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
   const toRad = (v) => (v * Math.PI) / 180;
-  const R = 6371; // Earth Radius in km
+  const R = 6371; 
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 };
 
-export default function AddressesBottomSheet({ bottomSheetRef, navigation, setActiveTab }) {
-  const { userData, loading, mainAddress, setMainAddress } = useUser();
+export default function AddressesScreen({ navigation, route }) {
+  const { userData, loading, mainAddress } = useUser();
   const { allBranches } = useAdmin();
+
+  const setActiveTab = route?.params?.setActiveTab; // Safely extracted from navigation params
 
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [warningModalVisible, setWarningModalVisible] = useState(false);
@@ -42,46 +32,18 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
   const addresses = userData?.addresses || {};
   const entries = Object.entries(addresses);
   
-  // Determine if user has any address (including guest)
   const isEmpty = useMemo(() => {
-    if (userData?.isGuest) {
-      return !mainAddress; // guest has no saved address
-    }
+    if (userData?.isGuest) return !mainAddress;
     return entries.length === 0;
   }, [userData, mainAddress, entries]);
 
-  const snapPoints = useMemo(() => ["50%", "85%"], []);
-
-  // Auto-expand when the screen is focused and user has no address
-  useFocusEffect(
-    useCallback(() => {
-      if (!loading && isEmpty) {
-        setTimeout(() => {
-          bottomSheetRef.current?.expand();
-        }, 150);
-      }
-    }, [loading, isEmpty, bottomSheetRef])
-  );
-
-  const renderBackdrop = useCallback(
-    (props) => (
-      <BottomSheetBackdrop 
-        {...props} 
-        disappearsOnIndex={-1} 
-        appearsOnIndex={0} 
-        pressBehavior={isEmpty ? "none" : "close"}
-      />
-    ),
-    [isEmpty]
-  );
-
   const onAdd = () => {
-    bottomSheetRef.current?.close();
+    navigation.goBack();
     navigation.navigate('MapScreen', { mode: 'add', isGuest: userData?.isGuest || false });
   };
 
   const onEdit = (id, item) => {
-    bottomSheetRef.current?.close();
+    navigation.goBack();
     navigation.navigate('MapScreen', { mode: 'edit', addressId: id, initial: { ...item }, isGuest: userData?.isGuest || false });
   };
 
@@ -94,7 +56,7 @@ export default function AddressesBottomSheet({ bottomSheetRef, navigation, setAc
     }
   };
 
-const confirmDelete = async () => {
+  const confirmDelete = async () => {
     setDeleteModalVisible(false);
     if (!addressToDelete) return;
 
@@ -113,7 +75,6 @@ const confirmDelete = async () => {
           const nextAddress = nextAddressEntry[1];
           updates['mainAddressId'] = nextId;
 
-          // 🔥 RECALCULATE BELONGS TO ARRAY 🔥
           if (nextAddress.lat && nextAddress.lng && allBranches?.length) {
             let matchedBranchIds = [];
             let minDist = Infinity;
@@ -121,39 +82,25 @@ const confirmDelete = async () => {
 
             allBranches.forEach(branch => {
               let isMatched = false;
-
               if (nextAddress.pincode && branch.serviceable_pincodes) {
                 const pins = branch.serviceable_pincodes.map(p => String(p).trim());
                 if (pins.includes(String(nextAddress.pincode).trim())) isMatched = true;
               }
-
               if (branch.lat && branch.lng) {
-                const dist = haversineDistance(
-                  parseFloat(nextAddress.lat), parseFloat(nextAddress.lng),
-                  parseFloat(branch.lat), parseFloat(branch.lng)
-                );
-                
+                const dist = haversineDistance(parseFloat(nextAddress.lat), parseFloat(nextAddress.lng), parseFloat(branch.lat), parseFloat(branch.lng));
                 if (dist <= (branch.radius || 15)) isMatched = true;
-                
-                if (dist < minDist) { 
-                  minDist = dist; 
-                  nearestContact = branch.contactNumber || null; 
-                }
+                if (dist < minDist) { minDist = dist; nearestContact = branch.contactNumber || null; }
               }
-              
               if (isMatched && branch.id) matchedBranchIds.push(branch.id);
             });
-
             if (nearestContact) updates['supportcontact'] = nearestContact;
             updates['belongsTo'] = [...new Set(matchedBranchIds)];
           }
         } else {
-          // If last address deleted, clear the arrays
           updates['belongsTo'] = deleteField();
           updates['supportcontact'] = deleteField();
         }
       }
-
       await updateDoc(doc(db, "users", uid), updates);
     } catch (e) {
       console.error('Delete address error:', e);
@@ -164,11 +111,8 @@ const confirmDelete = async () => {
 
   const onSetMain = async (id) => {
     try {
-      bottomSheetRef.current?.close();
-      
-      if (setActiveTab) {
-        setActiveTab("products");
-      }
+      navigation.goBack();
+      if (setActiveTab) setActiveTab("products");
 
       const uid = auth.currentUser?.uid;
       if (!uid) return;
@@ -178,7 +122,6 @@ const confirmDelete = async () => {
 
       const updates = { mainAddressId: id };
       
-      // 🔥 RECALCULATE BELONGS TO ARRAY 🔥
       if (selectedAddress.lat && selectedAddress.lng && allBranches?.length) {
         let matchedBranchIds = [];
         let minDist = Infinity;
@@ -186,33 +129,21 @@ const confirmDelete = async () => {
 
         allBranches.forEach(branch => {
           let isMatched = false;
-
           if (selectedAddress.pincode && branch.serviceable_pincodes) {
             const pins = branch.serviceable_pincodes.map(p => String(p).trim());
             if (pins.includes(String(selectedAddress.pincode).trim())) isMatched = true;
           }
-
           if (branch.lat && branch.lng) {
-            const dist = haversineDistance(
-              parseFloat(selectedAddress.lat), parseFloat(selectedAddress.lng),
-              parseFloat(branch.lat), parseFloat(branch.lng)
-            );
-            
+            const dist = haversineDistance(parseFloat(selectedAddress.lat), parseFloat(selectedAddress.lng), parseFloat(branch.lat), parseFloat(branch.lng));
             if (dist <= (branch.radius || 15)) isMatched = true;
-            
-            if (dist < minDist) { 
-              minDist = dist; 
-              nearestContact = branch.contactNumber || null; 
-            }
+            if (dist < minDist) { minDist = dist; nearestContact = branch.contactNumber || null; }
           }
-          
           if (isMatched && branch.id) matchedBranchIds.push(branch.id);
         });
 
         if (nearestContact) updates['supportcontact'] = nearestContact;
         updates['belongsTo'] = [...new Set(matchedBranchIds)];
       }
-
       await updateDoc(doc(db, "users", uid), updates);
     } catch (e) {
       console.error('Set main address error:', e);
@@ -225,30 +156,20 @@ const confirmDelete = async () => {
     const isMain = userData?.mainAddressId === id;
 
     return (
-      <TouchableOpacity 
-        style={[styles.radioCard, isMain && styles.radioCardActive]} 
-        activeOpacity={0.7}
-        onPress={() => onSetMain(id)}
-      >
+      <TouchableOpacity style={[styles.radioCard, isMain && styles.radioCardActive]} activeOpacity={0.7} onPress={() => onSetMain(id)}>
         <View style={styles.radioHeader}>
           <View style={styles.radioLeft}>
-            <Ionicons 
-              name={isMain ? "radio-button-on" : "radio-button-off"} 
-              size={24} 
-              color={isMain ? "#149506" : "#ccc"} 
-            />
+            <Ionicons name={isMain ? "radio-button-on" : "radio-button-off"} size={24} color={isMain ? "#149506" : "#ccc"} />
             <View style={styles.titleWrapper}>
               <Text style={styles.title} numberOfLines={1}>{addr.name || 'Unnamed Location'}</Text>
               {isMain && <View style={styles.mainPill}><Text style={styles.mainPillText}>CURRENT</Text></View>}
             </View>
           </View>
         </View>
-
         <View style={styles.radioBody}>
           <Text style={styles.address} numberOfLines={2}>{addr.formattedAddress || '-'}</Text>
           <Text style={styles.phone}>{addr.phone || 'No phone number added'}</Text>
         </View>
-
         <View style={styles.radioFooter}>
           <TouchableOpacity style={styles.actionBtn} onPress={() => onEdit(id, addr)}>
             <Ionicons name="pencil" size={14} color="#555" />
@@ -264,7 +185,6 @@ const confirmDelete = async () => {
     );
   };
 
-  // Guest view: show the single address (if any) without radio selection
   const renderGuestAddress = () => {
     if (!mainAddress) return null;
     return (
@@ -297,57 +217,42 @@ const confirmDelete = async () => {
   };
 
   return (
-    <>
-      <BottomSheet
-        ref={bottomSheetRef}
-        index={-1}
-        snapPoints={snapPoints}
-        backdropComponent={renderBackdrop}
-        enablePanDownToClose={!isEmpty}
-        backgroundStyle={styles.bottomSheetBg}
-        handleIndicatorStyle={styles.indicator}
-      >
-        <View style={styles.sheetHeader}>
-          <Text style={styles.sheetTitle}>Select Delivery Address</Text>
-          {!isEmpty && (
-            <TouchableOpacity style={styles.closeBtn} onPress={() => bottomSheetRef.current?.close()}>
-              <Ionicons name="close" size={24} color="#333" />
-            </TouchableOpacity>
-          )}
-        </View>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+      <View style={styles.sheetHeader}>
+        <Text style={styles.sheetTitle}>Select Delivery Address</Text>
+        <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()}>
+          <Ionicons name="close" size={28} color="#333" />
+        </TouchableOpacity>
+      </View>
 
-        <View style={styles.sheetBody}>
-          {loading ? (
-            <View style={styles.centered}><ActivityIndicator size="large" color="#149506" /></View>
-          ) : isEmpty ? (
-            <View style={styles.empty}>
-              <Ionicons name="location-outline" size={60} color="#d3d3d3" />
-              <Text style={styles.emptyTitle}>Welcome to LocalBoys!</Text>
-              <Text style={styles.emptySub}>Please add a delivery location so we can show you the best shops and services nearby.</Text>
-            </View>
-          ) : userData?.isGuest ? (
-            // Guest with an address
-            <View style={styles.listContent}>
-              {renderGuestAddress()}
-            </View>
-          ) : (
-            <BottomSheetFlatList
-              data={entries}
-              renderItem={renderItem}
-              keyExtractor={(it) => it[0]}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-            />
-          )}
-
-          <View style={styles.bottomAddContainer}>
-            <TouchableOpacity onPress={onAdd} style={styles.addPrimaryBtn}>
-              <Ionicons name="add-circle" size={22} color="#fff" style={{marginRight: 6}} />
-              <Text style={styles.addPrimaryText}>Add New Address</Text>
-            </TouchableOpacity>
+      <View style={styles.sheetBody}>
+        {loading ? (
+          <View style={styles.centered}><ActivityIndicator size="large" color="#149506" /></View>
+        ) : isEmpty ? (
+          <View style={styles.empty}>
+            <Ionicons name="location-outline" size={60} color="#d3d3d3" />
+            <Text style={styles.emptyTitle}>Welcome to LocalBoys!</Text>
+            <Text style={styles.emptySub}>Please add a delivery location so we can show you the best shops and services nearby.</Text>
           </View>
+        ) : userData?.isGuest ? (
+          <View style={styles.listContent}>{renderGuestAddress()}</View>
+        ) : (
+          <FlatList
+            data={entries}
+            renderItem={renderItem}
+            keyExtractor={(it) => it[0]}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+
+        <View style={styles.bottomAddContainer}>
+          <TouchableOpacity onPress={onAdd} style={styles.addPrimaryBtn}>
+            <Ionicons name="add-circle" size={22} color="#fff" style={{marginRight: 6}} />
+            <Text style={styles.addPrimaryText}>Add New Address</Text>
+          </TouchableOpacity>
         </View>
-      </BottomSheet>
+      </View>
 
       {/* Modals */}
       <Modal animationType="fade" transparent={true} visible={warningModalVisible} onRequestClose={() => setWarningModalVisible(false)}>
@@ -384,14 +289,13 @@ const confirmDelete = async () => {
           </View>
         </View>
       </Modal>
-    </>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  bottomSheetBg: { backgroundColor: '#f6f7f9', borderTopLeftRadius: 24, borderTopRightRadius: 24 },
-  indicator: { backgroundColor: '#ccc', width: 40, height: 5 },
-  sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eaeaea', borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  safeArea: { flex: 1, backgroundColor: '#f6f7f9' },
+  sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#eaeaea' },
   sheetTitle: { fontSize: 18, fontFamily: 'Sen_Bold', color: '#111' },
   closeBtn: { padding: 4 },
   sheetBody: { flex: 1, position: 'relative' },
@@ -412,21 +316,7 @@ const styles = StyleSheet.create({
   actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingRight: 15 },
   actionText: { fontSize: 13, fontFamily: 'Sen_Medium', color: '#555', marginLeft: 4 },
   divider: { width: 1, height: 14, backgroundColor: '#ddd', marginRight: 15 },
-  bottomAddContainer: { 
-    position: 'absolute', 
-    bottom: 0, 
-    left: 0, 
-    right: 0, 
-    padding: 16, 
-    backgroundColor: '#f6f7f9', 
-    borderTopWidth: 1, 
-    borderTopColor: '#eaeaea',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 10
-  },
+  bottomAddContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, backgroundColor: '#f6f7f9', borderTopWidth: 1, borderTopColor: '#eaeaea', shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 10 },
   addPrimaryBtn: { backgroundColor: '#009688', flexDirection: 'row', paddingVertical: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   addPrimaryText: { color: '#fff', fontFamily: 'Sen_Bold', fontSize: 16 },
   empty: { flex: 1, alignItems: 'center', paddingHorizontal: 30, marginTop: 60 },

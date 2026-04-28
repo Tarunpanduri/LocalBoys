@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Animated } from 'react-native';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from "@expo/vector-icons";
+import Animated, { useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated';
 
 // FIXED: Bulletproof logic
 const darkenColor = (hex, percent) => {
@@ -14,8 +15,47 @@ const darkenColor = (hex, percent) => {
   return "#" + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
 };
 
+// 🔥 THE FIX: Extracted to a proper React Component to respect Rules of Hooks
+const NavTab = React.memo(({ tabId, label, iconActive, iconInactive, isActive, darkenedColor, onPress }) => {
+  
+  // Natively animate flex container
+  const animatedContainerStyle = useAnimatedStyle(() => {
+    return {
+      flex: withTiming(isActive ? 6 : 2, { duration: 300, easing: Easing.out(Easing.ease) })
+    };
+  }, [isActive]);
+
+  // Natively animate text expanding
+  const animatedTextStyle = useAnimatedStyle(() => {
+    return {
+      maxWidth: withTiming(isActive ? 80 : 0, { duration: 300 }),
+      opacity: withTiming(isActive ? 1 : 0, { duration: 300 }),
+      marginLeft: withTiming(isActive ? 6 : 0, { duration: 300 })
+    };
+  }, [isActive]);
+
+  return (
+    <Animated.View style={[styles.navItemContainer, animatedContainerStyle]}>
+      <TouchableOpacity 
+        activeOpacity={0.8} 
+        // 🔥 THE FIX: Apply background color exactly like the old code for instant, glitch-free selection
+        style={[styles.navButton, isActive && { backgroundColor: darkenedColor }]} 
+        onPress={() => onPress(tabId)}
+      >
+        <Ionicons name={isActive ? iconActive : iconInactive} size={22} color="#fff" />
+        <Animated.View style={[{ overflow: 'hidden' }, animatedTextStyle]}>
+          <Text style={styles.navText} numberOfLines={1}>{label}</Text>
+        </Animated.View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+});
+
 export default function BottomNav({ activeTab, setActiveTab, setActiveCategory, activeCategoryColor, openCustomOrderSheet }) {
   const [visualTab, setVisualTab] = useState(activeTab);
+
+  // Pre-calculate the color on the JS thread so the UI thread doesn't crash
+  const darkenedActiveColor = useMemo(() => darkenColor(activeCategoryColor, 15), [activeCategoryColor]);
 
   useEffect(() => {
     if (activeTab !== visualTab && activeTab !== "custom") {
@@ -23,26 +63,7 @@ export default function BottomNav({ activeTab, setActiveTab, setActiveCategory, 
     }
   }, [activeTab]);
 
-  const flexProd = useRef(new Animated.Value(visualTab === "products" ? 6 : 2)).current;
-  const flexCust = useRef(new Animated.Value(visualTab === "custom" ? 6 : 2)).current;
-  const flexServ = useRef(new Animated.Value(visualTab === "services" ? 6 : 2)).current;
-
-  const activeProd = useRef(new Animated.Value(visualTab === "products" ? 1 : 0)).current;
-  const activeCust = useRef(new Animated.Value(visualTab === "custom" ? 1 : 0)).current;
-  const activeServ = useRef(new Animated.Value(visualTab === "services" ? 1 : 0)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(flexProd, { toValue: visualTab === "products" ? 6 : 2, duration: 300, useNativeDriver: false }),
-      Animated.timing(flexCust, { toValue: visualTab === "custom" ? 6 : 2, duration: 300, useNativeDriver: false }),
-      Animated.timing(flexServ, { toValue: visualTab === "services" ? 6 : 2, duration: 300, useNativeDriver: false }),
-      Animated.timing(activeProd, { toValue: visualTab === "products" ? 1 : 0, duration: 300, useNativeDriver: false }),
-      Animated.timing(activeCust, { toValue: visualTab === "custom" ? 1 : 0, duration: 300, useNativeDriver: false }),
-      Animated.timing(activeServ, { toValue: visualTab === "services" ? 1 : 0, duration: 300, useNativeDriver: false }),
-    ]).start();
-  }, [visualTab]);
-
-  const handlePress = (tabId) => {
+  const handlePress = useCallback((tabId) => {
     setVisualTab(tabId);
     if (tabId === "products") {
       setActiveTab("products");
@@ -53,37 +74,37 @@ export default function BottomNav({ activeTab, setActiveTab, setActiveCategory, 
     } else if (tabId === "custom") {
       openCustomOrderSheet();
     }
-  };
-
-  const renderTab = (tabId, label, iconActive, iconInactive, flexAnim, activeAnim) => {
-    const isActive = visualTab === tabId;
-    const textMaxWidth = activeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 80] });
-    const textMargin = activeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 6] });
-    
-    return (
-      <Animated.View style={[styles.navItemContainer, { flex: flexAnim }]}>
-        <TouchableOpacity 
-          activeOpacity={0.8}
-          style={[
-            styles.navButton, 
-            isActive && { backgroundColor: darkenColor(activeCategoryColor, 15) } 
-          ]} 
-          onPress={() => handlePress(tabId)}
-        >
-          <Ionicons name={isActive ? iconActive : iconInactive} size={22} color="#fff" />
-          <Animated.View style={{ maxWidth: textMaxWidth, opacity: activeAnim, overflow: 'hidden', marginLeft: textMargin }}>
-            <Text style={styles.navText} numberOfLines={1}>{label}</Text>
-          </Animated.View>
-        </TouchableOpacity>
-      </Animated.View>
-    );
-  };
+  }, [setActiveTab, setActiveCategory, openCustomOrderSheet]);
 
   return (
     <View style={[styles.bottomNav, { backgroundColor: activeCategoryColor || "#66BB6A" }]}>
-      {renderTab("products", "Products", "bag-handle", "bag-handle-outline", flexProd, activeProd)}
-      {renderTab("custom", "Custom", "cube", "cube-outline", flexCust, activeCust)}
-      {renderTab("services", "Services", "construct", "construct-outline", flexServ, activeServ)}
+      <NavTab 
+        tabId="products" 
+        label="Products" 
+        iconActive="bag-handle" 
+        iconInactive="bag-handle-outline" 
+        isActive={visualTab === "products"} 
+        darkenedColor={darkenedActiveColor} 
+        onPress={handlePress} 
+      />
+      <NavTab 
+        tabId="custom" 
+        label="Custom" 
+        iconActive="cube" 
+        iconInactive="cube-outline" 
+        isActive={visualTab === "custom"} 
+        darkenedColor={darkenedActiveColor} 
+        onPress={handlePress} 
+      />
+      <NavTab 
+        tabId="services" 
+        label="Services" 
+        iconActive="construct" 
+        iconInactive="construct-outline" 
+        isActive={visualTab === "services"} 
+        darkenedColor={darkenedActiveColor} 
+        onPress={handlePress} 
+      />
     </View>
   );
 }

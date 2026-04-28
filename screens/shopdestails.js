@@ -499,7 +499,7 @@ export default function ShopDetails({ route, navigation }) {
             <View style={styles.modalIconContainer}><Ionicons name="cart-outline" size={40} color="#28A745" /></View>
             <Text style={styles.modalTitle}>Ready to Order?</Text>
             <Text style={styles.modalMessage}>Please log in to add items to your cart and track your order easily.</Text>
-            <TouchableOpacity style={styles.modalLoginBtn} onPress={() => { setLoginModalVisible(false); navigation.navigate("Login"); }}>
+            <TouchableOpacity style={styles.modalLoginBtn} onPress={() => { setLoginModalVisible(false); navigation.navigate("NewLogin"); }}>
               <Text style={styles.modalLoginText}>Log In / Sign Up</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setLoginModalVisible(false)}>

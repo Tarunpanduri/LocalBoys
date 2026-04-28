@@ -66,6 +66,20 @@ export default {
       "@react-native-firebase/auth",
       "expo-font",
       [
+        "expo-image-picker",
+        {
+          photosPermission: "LocalBoys needs access to your photos so you can upload reference images for custom orders.",
+          cameraPermission: "LocalBoys needs access to your camera so you can snap photos for custom orders."
+        }
+      ],
+      // 2. ADD LOCATION PLUGIN OVERRIDES
+      [
+        "expo-location",
+        {
+          locationAlwaysAndWhenInUsePermission: "LocalBoys needs your location to pinpoint your delivery address and find the closest shops."
+        }
+      ],
+      [
         "expo-notifications",
         {
           icon: "./assets/icon.png",

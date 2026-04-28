@@ -50,7 +50,6 @@ export const UserProvider = ({ children }) => {
           (snapshot) => {
             if (snapshot.exists) {
               const val = snapshot.data();
-              // ✅ Defensive check: ensure val is an object
               if (val && typeof val === 'object') {
                 if (val.addresses) {
                   Object.keys(val.addresses).forEach(key => {

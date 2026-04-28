@@ -19,7 +19,16 @@ const fetchWithNativeCache = async (url, cacheKey, onDataRetrieved) => {
   }
 
   try {
-    const response = await fetch(url, { cache: 'no-cache' });
+    const bypassCacheUrl = url + (url.includes('?') ? '&' : '?') + 'nocache=' + Date.now();
+    
+    const response = await fetch(bypassCacheUrl, { 
+      cache: 'no-store', 
+      headers: {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      }
+    });
+
     if (response.ok) {
       const freshData = await response.json();
       const freshDataStr = JSON.stringify(freshData);
@@ -137,7 +146,7 @@ export const AdminProvider = ({ children }) => {
       }));
     }
     
-    return newBranchIds; // 🔥 NEW: Explicitly return the matched array
+    return newBranchIds;
   }, [allBranches, getDistance]); 
 
   const applyBranchSpecifics = (branchId, data, radius) => {

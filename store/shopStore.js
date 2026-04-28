@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 // 🔥 NATIVE MODULAR IMPORTS 🔥
 import { db } from "../firebase";
-import { doc, getDoc, collection } from '@react-native-firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, FieldPath } from '@react-native-firebase/firestore';
 import * as geofire from 'geofire-common';
 
 import { useProductStore } from './productStore';
@@ -61,6 +62,7 @@ export const useShopStore = create(
                   }
 
                   const localShop = getStore().shops.find(s => s.id === shopId);
+                  // If the shop isn't cached, or the server says it has been updated, queue it for download
                   if (!localShop || shopMeta.updatedAt > (localShop.localUpdatedAt || 0)) {
                     if(!idsToFetch.includes(shopId)) {
                         idsToFetch.push(shopId);
@@ -76,35 +78,55 @@ export const useShopStore = create(
           if (idsToFetch.length > 0) {
             console.log(`Syncing ${idsToFetch.length} shops across ${branchIdsArray.length} branches...`);
             
+            // 🔥 PRODUCTION UPGRADE: Parallel Batch Querying 🔥
+            // Firestore 'in' queries are strictly limited to 10 items max.
             const chunkSize = 10;
+            const chunkedQueries = [];
+
+            // 1. Break the massive list of IDs into chunks of 10 and build the queries
             for (let i = 0; i < idsToFetch.length; i += chunkSize) {
                 const chunk = idsToFetch.slice(i, i + chunkSize);
-                const fetchPromises = chunk.map(id => getDoc(doc(db, "shops", id)));
-                const snapshots = await Promise.all(fetchPromises);
-
-                snapshots.forEach(snap => {
-                  if (snap.exists) {
-                    const freshShop = {
-                      id: snap.id,
-                      ...snap.data(),
-                      localUpdatedAt: Date.now()
-                    };
-
-                    const existingIndex = updatedShopsList.findIndex(s => s.id === snap.id);
-                    if (existingIndex !== -1) {
-                      updatedShopsList[existingIndex] = freshShop;
-                    } else {
-                      updatedShopsList.push(freshShop);
-                    }
-
-                    useProductStore.getState().clearShopMenu(snap.id);
-                  }
-                });
+                
+                const q = query(
+                  collection(db, "shops"),
+                  where(FieldPath.documentId(), "in", chunk)
+                );
+                
+                // Push the un-resolved promise into our array
+                chunkedQueries.push(getDocs(q));
             }
+
+            // 2. Execute ALL queries simultaneously without blocking the JS thread
+            const querySnapshots = await Promise.all(chunkedQueries);
+
+            // 3. Process the batched results
+            querySnapshots.forEach((querySnapshot) => {
+              querySnapshot.forEach((snap) => {
+                if (snap.exists) {
+                  const freshShop = {
+                    id: snap.id,
+                    ...snap.data(),
+                    localUpdatedAt: Date.now()
+                  };
+
+                  const existingIndex = updatedShopsList.findIndex(s => s.id === snap.id);
+                  if (existingIndex !== -1) {
+                    updatedShopsList[existingIndex] = freshShop;
+                  } else {
+                    updatedShopsList.push(freshShop);
+                  }
+
+                  // Clear stale menu cache for updated shops
+                  useProductStore.getState().clearShopMenu(snap.id);
+                }
+              });
+            });
           }
 
+          // Filter out shops that are no longer in radius or are inactive
           updatedShopsList = updatedShopsList.filter(shop => validShopIdsInRadius.includes(shop.id));
 
+          // Sort the final list by physical distance to the user
           updatedShopsList.sort((a, b) => {
             const latA = parseFloat(a.location?.latitude ?? a.location?.lat) || 0;
             const lngA = parseFloat(a.location?.longitude ?? a.location?.lng) || 0;

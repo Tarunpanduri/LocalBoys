@@ -25,10 +25,9 @@ import * as Notifications from "expo-notifications";
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 
-// 🔥 NATIVE FIREBASE MODULAR IMPORTS 🔥
-import { auth, db } from "../firebase";
-import { signInWithPhoneNumber, onAuthStateChanged } from "@react-native-firebase/auth";
-import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from "@react-native-firebase/firestore";
+// 🔥 CLASSIC REACT NATIVE FIREBASE API (Bulletproof for iOS Phone Auth) 🔥
+import auth from "@react-native-firebase/auth";
+import firestore from "@react-native-firebase/firestore";
 
 const { width, height } = Dimensions.get("window");
 
@@ -77,12 +76,10 @@ export default function Login({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   
-  // 🔥 NEW STATE: Auto-detect countdown timer 🔥
   const [autoDetectTimer, setAutoDetectTimer] = useState(0);
 
   const [fontsLoaded] = useFonts({ ...Ionicons.font });
 
-  // Load remembered phone
   useEffect(() => {
     const loadRememberedUser = async () => {
       try {
@@ -95,10 +92,9 @@ export default function Login({ navigation }) {
     loadRememberedUser();
   }, []);
 
-  // 🔥 ANDROID BACKGROUND AUTO-VERIFY LISTENER 🔥
   useEffect(() => {
-    const subscriber = onAuthStateChanged(auth, async (user) => {
-      // If Firebase automatically reads the SMS on Android, it logs them in.
+    // 🔥 CLASSIC API LISTENER 🔥
+    const subscriber = auth().onAuthStateChanged(async (user) => {
       if (user && step === 1 && !loading) {
         setAutoDetectTimer(0);
         await processAuthenticatedUser(user.uid);
@@ -107,14 +103,12 @@ export default function Login({ navigation }) {
     return subscriber; 
   }, [step]);
 
-  // 🔥 AUTO-VERIFY WHEN 6 DIGITS ARE ENTERED (iOS Autofill / Manual) 🔥
   useEffect(() => {
     if (verificationCode.length === 6 && step === 1 && !loading) {
       handleVerifyOTP();
     }
   }, [verificationCode]);
 
-  // 🔥 VISUAL "FREEZE" COUNTDOWN TIMER 🔥
   useEffect(() => {
     let interval;
     if (autoDetectTimer > 0 && step === 1) {
@@ -161,7 +155,6 @@ export default function Login({ navigation }) {
     setVerificationCode(cleaned);
   };
 
-  // 🔥 REUSABLE FUNCTION: Check if user exists after Auth 🔥
   const processAuthenticatedUser = async (userId) => {
     setLoading(true);
     try {
@@ -172,13 +165,14 @@ export default function Login({ navigation }) {
         await AsyncStorage.removeItem("rememberedPhone");
       }
 
-      const userDocRef = doc(db, "users", userId);
-      const userDoc = await getDoc(userDocRef);
+      // 🔥 CLASSIC FIRESTORE API 🔥
+      const userDocRef = firestore().collection("users").doc(userId);
+      const userDoc = await userDocRef.get();
       
       if (userDoc.exists && userDoc.data()?.firstName) {
         const pushToken = await getPushTokenAsync();
         if (pushToken) {
-          await updateDoc(userDocRef, { expoPushToken: pushToken });
+          await userDocRef.update({ expoPushToken: pushToken });
         }
         navigation.reset({ index: 0, routes: [{ name: "HomeScreen" }] });
       } else {
@@ -200,18 +194,21 @@ export default function Login({ navigation }) {
     Keyboard.dismiss();
     setLoading(true);
     try {
-      const confirmation = await signInWithPhoneNumber(auth, `+91${phoneNumber}`);
+      // Set region to assist with formatting/reCAPTCHA
+      auth().languageCode = 'en-IN';
+      
+      // Send OTP without the testing flag blocking real numbers!
+      const confirmation = await auth().signInWithPhoneNumber(`+91${phoneNumber}`);
       setConfirm(confirmation);
       setVerificationCode(""); 
       setStep(1);
-      setAutoDetectTimer(10); // Start 10-second auto-detect phase
+      setAutoDetectTimer(10); 
     } catch (error) {
       console.error("Phone Auth Error:", error);
-      let errorMsg = "Failed to send OTP. Please try again.";
-      if (error.code === 'auth/invalid-phone-number') errorMsg = "The phone number format is invalid.";
-      else if (error.code === 'auth/too-many-requests') errorMsg = "Too many requests. Please try again later.";
-      else if (error.code === 'auth/missing-client-identifier') errorMsg = "App integrity check failed.";
-      Alert.alert("Authentication Error", errorMsg);
+      Alert.alert(
+        "Raw Firebase Error", 
+        `Code: ${error.code}\n\nMessage: ${error.message}`
+      );
     } finally {
       setLoading(false);
     }
@@ -229,7 +226,7 @@ export default function Login({ navigation }) {
     } catch (error) {
       console.log("OTP Verification Error:", error); 
       Alert.alert("Verification Failed", "The OTP is incorrect or expired.");
-      setVerificationCode(""); // Clear invalid code
+      setVerificationCode(""); 
     } finally {
       setLoading(false);
     }
@@ -242,11 +239,12 @@ export default function Login({ navigation }) {
     }
     setLoading(true);
     try {
-      const userId = auth.currentUser.uid;
+      const userId = auth().currentUser.uid;
       const pushToken = await getPushTokenAsync();
 
-      const userRef = doc(db, "users", userId);
-      await setDoc(userRef, {
+      // 🔥 CLASSIC FIRESTORE API 🔥
+      const userRef = firestore().collection("users").doc(userId);
+      await userRef.set({
         uid: userId,
         mobile: phoneNumber,
         firstName: firstName.trim(),
@@ -256,13 +254,16 @@ export default function Login({ navigation }) {
         addresses: {},
         preferences: { smsEnabled: true, whatsappEnabled: true },
         expoPushToken: pushToken,
-        createdAt: serverTimestamp()
+        createdAt: firestore.FieldValue.serverTimestamp()
       });
 
       navigation.reset({ index: 0, routes: [{ name: "HomeScreen" }] });
     } catch (error) {
       console.error("Profile Save Error:", error);
-      Alert.alert("Error", "Failed to save your profile. Please try again.");
+      Alert.alert(
+        "Debug Error", 
+        `Code: ${error.code}\nMessage: ${error.message}`
+      );
     } finally {
       setLoading(false);
     }
@@ -342,7 +343,6 @@ export default function Login({ navigation }) {
                 <>
                   <View style={styles.rowBetween}>
                      <Text style={[styles.label, {marginTop: 0, marginBottom: 0}]}>ENTER OTP</Text>
-                     {/* 🔥 VISUAL INDICATOR 🔥 */}
                      {autoDetectTimer > 0 && (
                         <View style={{flexDirection: 'row', alignItems: 'center'}}>
                            <ActivityIndicator size="small" color="#28A745" style={{marginRight: 6}} />

@@ -4,7 +4,7 @@ export default {
   expo: {
     name: "Localboys",
     slug: "LocalBoys",
-    version: "1.0.1",
+    version: "2.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "light",
@@ -15,7 +15,6 @@ export default {
     updates: {
       url: "https://u.expo.dev/fcf95556-c415-4a5f-8f64-31a42bbeaa98"
     },
-
     splash: {
       image: "./assets/splash-icon.png",
       resizeMode: "contain",
@@ -26,11 +25,15 @@ export default {
       supportsTablet: true,
       infoPlist: {
         NSLocationWhenInUseUsageDescription: "LocalBoys needs your location to help you pin your delivery address.",
-        UIBackgroundModes: [
-          "fetch",
-          "remote-notification"
-        ],
-        ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes: ["fetch", "remote-notification"],
+        ITSAppUsesNonExemptEncryption: false,
+        CFBundleURLTypes: [
+          {
+            CFBundleURLSchemes: [
+              "com.googleusercontent.apps.44592964622-95i20pukdlbgd9s8r6m4su8lthb8u9bs"
+            ]
+          }
+        ]
       },
       config: {
         googleMapsApiKey: process.env.googleMapsApiKey
@@ -64,6 +67,7 @@ export default {
     plugins: [
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
+      "@react-native-firebase/messaging",
       "expo-font",
       [
         "expo-image-picker",
@@ -72,7 +76,6 @@ export default {
           cameraPermission: "LocalBoys needs access to your camera so you can snap photos for custom orders."
         }
       ],
-      // 2. ADD LOCATION PLUGIN OVERRIDES
       [
         "expo-location",
         {
@@ -95,7 +98,8 @@ export default {
             useFrameworks: "static"
           }
         }
-      ]
+      ],
+      "./plugins/withReactNativeMapsFix.js"
     ],
     extra: {
       apiKey: process.env.API_KEY,

@@ -264,7 +264,7 @@ export default function CustomOrderScreen({ navigation, route }) {
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Reference Image</Text>
+          <Text style={styles.inputLabel}>Reference Image (Only if required)</Text>
           <TouchableOpacity style={styles.imagePickerBtn} onPress={pickImage} disabled={orderState === "submitting"}>
             {customImage ? (
               <View style={{ width: '100%', height: '100%', position: 'relative' }}>

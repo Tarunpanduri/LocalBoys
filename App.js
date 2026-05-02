@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Alert, Platform } from 'react-native';
+import { StyleSheet, View, Platform, Modal, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts, Sen_400Regular, Sen_500Medium, Sen_700Bold, Sen_800ExtraBold } from '@expo-google-fonts/sen';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
@@ -9,7 +9,6 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// 👇 NEW: Import Expo Updates 👇
 import * as Updates from 'expo-updates'; 
 
 import { AdminProvider } from './context/AdminContext';
@@ -24,7 +23,6 @@ import ShopDetails from './screens/shopdestails';
 import CheckoutScreen from './screens/checkout';
 import OrderConfirmation from "./screens/OrderConfirmation";
 import TrackOrder from './screens/trackorder';
-// import AddressesScreen from './screens/AddressesScreen';
 import Profile from './screens/profile';
 import EditProfile from './screens/editprofile';
 import PrivacyPolicyScreen from './screens/privacypolicy';
@@ -37,9 +35,13 @@ import NewLogin from './screens/newlogin';
 import CustomOrderScreen from './components/CustomOrderBottomSheet';
 import AddressesScreen from './components/AddressesBottomSheet';
 
-import { auth, db } from './firebase';
-import { onAuthStateChanged } from '@react-native-firebase/auth';
-import { doc, setDoc } from '@react-native-firebase/firestore'; 
+// 🔥 REMOVED THE WEB SDK IMPORT. PURE NATIVE FIREBASE ONLY. 🔥
+import { getAuth, onAuthStateChanged } from '@react-native-firebase/auth';
+import { getFirestore, doc, setDoc } from '@react-native-firebase/firestore'; 
+
+// Initialize Native Instances
+const auth = getAuth();
+const db = getFirestore();
 
 SplashScreen.preventAutoHideAsync();
 
@@ -62,28 +64,25 @@ export default function App() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const responseListener = useRef(null);
 
+  // Modal State
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
+
   const onLayoutRootView = useCallback(async () => {
     if (fontsLoaded && !checkingAuth) await SplashScreen.hideAsync();
   }, [fontsLoaded, checkingAuth]);
 
-  // 🔥 NEW: Check for OTA Updates on App Startup 🔥
   useEffect(() => {
     async function onFetchUpdateAsync() {
-      // Don't check for updates in local development
       if (__DEV__) return; 
       
       try {
         const update = await Updates.checkForUpdateAsync();
         if (update.isAvailable) {
           await Updates.fetchUpdateAsync();
-          Alert.alert(
-            "Update Available",
-            "A new version of LocalBoys is ready. The app will quickly restart to apply it.",
-            [{ text: "Update Now", onPress: () => Updates.reloadAsync() }]
-          );
+          setShowUpdateModal(true);
         }
       } catch (error) {
-        // You can log this to Crashlytics/Sentry in the future
         console.log(`Error fetching latest Expo update: ${error}`);
       }
     }
@@ -168,7 +167,6 @@ export default function App() {
 
     return () => {
       unsubscribe();
-      // FIXED: Call .remove() directly on the subscription object
       if (responseListener.current) {
         responseListener.current.remove();
       }
@@ -192,7 +190,6 @@ export default function App() {
                   <Stack.Screen name="ShopDetails" component={ShopDetails} />
                   <Stack.Screen name="Checkout" component={CheckoutScreen} />
                   <Stack.Screen name="TrackOrder" component={TrackOrder} />
-                  {/* <Stack.Screen name="Addresses" component={AddressesScreen} /> */}
                   <Stack.Screen name="Profile" component={Profile} />
                   <Stack.Screen name="EditProfile" component={EditProfile} />
                   <Stack.Screen name="OrderConfirmation" component={OrderConfirmation} options={{ headerShown: false, gestureEnabled: false }} />
@@ -212,9 +209,93 @@ export default function App() {
             </CouponProvider>
           </UserProvider>
         </AdminProvider>
+
+        {/* Custom Update Modal */}
+        <Modal
+          visible={showUpdateModal}
+          transparent={true}
+          animationType="fade"
+        >
+          <View style={styles.modalBackground}>
+            <View style={styles.modalContainer}>
+              <Text style={styles.modalTitle}>Update Available!</Text>
+              <Text style={styles.modalText}>
+                A new version of LocalBoys is ready. Please restart the app to apply the latest features and fixes.
+              </Text>
+              <TouchableOpacity
+                style={styles.updateButton}
+                activeOpacity={0.8}
+                onPress={async () => {
+                  setIsRestarting(true);
+                  await Updates.reloadAsync();
+                }}
+                disabled={isRestarting}
+              >
+                {isRestarting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.updateButtonText}>Restart Now</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
       </View>
     </RootSiblingParent>
   );
 }
 
-const styles = StyleSheet.create({ container: { flex: 1, backgroundColor: '#fff' } });
+const styles = StyleSheet.create({ 
+  container: { 
+    flex: 1, 
+    backgroundColor: '#fff' 
+  },
+  modalBackground: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '85%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  modalTitle: {
+    fontFamily: 'Sen_Bold',
+    fontSize: 22,
+    marginBottom: 12,
+    textAlign: 'center',
+    color: '#1A1A1A',
+  },
+  modalText: {
+    fontFamily: 'Sen_Regular',
+    fontSize: 16,
+    textAlign: 'center',
+    color: '#666',
+    marginBottom: 24,
+    lineHeight: 24,
+  },
+  updateButton: {
+    backgroundColor: '#000', 
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  updateButtonText: {
+    fontFamily: 'Sen_Bold',
+    color: '#fff',
+    fontSize: 16,
+  }
+});
